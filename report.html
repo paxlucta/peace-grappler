@@ -128,7 +128,7 @@
 
 <div class="page-header">
   <h1>@peacegrappler_mma</h1>
-  <div class="subtitle">Peace Grappler | MMA Stories &mdash; Report generated Mar 26, 2026, 7:50 PM</div>
+  <div class="subtitle">Peace Grappler | MMA Stories &mdash; Report generated Mar 26, 2026, 8:00 PM</div>
   <div class="nav-tabs">
     <div class="nav-tab active" onclick="switchPage('overview')">Overview</div>
     <div class="nav-tab" onclick="switchPage('posts')">Post Performance</div>
@@ -2691,10 +2691,10 @@ function initCharts() {
   new Chart(document.getElementById('growthChart'), {
     type: 'line',
     data: {
-      labels: ["2026-03-22","2026-03-23","2026-03-24","2026-03-25","2026-03-26"],
+      labels: ["2026-03-22","2026-03-23","2026-03-24","2026-03-25","2026-03-26","2026-03-27"],
       datasets: [{
         label: 'Followers',
-        data: [591,608,634,651,663],
+        data: [591,608,634,651,663,663],
         borderColor: '#6366f1', backgroundColor: '#6366f133',
         fill: true, tension: 0.3, pointRadius: 2,
       }]
@@ -2774,8 +2774,8 @@ function initCharts() {
   new Chart(document.getElementById('cityChart'), {
     type: 'bar',
     data: {
-      labels: ["Betim, Minas Gerais","Santo André, São Paulo (state)","São Bernardo do Campo, São Paulo (state)","Belo Horizonte, Minas Gerais","Orlando, Florida","Mauá, São Paulo (state)","Curitiba, Paraná","Salvador, Bahia","Barueri, São Paulo (state)","Governador Valadares, Minas Gerais"],
-      datasets: [{ data: [55,41,28,18,13,8,8,4,4,4], backgroundColor: '#fb923c', borderRadius: 4 }]
+      labels: ["São Paulo, São Paulo (state)","Betim, Minas Gerais","Guarulhos, São Paulo (state)","Santo André, São Paulo (state)","São Caetano do Sul, São Paulo (state)","São Bernardo do Campo, São Paulo (state)","Santana de Parnaíba, São Paulo (state)","Belo Horizonte, Minas Gerais","Orlando, Florida","Rio de Janeiro, Rio de Janeiro (state)"],
+      datasets: [{ data: [107,55,52,41,30,28,19,18,13,9], backgroundColor: '#fb923c', borderRadius: 4 }]
     },
     options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y',
       plugins: { legend: { display: false } }
