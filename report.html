@@ -128,7 +128,7 @@
 
 <div class="page-header">
   <h1>@peacegrappler_mma</h1>
-  <div class="subtitle">Peace Grappler | MMA Stories &mdash; Report generated Mar 27, 2026, 6:00 AM</div>
+  <div class="subtitle">Peace Grappler | MMA Stories &mdash; Report generated Mar 27, 2026, 7:00 AM</div>
   <div class="nav-tabs">
     <div class="nav-tab active" onclick="switchPage('overview')">Overview</div>
     <div class="nav-tab" onclick="switchPage('posts')">Post Performance</div>
@@ -2742,7 +2742,7 @@ function initCharts() {
     type: 'bar',
     data: {
       labels: ["25-34","35-44","18-24","45-54","55-64","13-17","65+"],
-      datasets: [{ data: [279,149,96,70,19,15,7], backgroundColor: '#6366f1', borderRadius: 4 }]
+      datasets: [{ data: [285,154,97,72,20,16,7], backgroundColor: '#6366f1', borderRadius: 4 }]
     },
     options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y',
       plugins: { legend: { display: false } }
@@ -2753,7 +2753,7 @@ function initCharts() {
     type: 'doughnut',
     data: {
       labels: ["Male","Female","U"],
-      datasets: [{ data: [447,124,64], backgroundColor: ['#6366f1','#f472b6','#fb923c'] }]
+      datasets: [{ data: [459,128,64], backgroundColor: ['#6366f1','#f472b6','#fb923c'] }]
     },
     options: { responsive: true, maintainAspectRatio: false,
       plugins: { legend: { position: 'bottom' } }
@@ -2763,8 +2763,8 @@ function initCharts() {
   new Chart(document.getElementById('countryChart'), {
     type: 'bar',
     data: {
-      labels: ["BR","US","MX","IT","AR","CL","RU","PT","CH","KR"],
-      datasets: [{ data: [561,53,3,3,3,2,1,1,1,1], backgroundColor: '#34d399', borderRadius: 4 }]
+      labels: ["BR","US","MX","IT","AR","RU","PT","CH","KR","CL"],
+      datasets: [{ data: [575,56,4,3,3,1,1,1,1,1], backgroundColor: '#34d399', borderRadius: 4 }]
     },
     options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y',
       plugins: { legend: { display: false } }
@@ -2774,8 +2774,8 @@ function initCharts() {
   new Chart(document.getElementById('cityChart'), {
     type: 'bar',
     data: {
-      labels: ["São Paulo, São Paulo (state)","Betim, Minas Gerais","Guarulhos, São Paulo (state)","Santo André, São Paulo (state)","São Caetano do Sul, São Paulo (state)","São Bernardo do Campo, São Paulo (state)","Santana de Parnaíba, São Paulo (state)","Belo Horizonte, Minas Gerais","Orlando, Florida","Rio de Janeiro, Rio de Janeiro (state)"],
-      datasets: [{ data: [109,55,52,45,31,31,21,18,15,10], backgroundColor: '#fb923c', borderRadius: 4 }]
+      labels: ["São Paulo, São Paulo (state)","Betim, Minas Gerais","Guarulhos, São Paulo (state)","Santo André, São Paulo (state)","São Bernardo do Campo, São Paulo (state)","São Caetano do Sul, São Paulo (state)","Santana de Parnaíba, São Paulo (state)","Belo Horizonte, Minas Gerais","Orlando, Florida","Rio de Janeiro, Rio de Janeiro (state)"],
+      datasets: [{ data: [113,55,53,45,33,31,21,18,15,10], backgroundColor: '#fb923c', borderRadius: 4 }]
     },
     options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y',
       plugins: { legend: { display: false } }
