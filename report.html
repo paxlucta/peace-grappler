@@ -128,7 +128,7 @@
 
 <div class="page-header">
   <h1>@peacegrappler_mma</h1>
-  <div class="subtitle">Peace Grappler | MMA Stories &mdash; Report generated Mar 29, 2026, 4:00 PM</div>
+  <div class="subtitle">Peace Grappler | MMA Stories &mdash; Report generated Mar 29, 2026, 5:00 PM</div>
   <div class="nav-tabs">
     <div class="nav-tab active" onclick="switchPage('overview')">Overview</div>
     <div class="nav-tab" onclick="switchPage('posts')">Post Performance</div>
@@ -143,11 +143,11 @@
 
   <div class="stats-grid">
     <div class="stat-card">
-      <div class="value">681</div>
+      <div class="value">682</div>
       <div class="label">Followers</div>
     </div>
     <div class="stat-card">
-      <div class="value">60</div>
+      <div class="value">61</div>
       <div class="label">Following</div>
     </div>
     <div class="stat-card">
@@ -2824,7 +2824,7 @@ function initCharts() {
       labels: ["2026-03-22","2026-03-23","2026-03-24","2026-03-25","2026-03-26","2026-03-27","2026-03-28","2026-03-29"],
       datasets: [{
         label: 'Followers',
-        data: [591,608,634,651,663,670,676,681],
+        data: [591,608,634,651,663,670,676,682],
         borderColor: '#6366f1', backgroundColor: '#6366f133',
         fill: true, tension: 0.3, pointRadius: 2,
       }]
@@ -2904,8 +2904,8 @@ function initCharts() {
   new Chart(document.getElementById('cityChart'), {
     type: 'bar',
     data: {
-      labels: ["São Paulo, São Paulo (state)","Betim, Minas Gerais","Guarulhos, São Paulo (state)","Santo André, São Paulo (state)","São Bernardo do Campo, São Paulo (state)","São Caetano do Sul, São Paulo (state)","Santana de Parnaíba, São Paulo (state)","Belo Horizonte, Minas Gerais","Orlando, Florida","Rio de Janeiro, Rio de Janeiro (state)"],
-      datasets: [{ data: [114,58,53,46,35,31,22,18,14,10], backgroundColor: '#fb923c', borderRadius: 4 }]
+      labels: ["Betim, Minas Gerais","Santo André, São Paulo (state)","São Bernardo do Campo, São Paulo (state)","Santana de Parnaíba, São Paulo (state)","Belo Horizonte, Minas Gerais","Orlando, Florida","Mauá, São Paulo (state)","Curitiba, Paraná","Florianópolis, Santa Catarina","Salvador, Bahia"],
+      datasets: [{ data: [58,46,35,22,18,14,9,9,6,5], backgroundColor: '#fb923c', borderRadius: 4 }]
     },
     options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y',
       plugins: { legend: { display: false } }
