@@ -128,11 +128,13 @@
 
 <div class="page-header">
   <h1>@peacegrappler_mma</h1>
-  <div class="subtitle">Peace Grappler | MMA Stories &mdash; Report generated Mar 31, 2026, 5:00 PM</div>
+  <div class="subtitle">Peace Grappler | MMA Stories &mdash; Report generated Mar 31, 2026, 6:00 PM</div>
   <div class="nav-tabs">
     <div class="nav-tab active" onclick="switchPage('overview')">Overview</div>
     <div class="nav-tab" onclick="switchPage('posts')">Post Performance</div>
-    <div class="nav-tab" onclick="switchPage('rankings')">Community Engagement Rankings</div>
+    <div class="nav-tab" onclick="switchPage('shares')">Shares &amp; Reposts</div>
+    <div class="nav-tab" onclick="switchPage('commenters')">Top Commenters</div>
+    <div class="nav-tab" onclick="switchPage('rankings')">Community Rankings</div>
   </div>
 </div>
 
@@ -143,7 +145,7 @@
 
   <div class="stats-grid">
     <div class="stat-card">
-      <div class="value">706</div>
+      <div class="value">707</div>
       <div class="label">Followers</div>
     </div>
     <div class="stat-card">
@@ -151,7 +153,7 @@
       <div class="label">Following</div>
     </div>
     <div class="stat-card">
-      <div class="value">98</div>
+      <div class="value">99</div>
       <div class="label">Posts</div>
     </div>
     <div class="stat-card">
@@ -159,21 +161,49 @@
       <div class="label">Total Reach</div>
     </div>
     <div class="stat-card">
-      <div class="value">127,879</div>
+      <div class="value">127,897</div>
       <div class="label">Total Views</div>
     </div>
     <div class="stat-card">
-      <div class="value">10,352</div>
+      <div class="value">10,369</div>
       <div class="label">Total Interactions</div>
     </div>
     <div class="stat-card">
-      <div class="value">994</div>
+      <div class="value">983</div>
       <div class="label">Avg Reach / Post</div>
     </div>
     <div class="stat-card">
-      <div class="value">3,564</div>
+      <div class="value">3,577</div>
       <div class="label">Total Comments</div>
     </div>
+  </div>
+
+  <h2>Follower Growth</h2>
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="value" style="color: var(--green)">+11</div>
+      <div class="label">Yesterday</div>
+    </div>
+    <div class="stat-card">
+      <div class="value" style="color: var(--green)">+56</div>
+      <div class="label">Last 7 Days</div>
+    </div>
+    <div class="stat-card">
+      <div class="value" style="color: var(--green)">+116</div>
+      <div class="label">Last 30 Days</div>
+    </div>
+  </div>
+
+  <h2>Content Published</h2>
+  <div class="card" style="overflow-x: auto;">
+    <table>
+      <thead><tr><th>Period</th><th>Total</th><th>Reels</th><th>Feed</th></tr></thead>
+      <tbody>
+        <tr><td>Yesterday</td><td>7</td><td>6</td><td>1</td></tr>
+        <tr><td>Last 7 Days</td><td>30</td><td>29</td><td>1</td></tr>
+        <tr><td>Last 30 Days</td><td>89</td><td>87</td><td>2</td></tr>
+      </tbody>
+    </table>
   </div>
 
   
@@ -403,6 +433,19 @@
         </tr>
       </thead>
       <tbody>
+        
+          <tr>
+            <td data-sort="2026-03-31T21:50:16+0000">Mar 31, 2026</td>
+            <td data-sort="REELS"><span class="badge badge-reels">REELS</span></td>
+            <td class="caption" data-sort="José Delano fala sobre sua versatilidade no MMA. Estuda muit...">José Delano fala sobre sua versatilidade no MMA. Estuda muit...</td>
+            <td data-sort="0">0</td>
+            <td data-sort="18">18</td>
+            <td data-sort="4">4</td>
+            <td data-sort="13">13</td>
+            <td data-sort="0">0</td>
+            <td data-sort="0">0</td>
+            <td><a href="https://www.instagram.com/reel/DWkBamGASKI/" target="_blank">View</a></td>
+          </tr>
         
           <tr>
             <td data-sort="2026-03-31T19:00:30+0000">Mar 31, 2026</td>
@@ -1564,7 +1607,305 @@ Caio Borralho training — ...</td>
 
 </div>
 
-<!-- ==================== TAB 3: COMMUNITY ENGAGEMENT ==================== -->
+<!-- ==================== TAB 3: SHARES & REPOSTS ==================== -->
+<div id="page-shares" class="page-panel">
+  <h2>Top Shared &amp; Reposted Content (Last 30 Days)</h2>
+  
+    <div class="card" style="overflow-x: auto;">
+      <table class="sortable" id="shares-table">
+        <thead>
+          <tr>
+            <th data-type="number"># <span class="sort-arrow">&#9650;</span></th>
+            <th data-type="number">Shares <span class="sort-arrow">&#9650;</span></th>
+            <th data-type="string">Type <span class="sort-arrow">&#9650;</span></th>
+            <th data-type="string">Caption <span class="sort-arrow">&#9650;</span></th>
+            <th data-type="date">Date <span class="sort-arrow">&#9650;</span></th>
+            <th class="no-sort">Link</th>
+          </tr>
+        </thead>
+        <tbody>
+          
+            <tr>
+              <td data-sort="1"><span class="rank rank-1">1</span></td>
+              <td data-sort="204" class="score">204</td>
+              <td data-sort="REELS"><span class="badge badge-reels">REELS</span></td>
+              <td class="caption" data-sort="Caio Borralho no ritmo do camp, intensidade alta e foco tota...">Caio Borralho no ritmo do camp, intensidade alta e foco tota...</td>
+              <td data-sort="2026-03-05T15:16:42+0000">Mar 5, 2026</td>
+              <td><a href="https://www.instagram.com/reel/DVgeLF8jnPq/" target="_blank">View</a></td>
+            </tr>
+          
+            <tr>
+              <td data-sort="2"><span class="rank rank-2">2</span></td>
+              <td data-sort="74" class="score">74</td>
+              <td data-sort="REELS"><span class="badge badge-reels">REELS</span></td>
+              <td class="caption" data-sort="Caio Borralho nos ajustes finais de ground and pound antes d...">Caio Borralho nos ajustes finais de ground and pound antes d...</td>
+              <td data-sort="2026-03-06T15:00:31+0000">Mar 6, 2026</td>
+              <td><a href="https://www.instagram.com/reel/DVi6qgyCuX4/" target="_blank">View</a></td>
+            </tr>
+          
+            <tr>
+              <td data-sort="3"><span class="rank rank-3">3</span></td>
+              <td data-sort="42" class="score">42</td>
+              <td data-sort="REELS"><span class="badge badge-reels">REELS</span></td>
+              <td class="caption" data-sort="Vitor Petrino está se dedicando com algumas sessões intensas...">Vitor Petrino está se dedicando com algumas sessões intensas...</td>
+              <td data-sort="2026-03-14T00:00:18+0000">Mar 13, 2026</td>
+              <td><a href="https://www.instagram.com/reel/DV16ACfiQPP/" target="_blank">View</a></td>
+            </tr>
+          
+            <tr>
+              <td data-sort="4"><span class="rank ">4</span></td>
+              <td data-sort="39" class="score">39</td>
+              <td data-sort="REELS"><span class="badge badge-reels">REELS</span></td>
+              <td class="caption" data-sort="Octógono aberto. Treino pesado com Quemuel Ottoni e Manoel “...">Octógono aberto. Treino pesado com Quemuel Ottoni e Manoel “...</td>
+              <td data-sort="2026-03-14T14:00:28+0000">Mar 14, 2026</td>
+              <td><a href="https://www.instagram.com/reel/DV3aMlqgeMC/" target="_blank">View</a></td>
+            </tr>
+          
+            <tr>
+              <td data-sort="5"><span class="rank ">5</span></td>
+              <td data-sort="27" class="score">27</td>
+              <td data-sort="REELS"><span class="badge badge-reels">REELS</span></td>
+              <td class="caption" data-sort="Vanessa Melo fala sobre Luana Carolina na semana da luta no ...">Vanessa Melo fala sobre Luana Carolina na semana da luta no ...</td>
+              <td data-sort="2026-03-19T15:00:25+0000">Mar 19, 2026</td>
+              <td><a href="https://www.instagram.com/reel/DWEZGHhEqJl/" target="_blank">View</a></td>
+            </tr>
+          
+            <tr>
+              <td data-sort="6"><span class="rank ">6</span></td>
+              <td data-sort="19" class="score">19</td>
+              <td data-sort="REELS"><span class="badge badge-reels">REELS</span></td>
+              <td class="caption" data-sort="Kevin Vallejos admite que pensou em desistir muitas vezes. D...">Kevin Vallejos admite que pensou em desistir muitas vezes. D...</td>
+              <td data-sort="2026-03-10T23:00:19+0000">Mar 10, 2026</td>
+              <td><a href="https://www.instagram.com/reel/DVuEwhGjfM5/" target="_blank">View</a></td>
+            </tr>
+          
+            <tr>
+              <td data-sort="7"><span class="rank ">7</span></td>
+              <td data-sort="19" class="score">19</td>
+              <td data-sort="REELS"><span class="badge badge-reels">REELS</span></td>
+              <td class="caption" data-sort="Manoel “Manumito” Sousa e seu coach Fred falam sobre a expec...">Manoel “Manumito” Sousa e seu coach Fred falam sobre a expec...</td>
+              <td data-sort="2026-03-11T15:00:32+0000">Mar 11, 2026</td>
+              <td><a href="https://www.instagram.com/reel/DVvyp6AgTg5/" target="_blank">View</a></td>
+            </tr>
+          
+            <tr>
+              <td data-sort="8"><span class="rank ">8</span></td>
+              <td data-sort="16" class="score">16</td>
+              <td data-sort="REELS"><span class="badge badge-reels">REELS</span></td>
+              <td class="caption" data-sort="Kevin Vallejos da caminhada até o cage até o momento da luta...">Kevin Vallejos da caminhada até o cage até o momento da luta...</td>
+              <td data-sort="2026-03-17T16:02:24+0000">Mar 17, 2026</td>
+              <td><a href="https://www.instagram.com/reel/DV_dMzjjzcL/" target="_blank">View</a></td>
+            </tr>
+          
+            <tr>
+              <td data-sort="9"><span class="rank ">9</span></td>
+              <td data-sort="14" class="score">14</td>
+              <td data-sort="REELS"><span class="badge badge-reels">REELS</span></td>
+              <td class="caption" data-sort="O vídeo completo sai hoje às 7PM no YouTube da Peace Grapple...">O vídeo completo sai hoje às 7PM no YouTube da Peace Grapple...</td>
+              <td data-sort="2026-03-22T15:00:14+0000">Mar 22, 2026</td>
+              <td><a href="https://www.instagram.com/reel/DWMHZ4jjpGW/" target="_blank">View</a></td>
+            </tr>
+          
+            <tr>
+              <td data-sort="10"><span class="rank ">10</span></td>
+              <td data-sort="14" class="score">14</td>
+              <td data-sort="REELS"><span class="badge badge-reels">REELS</span></td>
+              <td class="caption" data-sort="O treinador já deixou claro: podem esperar o jogo forte da B...">O treinador já deixou claro: podem esperar o jogo forte da B...</td>
+              <td data-sort="2026-03-27T19:00:27+0000">Mar 27, 2026</td>
+              <td><a href="https://www.instagram.com/reel/DWZaz3fDHBA/" target="_blank">View</a></td>
+            </tr>
+          
+        </tbody>
+      </table>
+    </div>
+  
+</div>
+
+<!-- ==================== TAB 4: TOP COMMENTERS ==================== -->
+<div id="page-commenters" class="page-panel">
+  <h2>Top Active Commenters (Last 30 Days)</h2>
+  
+    <div class="card" style="overflow-x: auto;">
+      <table class="sortable" id="commenters-table">
+        <thead>
+          <tr>
+            <th data-type="number"># <span class="sort-arrow">&#9650;</span></th>
+            <th data-type="string">Username <span class="sort-arrow">&#9650;</span></th>
+            <th data-type="number">Comments <span class="sort-arrow">&#9650;</span></th>
+            <th data-type="number">Replies <span class="sort-arrow">&#9650;</span></th>
+            <th data-type="number">Total <span class="sort-arrow">&#9650;</span></th>
+            <th class="no-sort">Top Posts Commented On</th>
+          </tr>
+        </thead>
+        <tbody>
+          
+            <tr>
+              <td data-sort="1"><span class="rank rank-1">1</span></td>
+              <td data-sort="peacegrappler_mma"><strong>@peacegrappler_mma</strong></td>
+              <td data-sort="57">57</td>
+              <td data-sort="918">918</td>
+              <td data-sort="975" class="score">975</td>
+              <td style="font-size:12px;color:var(--muted);max-width:250px;">40x on "Movsar Evloev passou por ..."<br>40x on "Manoel “Manumito” Sousa e..."<br>39x on "Treino entre Vitor Petrin..."</td>
+            </tr>
+            <tr>
+              <td data-sort="2"><span class="rank rank-2">2</span></td>
+              <td data-sort="luis_pequeno_mma"><strong>@luis_pequeno_mma</strong></td>
+              <td data-sort="66">66</td>
+              <td data-sort="273">273</td>
+              <td data-sort="339" class="score">339</td>
+              <td style="font-size:12px;color:var(--muted);max-width:250px;">13x on "Peace Grappler com Caio B..."<br>10x on "Manoel “Manumito” Sousa e..."<br>10x on "Gillian Robertson em ação..."</td>
+            </tr>
+            <tr>
+              <td data-sort="3"><span class="rank rank-3">3</span></td>
+              <td data-sort="quemuel_ottoni"><strong>@quemuel_ottoni</strong></td>
+              <td data-sort="55">55</td>
+              <td data-sort="257">257</td>
+              <td data-sort="312" class="score">312</td>
+              <td style="font-size:12px;color:var(--muted);max-width:250px;">41x on "Caio Borralho nos ajustes..."<br>40x on "Caio Borralho no ritmo do..."<br>27x on "Manoel “Manumito” Sousa r..."</td>
+            </tr>
+            <tr>
+              <td data-sort="4"><span class="rank ">4</span></td>
+              <td data-sort="enzocardoso.bjj"><strong>@enzocardoso.bjj</strong></td>
+              <td data-sort="124">124</td>
+              <td data-sort="46">46</td>
+              <td data-sort="170" class="score">170</td>
+              <td style="font-size:12px;color:var(--muted);max-width:250px;">10x on "Vanessa Melo fala sobre L..."<br>7x on "Felipe Franco em preparaç..."<br>6x on "Felipe Franco vivendo cad..."</td>
+            </tr>
+            <tr>
+              <td data-sort="5"><span class="rank ">5</span></td>
+              <td data-sort="pedr00jj"><strong>@pedr00jj</strong></td>
+              <td data-sort="76">76</td>
+              <td data-sort="44">44</td>
+              <td data-sort="120" class="score">120</td>
+              <td style="font-size:12px;color:var(--muted);max-width:250px;">37x on "Treino entre Vitor Petrin..."<br>4x on "Uma guerra dentro do cage..."<br>4x on "Bia Mesquita caminhou com..."</td>
+            </tr>
+            <tr>
+              <td data-sort="6"><span class="rank ">6</span></td>
+              <td data-sort="god.motivacao"><strong>@god.motivacao</strong></td>
+              <td data-sort="114">114</td>
+              <td data-sort="2">2</td>
+              <td data-sort="116" class="score">116</td>
+              <td style="font-size:12px;color:var(--muted);max-width:250px;">5x on "Vanessa Melo fala sobre L..."<br>4x on "Marwan Rahiki da entrada ..."<br>4x on "Manoel “Manumito” Sousa e..."</td>
+            </tr>
+            <tr>
+              <td data-sort="7"><span class="rank ">7</span></td>
+              <td data-sort="rpsantos_mma"><strong>@rpsantos_mma</strong></td>
+              <td data-sort="98">98</td>
+              <td data-sort="14">14</td>
+              <td data-sort="112" class="score">112</td>
+              <td style="font-size:12px;color:var(--muted);max-width:250px;">8x on "Felipe Franco no dia da p..."<br>6x on "Movsar Evloev passou por ..."<br>5x on "Yuri Moura já avisou essa..."</td>
+            </tr>
+            <tr>
+              <td data-sort="8"><span class="rank ">8</span></td>
+              <td data-sort="pablofiorindi"><strong>@pablofiorindi</strong></td>
+              <td data-sort="69">69</td>
+              <td data-sort="43">43</td>
+              <td data-sort="112" class="score">112</td>
+              <td style="font-size:12px;color:var(--muted);max-width:250px;">11x on "Kevin “El Chino” Vallejos..."<br>5x on "Confira a seleção dos mel..."<br>5x on "Peace Grappler com Caio B..."</td>
+            </tr>
+            <tr>
+              <td data-sort="9"><span class="rank ">9</span></td>
+              <td data-sort="pg_grappling"><strong>@pg_grappling</strong></td>
+              <td data-sort="51">51</td>
+              <td data-sort="31">31</td>
+              <td data-sort="82" class="score">82</td>
+              <td style="font-size:12px;color:var(--muted);max-width:250px;">14x on "Manoel “Manumito” Sousa e..."<br>5x on "Bruno Lopes relembra a lu..."<br>4x on "Kevin Vallejos admite que..."</td>
+            </tr>
+            <tr>
+              <td data-sort="10"><span class="rank ">10</span></td>
+              <td data-sort="ryangandraufc"><strong>@ryangandraufc</strong></td>
+              <td data-sort="44">44</td>
+              <td data-sort="19">19</td>
+              <td data-sort="63" class="score">63</td>
+              <td style="font-size:12px;color:var(--muted);max-width:250px;">7x on "Ryan Gandra fala sobre a ..."<br>5x on "Caio Borralho nos ajustes..."<br>3x on "Vanessa Melo fala sobre L..."</td>
+            </tr>
+            <tr>
+              <td data-sort="11"><span class="rank ">11</span></td>
+              <td data-sort="ronemayanmorais"><strong>@ronemayanmorais</strong></td>
+              <td data-sort="41">41</td>
+              <td data-sort="12">12</td>
+              <td data-sort="53" class="score">53</td>
+              <td style="font-size:12px;color:var(--muted);max-width:250px;">4x on "Manoel “Manumito” Sousa e..."<br>3x on "Manoel “Manumito” Sousa r..."<br>2x on "Bolaji Oki da caminhada a..."</td>
+            </tr>
+            <tr>
+              <td data-sort="12"><span class="rank ">12</span></td>
+              <td data-sort="irmandadefightteam"><strong>@irmandadefightteam</strong></td>
+              <td data-sort="0">0</td>
+              <td data-sort="52">52</td>
+              <td data-sort="52" class="score">52</td>
+              <td style="font-size:12px;color:var(--muted);max-width:250px;">2x on "Movsar Evloev passou por ..."<br>1x on "Yuri Moura já avisou essa..."<br>1x on "Luan Lacerda relembra o d..."</td>
+            </tr>
+            <tr>
+              <td data-sort="13"><span class="rank ">13</span></td>
+              <td data-sort="anaaj_camargo"><strong>@anaaj_camargo</strong></td>
+              <td data-sort="48">48</td>
+              <td data-sort="0">0</td>
+              <td data-sort="48" class="score">48</td>
+              <td style="font-size:12px;color:var(--muted);max-width:250px;">4x on "O treinador já deixou cla..."<br>3x on "A caminhada para o UFC Fi..."<br>3x on "Tawan Regis começou na lu..."</td>
+            </tr>
+            <tr>
+              <td data-sort="14"><span class="rank ">14</span></td>
+              <td data-sort="erik_.mma"><strong>@erik_.mma</strong></td>
+              <td data-sort="0">0</td>
+              <td data-sort="45">45</td>
+              <td data-sort="45" class="score">45</td>
+              <td style="font-size:12px;color:var(--muted);max-width:250px;">1x on "Marwan Rahiki da entrada ..."<br>1x on "Kevin Vallejos da caminha..."<br>1x on "Manoel “Manumito” Sousa e..."</td>
+            </tr>
+            <tr>
+              <td data-sort="15"><span class="rank ">15</span></td>
+              <td data-sort="bellsouza816"><strong>@bellsouza816</strong></td>
+              <td data-sort="0">0</td>
+              <td data-sort="44">44</td>
+              <td data-sort="44" class="score">44</td>
+              <td style="font-size:12px;color:var(--muted);max-width:250px;">1x on "Marwan Rahiki da entrada ..."<br>1x on "Kevin Vallejos da caminha..."<br>1x on "Manoel “Manumito” Sousa e..."</td>
+            </tr>
+            <tr>
+              <td data-sort="16"><span class="rank ">16</span></td>
+              <td data-sort="kaua_limamma"><strong>@kaua_limamma</strong></td>
+              <td data-sort="0">0</td>
+              <td data-sort="43">43</td>
+              <td data-sort="43" class="score">43</td>
+              <td style="font-size:12px;color:var(--muted);max-width:250px;">1x on "Kevin Vallejos da caminha..."<br>1x on "Manoel “Manumito” Sousa e..."<br>1x on "Gillian Robertson em ação..."</td>
+            </tr>
+            <tr>
+              <td data-sort="17"><span class="rank ">17</span></td>
+              <td data-sort="rm.nicki"><strong>@rm.nicki</strong></td>
+              <td data-sort="39">39</td>
+              <td data-sort="0">0</td>
+              <td data-sort="39" class="score">39</td>
+              <td style="font-size:12px;color:var(--muted);max-width:250px;">3x on "A caminhada para o UFC Fi..."<br>3x on "Tawan Regis começou na lu..."<br>3x on "Thalyta Silva fala sobre ..."</td>
+            </tr>
+            <tr>
+              <td data-sort="18"><span class="rank ">18</span></td>
+              <td data-sort="leandro._bjj"><strong>@leandro._bjj</strong></td>
+              <td data-sort="32">32</td>
+              <td data-sort="3">3</td>
+              <td data-sort="35" class="score">35</td>
+              <td style="font-size:12px;color:var(--muted);max-width:250px;">4x on "Kevin Vallejos da caminha..."<br>4x on "O vídeo completo sai hoje..."<br>3x on "Felipe Franco em preparaç..."</td>
+            </tr>
+            <tr>
+              <td data-sort="19"><span class="rank ">19</span></td>
+              <td data-sort="combintel"><strong>@combintel</strong></td>
+              <td data-sort="28">28</td>
+              <td data-sort="4">4</td>
+              <td data-sort="32" class="score">32</td>
+              <td style="font-size:12px;color:var(--muted);max-width:250px;">5x on "Luan Lacerda relembra o d..."<br>2x on "Vitor Petrino vence Steve..."<br>1x on "Uma guerra dentro do cage..."</td>
+            </tr>
+            <tr>
+              <td data-sort="20"><span class="rank ">20</span></td>
+              <td data-sort="mmmarc20"><strong>@mmmarc20</strong></td>
+              <td data-sort="24">24</td>
+              <td data-sort="8">8</td>
+              <td data-sort="32" class="score">32</td>
+              <td style="font-size:12px;color:var(--muted);max-width:250px;">3x on "Movsar Evloev passou por ..."<br>3x on "Kevin “El Chino” Vallejos..."<br>3x on "Vinícius Pires diz que de..."</td>
+            </tr>
+        </tbody>
+      </table>
+    </div>
+  
+</div>
+
+<!-- ==================== TAB 5: COMMUNITY ENGAGEMENT ==================== -->
 <div id="page-rankings" class="page-panel">
 
   <h2>Community Engagement Rankings</h2>
@@ -1603,13 +1944,13 @@ Caio Borralho training — ...</td>
           <tr>
             <td data-sort="1"><span class="rank rank-1">1</span></td>
             <td data-sort="peacegrappler_mma"><strong>@peacegrappler_mma</strong></td>
-            <td data-sort="11650" class="score">11,650</td>
-            <td data-sort="726" style="color: var(--orange);">726</td>
-            <td data-sort="56">56</td>
+            <td data-sort="11744" class="score">11,744</td>
+            <td data-sort="733" style="color: var(--orange);">733</td>
+            <td data-sort="57">57</td>
             <td data-sort="0">0</td>
-            <td data-sort="909">909</td>
+            <td data-sort="915">915</td>
             <td data-sort="3">3</td>
-            <td data-sort="968">968</td>
+            <td data-sort="975">975</td>
           </tr>
         
           <tr>
@@ -1699,13 +2040,13 @@ Caio Borralho training — ...</td>
           <tr>
             <td data-sort="9"><span class="rank ">9</span></td>
             <td data-sort="anaaj_camargo"><strong>@anaaj_camargo</strong></td>
-            <td data-sort="390" class="score">390</td>
-            <td data-sort="33" style="color: var(--orange);">33</td>
-            <td data-sort="45">45</td>
+            <td data-sort="420" class="score">420</td>
+            <td data-sort="36" style="color: var(--orange);">36</td>
+            <td data-sort="48">48</td>
             <td data-sort="0">0</td>
             <td data-sort="0">0</td>
             <td data-sort="0">0</td>
-            <td data-sort="45">45</td>
+            <td data-sort="48">48</td>
           </tr>
         
           <tr>
@@ -1722,6 +2063,18 @@ Caio Borralho training — ...</td>
         
           <tr>
             <td data-sort="11"><span class="rank ">11</span></td>
+            <td data-sort="rm.nicki"><strong>@rm.nicki</strong></td>
+            <td data-sort="367" class="score">367</td>
+            <td data-sort="36" style="color: var(--orange);">36</td>
+            <td data-sort="38">38</td>
+            <td data-sort="1">1</td>
+            <td data-sort="0">0</td>
+            <td data-sort="0">0</td>
+            <td data-sort="39">39</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="12"><span class="rank ">12</span></td>
             <td data-sort="ryangandraufc"><strong>@ryangandraufc</strong></td>
             <td data-sort="344" class="score">344</td>
             <td data-sort="29" style="color: var(--orange);">29</td>
@@ -1730,18 +2083,6 @@ Caio Borralho training — ...</td>
             <td data-sort="19">19</td>
             <td data-sort="0">0</td>
             <td data-sort="63">63</td>
-          </tr>
-        
-          <tr>
-            <td data-sort="12"><span class="rank ">12</span></td>
-            <td data-sort="rm.nicki"><strong>@rm.nicki</strong></td>
-            <td data-sort="337" class="score">337</td>
-            <td data-sort="33" style="color: var(--orange);">33</td>
-            <td data-sort="35">35</td>
-            <td data-sort="1">1</td>
-            <td data-sort="0">0</td>
-            <td data-sort="0">0</td>
-            <td data-sort="36">36</td>
           </tr>
         
           <tr>
@@ -2225,13 +2566,13 @@ Caio Borralho training — ...</td>
           <tr>
             <td data-sort="1"><span class="rank rank-1">1</span></td>
             <td data-sort="peacegrappler_mma"><strong>@peacegrappler_mma</strong></td>
-            <td data-sort="11650" class="score">11,650</td>
-            <td data-sort="726" style="color: var(--orange);">726</td>
-            <td data-sort="56">56</td>
+            <td data-sort="11744" class="score">11,744</td>
+            <td data-sort="733" style="color: var(--orange);">733</td>
+            <td data-sort="57">57</td>
             <td data-sort="0">0</td>
-            <td data-sort="909">909</td>
+            <td data-sort="915">915</td>
             <td data-sort="3">3</td>
-            <td data-sort="968">968</td>
+            <td data-sort="975">975</td>
           </tr>
         
           <tr>
@@ -2321,13 +2662,13 @@ Caio Borralho training — ...</td>
           <tr>
             <td data-sort="9"><span class="rank ">9</span></td>
             <td data-sort="anaaj_camargo"><strong>@anaaj_camargo</strong></td>
-            <td data-sort="390" class="score">390</td>
-            <td data-sort="33" style="color: var(--orange);">33</td>
-            <td data-sort="45">45</td>
+            <td data-sort="420" class="score">420</td>
+            <td data-sort="36" style="color: var(--orange);">36</td>
+            <td data-sort="48">48</td>
             <td data-sort="0">0</td>
             <td data-sort="0">0</td>
             <td data-sort="0">0</td>
-            <td data-sort="45">45</td>
+            <td data-sort="48">48</td>
           </tr>
         
           <tr>
@@ -2344,6 +2685,18 @@ Caio Borralho training — ...</td>
         
           <tr>
             <td data-sort="11"><span class="rank ">11</span></td>
+            <td data-sort="rm.nicki"><strong>@rm.nicki</strong></td>
+            <td data-sort="367" class="score">367</td>
+            <td data-sort="36" style="color: var(--orange);">36</td>
+            <td data-sort="38">38</td>
+            <td data-sort="1">1</td>
+            <td data-sort="0">0</td>
+            <td data-sort="0">0</td>
+            <td data-sort="39">39</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="12"><span class="rank ">12</span></td>
             <td data-sort="ryangandraufc"><strong>@ryangandraufc</strong></td>
             <td data-sort="344" class="score">344</td>
             <td data-sort="29" style="color: var(--orange);">29</td>
@@ -2352,18 +2705,6 @@ Caio Borralho training — ...</td>
             <td data-sort="19">19</td>
             <td data-sort="0">0</td>
             <td data-sort="63">63</td>
-          </tr>
-        
-          <tr>
-            <td data-sort="12"><span class="rank ">12</span></td>
-            <td data-sort="rm.nicki"><strong>@rm.nicki</strong></td>
-            <td data-sort="337" class="score">337</td>
-            <td data-sort="33" style="color: var(--orange);">33</td>
-            <td data-sort="35">35</td>
-            <td data-sort="1">1</td>
-            <td data-sort="0">0</td>
-            <td data-sort="0">0</td>
-            <td data-sort="36">36</td>
           </tr>
         
           <tr>
@@ -2917,7 +3258,7 @@ function initCharts() {
       labels: ["2026-03-22","2026-03-23","2026-03-24","2026-03-25","2026-03-26","2026-03-27","2026-03-28","2026-03-29","2026-03-30","2026-03-31"],
       datasets: [{
         label: 'Followers',
-        data: [591,608,634,651,663,670,676,682,696,706],
+        data: [591,608,634,651,663,670,676,682,696,707],
         borderColor: '#6366f1', backgroundColor: '#6366f133',
         fill: true, tension: 0.3, pointRadius: 2,
       }]
@@ -2933,14 +3274,14 @@ function initCharts() {
     type: 'doughnut',
     data: {
       labels: ["FEED","REELS"],
-      datasets: [{ data: [2,86], backgroundColor: COLORS }]
+      datasets: [{ data: [2,87], backgroundColor: COLORS }]
     },
     options: { responsive: true, maintainAspectRatio: false,
       plugins: { legend: { position: 'bottom' } }
     }
   });
 
-  const reachMedia = [{"date":"Mar 5, 2026","reach":2950,"type":"REELS"},{"date":"Mar 5, 2026","reach":1148,"type":"REELS"},{"date":"Mar 6, 2026","reach":2398,"type":"REELS"},{"date":"Mar 6, 2026","reach":1026,"type":"REELS"},{"date":"Mar 6, 2026","reach":1522,"type":"REELS"},{"date":"Mar 6, 2026","reach":2155,"type":"REELS"},{"date":"Mar 6, 2026","reach":1076,"type":"REELS"},{"date":"Mar 7, 2026","reach":494,"type":"FEED"},{"date":"Mar 7, 2026","reach":972,"type":"REELS"},{"date":"Mar 7, 2026","reach":439,"type":"REELS"},{"date":"Mar 7, 2026","reach":271,"type":"REELS"},{"date":"Mar 7, 2026","reach":2121,"type":"REELS"},{"date":"Mar 7, 2026","reach":878,"type":"REELS"},{"date":"Mar 7, 2026","reach":3418,"type":"REELS"},{"date":"Mar 7, 2026","reach":1728,"type":"REELS"},{"date":"Mar 7, 2026","reach":546,"type":"REELS"},{"date":"Mar 7, 2026","reach":460,"type":"REELS"},{"date":"Mar 7, 2026","reach":498,"type":"REELS"},{"date":"Mar 7, 2026","reach":497,"type":"REELS"},{"date":"Mar 8, 2026","reach":360,"type":"REELS"},{"date":"Mar 8, 2026","reach":164,"type":"REELS"},{"date":"Mar 9, 2026","reach":4775,"type":"REELS"},{"date":"Mar 9, 2026","reach":912,"type":"REELS"},{"date":"Mar 10, 2026","reach":1969,"type":"REELS"},{"date":"Mar 10, 2026","reach":470,"type":"REELS"},{"date":"Mar 10, 2026","reach":931,"type":"REELS"},{"date":"Mar 11, 2026","reach":4588,"type":"REELS"},{"date":"Mar 11, 2026","reach":6175,"type":"REELS"},{"date":"Mar 12, 2026","reach":354,"type":"REELS"},{"date":"Mar 12, 2026","reach":2049,"type":"REELS"},{"date":"Mar 12, 2026","reach":3751,"type":"REELS"},{"date":"Mar 12, 2026","reach":791,"type":"REELS"},{"date":"Mar 13, 2026","reach":232,"type":"REELS"},{"date":"Mar 13, 2026","reach":3636,"type":"REELS"},{"date":"Mar 13, 2026","reach":1808,"type":"REELS"},{"date":"Mar 13, 2026","reach":241,"type":"REELS"},{"date":"Mar 14, 2026","reach":5661,"type":"REELS"},{"date":"Mar 14, 2026","reach":584,"type":"REELS"},{"date":"Mar 14, 2026","reach":1497,"type":"REELS"},{"date":"Mar 14, 2026","reach":254,"type":"REELS"},{"date":"Mar 15, 2026","reach":609,"type":"REELS"},{"date":"Mar 16, 2026","reach":451,"type":"REELS"},{"date":"Mar 17, 2026","reach":2871,"type":"REELS"},{"date":"Mar 17, 2026","reach":1458,"type":"REELS"},{"date":"Mar 17, 2026","reach":561,"type":"REELS"},{"date":"Mar 18, 2026","reach":220,"type":"REELS"},{"date":"Mar 18, 2026","reach":1510,"type":"REELS"},{"date":"Mar 19, 2026","reach":1775,"type":"REELS"},{"date":"Mar 19, 2026","reach":914,"type":"REELS"},{"date":"Mar 20, 2026","reach":1725,"type":"REELS"},{"date":"Mar 20, 2026","reach":2950,"type":"REELS"},{"date":"Mar 20, 2026","reach":2645,"type":"REELS"},{"date":"Mar 21, 2026","reach":327,"type":"REELS"},{"date":"Mar 21, 2026","reach":328,"type":"REELS"},{"date":"Mar 22, 2026","reach":178,"type":"REELS"},{"date":"Mar 22, 2026","reach":189,"type":"REELS"},{"date":"Mar 23, 2026","reach":179,"type":"REELS"},{"date":"Mar 23, 2026","reach":293,"type":"REELS"},{"date":"Mar 23, 2026","reach":145,"type":"REELS"},{"date":"Mar 23, 2026","reach":39,"type":"REELS"},{"date":"Mar 24, 2026","reach":220,"type":"REELS"},{"date":"Mar 24, 2026","reach":47,"type":"REELS"},{"date":"Mar 24, 2026","reach":106,"type":"REELS"},{"date":"Mar 25, 2026","reach":0,"type":"REELS"},{"date":"Mar 25, 2026","reach":0,"type":"REELS"},{"date":"Mar 25, 2026","reach":156,"type":"REELS"},{"date":"Mar 25, 2026","reach":0,"type":"REELS"},{"date":"Mar 26, 2026","reach":23,"type":"REELS"},{"date":"Mar 26, 2026","reach":116,"type":"REELS"},{"date":"Mar 26, 2026","reach":143,"type":"REELS"},{"date":"Mar 26, 2026","reach":0,"type":"REELS"},{"date":"Mar 27, 2026","reach":123,"type":"REELS"},{"date":"Mar 27, 2026","reach":107,"type":"REELS"},{"date":"Mar 27, 2026","reach":87,"type":"REELS"},{"date":"Mar 27, 2026","reach":0,"type":"REELS"},{"date":"Mar 28, 2026","reach":27,"type":"REELS"},{"date":"Mar 28, 2026","reach":19,"type":"REELS"},{"date":"Mar 28, 2026","reach":210,"type":"REELS"},{"date":"Mar 28, 2026","reach":0,"type":"REELS"},{"date":"Mar 29, 2026","reach":61,"type":"REELS"},{"date":"Mar 29, 2026","reach":195,"type":"REELS"},{"date":"Mar 29, 2026","reach":3,"type":"REELS"},{"date":"Mar 30, 2026","reach":209,"type":"REELS"},{"date":"Mar 30, 2026","reach":73,"type":"REELS"},{"date":"Mar 30, 2026","reach":166,"type":"REELS"},{"date":"Mar 30, 2026","reach":0,"type":"FEED"},{"date":"Mar 31, 2026","reach":60,"type":"REELS"},{"date":"Mar 31, 2026","reach":175,"type":"REELS"}];
+  const reachMedia = [{"date":"Mar 5, 2026","reach":2950,"type":"REELS"},{"date":"Mar 5, 2026","reach":1148,"type":"REELS"},{"date":"Mar 6, 2026","reach":2398,"type":"REELS"},{"date":"Mar 6, 2026","reach":1026,"type":"REELS"},{"date":"Mar 6, 2026","reach":1522,"type":"REELS"},{"date":"Mar 6, 2026","reach":2155,"type":"REELS"},{"date":"Mar 6, 2026","reach":1076,"type":"REELS"},{"date":"Mar 7, 2026","reach":494,"type":"FEED"},{"date":"Mar 7, 2026","reach":972,"type":"REELS"},{"date":"Mar 7, 2026","reach":439,"type":"REELS"},{"date":"Mar 7, 2026","reach":271,"type":"REELS"},{"date":"Mar 7, 2026","reach":2121,"type":"REELS"},{"date":"Mar 7, 2026","reach":878,"type":"REELS"},{"date":"Mar 7, 2026","reach":3418,"type":"REELS"},{"date":"Mar 7, 2026","reach":1728,"type":"REELS"},{"date":"Mar 7, 2026","reach":546,"type":"REELS"},{"date":"Mar 7, 2026","reach":460,"type":"REELS"},{"date":"Mar 7, 2026","reach":498,"type":"REELS"},{"date":"Mar 7, 2026","reach":497,"type":"REELS"},{"date":"Mar 8, 2026","reach":360,"type":"REELS"},{"date":"Mar 8, 2026","reach":164,"type":"REELS"},{"date":"Mar 9, 2026","reach":4775,"type":"REELS"},{"date":"Mar 9, 2026","reach":912,"type":"REELS"},{"date":"Mar 10, 2026","reach":1969,"type":"REELS"},{"date":"Mar 10, 2026","reach":470,"type":"REELS"},{"date":"Mar 10, 2026","reach":931,"type":"REELS"},{"date":"Mar 11, 2026","reach":4588,"type":"REELS"},{"date":"Mar 11, 2026","reach":6175,"type":"REELS"},{"date":"Mar 12, 2026","reach":354,"type":"REELS"},{"date":"Mar 12, 2026","reach":2049,"type":"REELS"},{"date":"Mar 12, 2026","reach":3751,"type":"REELS"},{"date":"Mar 12, 2026","reach":791,"type":"REELS"},{"date":"Mar 13, 2026","reach":232,"type":"REELS"},{"date":"Mar 13, 2026","reach":3636,"type":"REELS"},{"date":"Mar 13, 2026","reach":1808,"type":"REELS"},{"date":"Mar 13, 2026","reach":241,"type":"REELS"},{"date":"Mar 14, 2026","reach":5661,"type":"REELS"},{"date":"Mar 14, 2026","reach":584,"type":"REELS"},{"date":"Mar 14, 2026","reach":1497,"type":"REELS"},{"date":"Mar 14, 2026","reach":254,"type":"REELS"},{"date":"Mar 15, 2026","reach":609,"type":"REELS"},{"date":"Mar 16, 2026","reach":451,"type":"REELS"},{"date":"Mar 17, 2026","reach":2871,"type":"REELS"},{"date":"Mar 17, 2026","reach":1458,"type":"REELS"},{"date":"Mar 17, 2026","reach":561,"type":"REELS"},{"date":"Mar 18, 2026","reach":220,"type":"REELS"},{"date":"Mar 18, 2026","reach":1510,"type":"REELS"},{"date":"Mar 19, 2026","reach":1775,"type":"REELS"},{"date":"Mar 19, 2026","reach":914,"type":"REELS"},{"date":"Mar 20, 2026","reach":1725,"type":"REELS"},{"date":"Mar 20, 2026","reach":2950,"type":"REELS"},{"date":"Mar 20, 2026","reach":2645,"type":"REELS"},{"date":"Mar 21, 2026","reach":327,"type":"REELS"},{"date":"Mar 21, 2026","reach":328,"type":"REELS"},{"date":"Mar 22, 2026","reach":178,"type":"REELS"},{"date":"Mar 22, 2026","reach":189,"type":"REELS"},{"date":"Mar 23, 2026","reach":179,"type":"REELS"},{"date":"Mar 23, 2026","reach":293,"type":"REELS"},{"date":"Mar 23, 2026","reach":145,"type":"REELS"},{"date":"Mar 23, 2026","reach":39,"type":"REELS"},{"date":"Mar 24, 2026","reach":220,"type":"REELS"},{"date":"Mar 24, 2026","reach":47,"type":"REELS"},{"date":"Mar 24, 2026","reach":106,"type":"REELS"},{"date":"Mar 25, 2026","reach":0,"type":"REELS"},{"date":"Mar 25, 2026","reach":0,"type":"REELS"},{"date":"Mar 25, 2026","reach":156,"type":"REELS"},{"date":"Mar 25, 2026","reach":0,"type":"REELS"},{"date":"Mar 26, 2026","reach":23,"type":"REELS"},{"date":"Mar 26, 2026","reach":116,"type":"REELS"},{"date":"Mar 26, 2026","reach":143,"type":"REELS"},{"date":"Mar 26, 2026","reach":0,"type":"REELS"},{"date":"Mar 27, 2026","reach":123,"type":"REELS"},{"date":"Mar 27, 2026","reach":107,"type":"REELS"},{"date":"Mar 27, 2026","reach":87,"type":"REELS"},{"date":"Mar 27, 2026","reach":0,"type":"REELS"},{"date":"Mar 28, 2026","reach":27,"type":"REELS"},{"date":"Mar 28, 2026","reach":19,"type":"REELS"},{"date":"Mar 28, 2026","reach":210,"type":"REELS"},{"date":"Mar 28, 2026","reach":0,"type":"REELS"},{"date":"Mar 29, 2026","reach":61,"type":"REELS"},{"date":"Mar 29, 2026","reach":195,"type":"REELS"},{"date":"Mar 29, 2026","reach":3,"type":"REELS"},{"date":"Mar 30, 2026","reach":209,"type":"REELS"},{"date":"Mar 30, 2026","reach":73,"type":"REELS"},{"date":"Mar 30, 2026","reach":166,"type":"REELS"},{"date":"Mar 30, 2026","reach":0,"type":"FEED"},{"date":"Mar 31, 2026","reach":60,"type":"REELS"},{"date":"Mar 31, 2026","reach":175,"type":"REELS"},{"date":"Mar 31, 2026","reach":0,"type":"REELS"}];
   new Chart(document.getElementById('reachChart'), {
     type: 'bar',
     data: {
