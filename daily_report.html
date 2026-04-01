@@ -1,0 +1,2344 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PeaceGrappler MMA - Evening Report</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; margin: 0; padding: 0; background: #0f1117; color: #e1e4ed; }
+  .container { max-width: 900px; margin: 0 auto; padding: 20px; }
+
+  .header { text-align: center; padding: 30px 0 20px; border-bottom: 2px solid #6366f1; margin-bottom: 24px; }
+  .header h1 { font-size: 28px; margin: 0 0 4px; color: #818cf8; }
+  .header .subtitle { color: #8b8fa3; font-size: 14px; }
+  .header .report-type { display: inline-block; background: #6366f1; color: white; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; margin-top: 8px; }
+
+  h2 { font-size: 20px; color: #818cf8; margin: 32px 0 16px; padding-bottom: 8px; border-bottom: 1px solid #2a2d3a; }
+  h3 { font-size: 16px; color: #8b8fa3; margin: 20px 0 12px; text-transform: uppercase; letter-spacing: 1px; font-weight: 600; }
+
+  .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .metric-card { background: #1a1d27; border: 1px solid #2a2d3a; border-radius: 10px; padding: 16px; text-align: center; }
+  .metric-card .value { font-size: 28px; font-weight: 700; color: #818cf8; }
+  .metric-card .label { font-size: 12px; color: #8b8fa3; margin-top: 4px; }
+  .metric-card .delta { font-size: 13px; margin-top: 4px; font-weight: 600; }
+  .positive { color: #34d399; }
+  .negative { color: #f87171; }
+  .neutral { color: #8b8fa3; }
+
+  .growth-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; }
+  .growth-card { background: #1a1d27; border: 1px solid #2a2d3a; border-radius: 10px; padding: 16px; text-align: center; }
+  .growth-card .period { font-size: 12px; color: #8b8fa3; text-transform: uppercase; letter-spacing: 0.5px; }
+  .growth-card .growth-value { font-size: 24px; font-weight: 700; margin: 4px 0; }
+  .growth-card .sub { font-size: 11px; color: #8b8fa3; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 20px; }
+  th { background: #1a1d27; color: #8b8fa3; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; padding: 10px 8px; text-align: left; border-bottom: 2px solid #2a2d3a; }
+  td { padding: 8px; border-bottom: 1px solid #1e2130; vertical-align: top; }
+  tr:hover { background: rgba(99,102,241,0.05); }
+  .rank { font-weight: 700; color: #818cf8; }
+  .rank-1 { color: #fbbf24; }
+  .rank-2 { color: #d1d5db; }
+  .rank-3 { color: #cd7f32; }
+  .engagement-val { font-weight: 700; color: #34d399; }
+  .caption-cell { color: #8b8fa3; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; text-transform: uppercase; }
+  .badge-feed { background: #6366f133; color: #818cf8; }
+  .badge-reels { background: #f472b633; color: #f472b6; }
+  .badge-carousel { background: #fb923c33; color: #fb923c; }
+  a { color: #818cf8; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .post-card { background: #1a1d27; border: 1px solid #2a2d3a; border-radius: 10px; padding: 16px; margin-bottom: 12px; }
+  .post-card .post-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .post-card .post-caption { color: #8b8fa3; font-size: 13px; margin-bottom: 10px; }
+  .post-card .post-metrics { display: flex; gap: 16px; flex-wrap: wrap; }
+  .post-card .pm { text-align: center; }
+  .post-card .pm .pm-val { font-size: 18px; font-weight: 700; color: #e1e4ed; }
+  .post-card .pm .pm-label { font-size: 11px; color: #8b8fa3; }
+
+  .commenter-block { background: #1a1d27; border: 1px solid #2a2d3a; border-radius: 10px; padding: 16px; margin-bottom: 12px; }
+  .commenter-block .cb-header { font-weight: 600; color: #818cf8; margin-bottom: 6px; }
+  .commenter-block .cb-sub { font-size: 12px; color: #8b8fa3; margin-bottom: 8px; }
+  .commenter-block .cb-posts { font-size: 12px; color: #8b8fa3; }
+  .commenter-block .cb-posts span { color: #e1e4ed; }
+
+  .section-note { font-size: 12px; color: #8b8fa3; font-style: italic; margin-bottom: 16px; }
+
+  .footer { text-align: center; margin-top: 40px; padding: 20px 0; border-top: 1px solid #2a2d3a; color: #8b8fa3; font-size: 12px; }
+
+  @media (max-width: 600px) {
+    .metrics-grid { grid-template-columns: repeat(2, 1fr); }
+    .growth-row { grid-template-columns: 1fr; }
+    .post-card .post-metrics { gap: 12px; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<!-- HEADER -->
+<div class="header">
+  <h1>PeaceGrappler MMA</h1>
+  <div class="subtitle">@peacegrappler_mma &mdash; Tuesday, March 31, 2026 at 9:00 PM</div>
+  <div class="report-type">Evening Report</div>
+</div>
+
+<!-- SECTION 1: ACCOUNT SUMMARY & FOLLOWER GROWTH -->
+<h2>Account Summary</h2>
+<div class="metrics-grid">
+  <div class="metric-card">
+    <div class="value">709</div>
+    <div class="label">Followers</div>
+  </div>
+  <div class="metric-card">
+    <div class="value">99</div>
+    <div class="label">Total Posts</div>
+  </div>
+  <div class="metric-card">
+    <div class="value">68</div>
+    <div class="label">Following</div>
+  </div>
+</div>
+
+<h3>Follower Growth</h3>
+<div class="growth-row">
+  <div class="growth-card">
+    <div class="period">Yesterday</div>
+    <div class="growth-value positive">+2</div>
+    <div class="sub">followers</div>
+  </div>
+  <div class="growth-card">
+    <div class="period">Last 7 Days</div>
+    <div class="growth-value positive">+46</div>
+    <div class="sub">followers</div>
+  </div>
+  <div class="growth-card">
+    <div class="period">Last 30 Days</div>
+    <div class="growth-value positive">+118</div>
+    <div class="sub">followers</div>
+  </div>
+</div>
+
+<h3>Content Published</h3>
+<table>
+  <tr>
+    <th>Period</th>
+    <th>Total</th>
+    <th>Reels</th>
+    <th>Feed Posts</th>
+    <th>Carousels</th>
+  </tr>
+  <tr>
+    <td>Yesterday</td>
+    <td><strong>3</strong></td>
+    <td>3</td>
+    <td>0</td>
+    <td>0</td>
+  </tr>
+  <tr>
+    <td>Last 7 Days</td>
+    <td><strong>26</strong></td>
+    <td>25</td>
+    <td>1</td>
+    <td>0</td>
+  </tr>
+  <tr>
+    <td>Last 30 Days</td>
+    <td><strong>89</strong></td>
+    <td>87</td>
+    <td>2</td>
+    <td>0</td>
+  </tr>
+</table>
+
+<!-- SECTION 2: ENGAGEMENT ANALYTICS -->
+<h2>Engagement Analytics</h2>
+<div class="metrics-grid">
+  <div class="metric-card">
+    <div class="value">764</div>
+    <div class="label">Total Engagement (7d)</div>
+  </div>
+  <div class="metric-card">
+    <div class="value">29</div>
+    <div class="label">Avg per Post (7d)</div>
+  </div>
+  <div class="metric-card">
+    <div class="value">4,236</div>
+    <div class="label">Views (7d)</div>
+  </div>
+  <div class="metric-card">
+    <div class="value">1,953</div>
+    <div class="label">Reach (7d)</div>
+  </div>
+  <div class="metric-card">
+    <div class="value">15</div>
+    <div class="label">Shares (7d)</div>
+  </div>
+  <div class="metric-card">
+    <div class="value">5</div>
+    <div class="label">Saves (7d)</div>
+  </div>
+</div>
+
+<div class="metrics-grid">
+  <div class="metric-card">
+    <div class="value">9,173</div>
+    <div class="label">Total Engagement (30d)</div>
+  </div>
+  <div class="metric-card">
+    <div class="value">5,596</div>
+    <div class="label">Likes (30d)</div>
+  </div>
+  <div class="metric-card">
+    <div class="value">3,577</div>
+    <div class="label">Comments (30d)</div>
+  </div>
+  <div class="metric-card">
+    <div class="value">89</div>
+    <div class="label">Posts (30d)</div>
+  </div>
+</div>
+
+<!-- SECTION 3: TOP POSTS BY ENGAGEMENT -->
+<h2>Top 10 Posts by Engagement (Last 30 Days)</h2>
+<div class="section-note">Ranked by likes + comments</div>
+
+<div class="post-card">
+  <div class="post-header">
+    <span><span class="rank rank-1">#1</span>
+    <span class="badge badge-reels">REELS</span></span>
+    <span style="color:#8b8fa3;font-size:12px">Mar 5</span>
+  </div>
+  <div class="post-caption">Caio Borralho no ritmo do camp, intensidade alta e foco total enquanto o UFC Fight Night se aproxima...</div>
+  <div class="post-metrics">
+    <div class="pm"><div class="pm-val engagement-val">413</div><div class="pm-label">Engagement</div></div>
+    <div class="pm"><div class="pm-val">206</div><div class="pm-label">Likes</div></div>
+    <div class="pm"><div class="pm-val">207</div><div class="pm-label">Comments</div></div>
+    <div class="pm"><div class="pm-val">4,449</div><div class="pm-label">Views</div></div>
+    <div class="pm"><div class="pm-val">204</div><div class="pm-label">Shares</div></div>
+    <div class="pm"><div class="pm-val">2,950</div><div class="pm-label">Reach</div></div>
+  </div>
+</div>
+
+<div class="post-card">
+  <div class="post-header">
+    <span><span class="rank rank-2">#2</span>
+    <span class="badge badge-reels">REELS</span></span>
+    <span style="color:#8b8fa3;font-size:12px">Mar 17</span>
+  </div>
+  <div class="post-caption">Manoel “Manumito” Sousa em ação contra Oki. Intensidade do começo ao fim, trocação franca e mais um ...</div>
+  <div class="post-metrics">
+    <div class="pm"><div class="pm-val engagement-val">383</div><div class="pm-label">Engagement</div></div>
+    <div class="pm"><div class="pm-val">309</div><div class="pm-label">Likes</div></div>
+    <div class="pm"><div class="pm-val">74</div><div class="pm-label">Comments</div></div>
+    <div class="pm"><div class="pm-val">4,574</div><div class="pm-label">Views</div></div>
+    <div class="pm"><div class="pm-val">8</div><div class="pm-label">Shares</div></div>
+    <div class="pm"><div class="pm-val">2,871</div><div class="pm-label">Reach</div></div>
+  </div>
+</div>
+
+<div class="post-card">
+  <div class="post-header">
+    <span><span class="rank rank-3">#3</span>
+    <span class="badge badge-reels">REELS</span></span>
+    <span style="color:#8b8fa3;font-size:12px">Mar 11</span>
+  </div>
+  <div class="post-caption">Manoel “Manumito” Sousa e seu coach Fred falam sobre a expectativa para a estreia no UFC. Confiança ...</div>
+  <div class="post-metrics">
+    <div class="pm"><div class="pm-val engagement-val">369</div><div class="pm-label">Engagement</div></div>
+    <div class="pm"><div class="pm-val">262</div><div class="pm-label">Likes</div></div>
+    <div class="pm"><div class="pm-val">107</div><div class="pm-label">Comments</div></div>
+    <div class="pm"><div class="pm-val">6,230</div><div class="pm-label">Views</div></div>
+    <div class="pm"><div class="pm-val">19</div><div class="pm-label">Shares</div></div>
+    <div class="pm"><div class="pm-val">4,588</div><div class="pm-label">Reach</div></div>
+  </div>
+</div>
+
+<div class="post-card">
+  <div class="post-header">
+    <span><span class="rank ">#4</span>
+    <span class="badge badge-reels">REELS</span></span>
+    <span style="color:#8b8fa3;font-size:12px">Mar 20</span>
+  </div>
+  <div class="post-caption">Felipe Franco no dia da pesagem para sua estreia no UFC. Corte de peso feito, foco total e tudo alin...</div>
+  <div class="post-metrics">
+    <div class="pm"><div class="pm-val engagement-val">314</div><div class="pm-label">Engagement</div></div>
+    <div class="pm"><div class="pm-val">238</div><div class="pm-label">Likes</div></div>
+    <div class="pm"><div class="pm-val">76</div><div class="pm-label">Comments</div></div>
+    <div class="pm"><div class="pm-val">3,764</div><div class="pm-label">Views</div></div>
+    <div class="pm"><div class="pm-val">1</div><div class="pm-label">Shares</div></div>
+    <div class="pm"><div class="pm-val">2,645</div><div class="pm-label">Reach</div></div>
+  </div>
+</div>
+
+<div class="post-card">
+  <div class="post-header">
+    <span><span class="rank ">#5</span>
+    <span class="badge badge-reels">REELS</span></span>
+    <span style="color:#8b8fa3;font-size:12px">Mar 13</span>
+  </div>
+  <div class="post-caption">Tiwi acredita no nocaute!
+Segundo ele, os treinos do Manumito estão em um nível altíssimo e o lutado...</div>
+  <div class="post-metrics">
+    <div class="pm"><div class="pm-val engagement-val">303</div><div class="pm-label">Engagement</div></div>
+    <div class="pm"><div class="pm-val">217</div><div class="pm-label">Likes</div></div>
+    <div class="pm"><div class="pm-val">86</div><div class="pm-label">Comments</div></div>
+    <div class="pm"><div class="pm-val">6,506</div><div class="pm-label">Views</div></div>
+    <div class="pm"><div class="pm-val">4</div><div class="pm-label">Shares</div></div>
+    <div class="pm"><div class="pm-val">3,636</div><div class="pm-label">Reach</div></div>
+  </div>
+</div>
+
+<div class="post-card">
+  <div class="post-header">
+    <span><span class="rank ">#6</span>
+    <span class="badge badge-reels">REELS</span></span>
+    <span style="color:#8b8fa3;font-size:12px">Mar 9</span>
+  </div>
+  <div class="post-caption">Arthur acredita que Manu chega para a melhor luta da carreira. Segundo ele, a preparação foi a mais ...</div>
+  <div class="post-metrics">
+    <div class="pm"><div class="pm-val engagement-val">284</div><div class="pm-label">Engagement</div></div>
+    <div class="pm"><div class="pm-val">202</div><div class="pm-label">Likes</div></div>
+    <div class="pm"><div class="pm-val">82</div><div class="pm-label">Comments</div></div>
+    <div class="pm"><div class="pm-val">7,117</div><div class="pm-label">Views</div></div>
+    <div class="pm"><div class="pm-val">7</div><div class="pm-label">Shares</div></div>
+    <div class="pm"><div class="pm-val">4,775</div><div class="pm-label">Reach</div></div>
+  </div>
+</div>
+
+<div class="post-card">
+  <div class="post-header">
+    <span><span class="rank ">#7</span>
+    <span class="badge badge-reels">REELS</span></span>
+    <span style="color:#8b8fa3;font-size:12px">Mar 19</span>
+  </div>
+  <div class="post-caption">Vanessa Melo fala sobre Luana Carolina na semana da luta no UFC.
+Ela acompanha de perto o ritmo, a p...</div>
+  <div class="post-metrics">
+    <div class="pm"><div class="pm-val engagement-val">280</div><div class="pm-label">Engagement</div></div>
+    <div class="pm"><div class="pm-val">195</div><div class="pm-label">Likes</div></div>
+    <div class="pm"><div class="pm-val">85</div><div class="pm-label">Comments</div></div>
+    <div class="pm"><div class="pm-val">2,858</div><div class="pm-label">Views</div></div>
+    <div class="pm"><div class="pm-val">27</div><div class="pm-label">Shares</div></div>
+    <div class="pm"><div class="pm-val">1,775</div><div class="pm-label">Reach</div></div>
+  </div>
+</div>
+
+<div class="post-card">
+  <div class="post-header">
+    <span><span class="rank ">#8</span>
+    <span class="badge badge-reels">REELS</span></span>
+    <span style="color:#8b8fa3;font-size:12px">Mar 10</span>
+  </div>
+  <div class="post-caption">Treino entre Vitor Petrino e Ryan Gandra durante a preparação para a fight week desta semana (03/14)...</div>
+  <div class="post-metrics">
+    <div class="pm"><div class="pm-val engagement-val">270</div><div class="pm-label">Engagement</div></div>
+    <div class="pm"><div class="pm-val">117</div><div class="pm-label">Likes</div></div>
+    <div class="pm"><div class="pm-val">153</div><div class="pm-label">Comments</div></div>
+    <div class="pm"><div class="pm-val">3,301</div><div class="pm-label">Views</div></div>
+    <div class="pm"><div class="pm-val">5</div><div class="pm-label">Shares</div></div>
+    <div class="pm"><div class="pm-val">1,969</div><div class="pm-label">Reach</div></div>
+  </div>
+</div>
+
+<div class="post-card">
+  <div class="post-header">
+    <span><span class="rank ">#9</span>
+    <span class="badge badge-reels">REELS</span></span>
+    <span style="color:#8b8fa3;font-size:12px">Mar 12</span>
+  </div>
+  <div class="post-caption">Ryan Gandra fala sobre a amizade e a parceria de treinos com Vitor Petrino, que luta neste sábado, 0...</div>
+  <div class="post-metrics">
+    <div class="pm"><div class="pm-val engagement-val">259</div><div class="pm-label">Engagement</div></div>
+    <div class="pm"><div class="pm-val">184</div><div class="pm-label">Likes</div></div>
+    <div class="pm"><div class="pm-val">75</div><div class="pm-label">Comments</div></div>
+    <div class="pm"><div class="pm-val">3,556</div><div class="pm-label">Views</div></div>
+    <div class="pm"><div class="pm-val">5</div><div class="pm-label">Shares</div></div>
+    <div class="pm"><div class="pm-val">2,049</div><div class="pm-label">Reach</div></div>
+  </div>
+</div>
+
+<div class="post-card">
+  <div class="post-header">
+    <span><span class="rank ">#10</span>
+    <span class="badge badge-reels">REELS</span></span>
+    <span style="color:#8b8fa3;font-size:12px">Mar 12</span>
+  </div>
+  <div class="post-caption">Manoel “Manumito” Sousa relembra uma das lutas mais duras da carreira, contra um atleta que estava n...</div>
+  <div class="post-metrics">
+    <div class="pm"><div class="pm-val engagement-val">243</div><div class="pm-label">Engagement</div></div>
+    <div class="pm"><div class="pm-val">164</div><div class="pm-label">Likes</div></div>
+    <div class="pm"><div class="pm-val">79</div><div class="pm-label">Comments</div></div>
+    <div class="pm"><div class="pm-val">4,533</div><div class="pm-label">Views</div></div>
+    <div class="pm"><div class="pm-val">1</div><div class="pm-label">Shares</div></div>
+    <div class="pm"><div class="pm-val">3,751</div><div class="pm-label">Reach</div></div>
+  </div>
+</div>
+
+
+<!-- SECTION 4: PER-POST METRICS (LAST 30 DAYS) -->
+<h2>Per-Post Breakdown (Last 30 Days)</h2>
+<div class="section-note">Views and comments for every post in the last 30 days</div>
+<table>
+  <tr>
+    <th>#</th>
+    <th>Date</th>
+    <th>Type</th>
+    <th>Caption</th>
+    <th>Views</th>
+    <th>Likes</th>
+    <th>Comments</th>
+    <th>Shares</th>
+    <th>Reach</th>
+    <th>Link</th>
+  </tr>
+  
+  <tr>
+    <td>1</td>
+    <td>Mar 31</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">José Delano fala sobre sua versatilidade no MMA. E...</td>
+    <td><strong>18</strong></td>
+    <td>4</td>
+    <td>13</td>
+    <td>0</td>
+    <td>0</td>
+    <td><a href="https://www.instagram.com/reel/DWkBamGASKI/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>2</td>
+    <td>Mar 31</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Precisão, tempo e violência controlada.
+Marcos Tai...</td>
+    <td><strong>324</strong></td>
+    <td>17</td>
+    <td>35</td>
+    <td>0</td>
+    <td>175</td>
+    <td><a href="https://www.instagram.com/reel/DWjt_6MDs1N/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>3</td>
+    <td>Mar 31</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Quem olha o cartel 14-0 ou a rede social acha que ...</td>
+    <td><strong>126</strong></td>
+    <td>9</td>
+    <td>30</td>
+    <td>0</td>
+    <td>60</td>
+    <td><a href="https://www.instagram.com/reel/DWjSjQMFNRn/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>4</td>
+    <td>Mar 30</td>
+    <td><span class="badge badge-feed">FEED</span></td>
+    <td class="caption-cell">O card do UFC Vegas vem carregado de nomes fortes ...</td>
+    <td><strong>47</strong></td>
+    <td>2</td>
+    <td>1</td>
+    <td>0</td>
+    <td>0</td>
+    <td><a href="https://www.instagram.com/p/DWhcnMzFq8k/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>5</td>
+    <td>Mar 30</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">José Delano fala sobre sua paixão pelo esporte — e...</td>
+    <td><strong>207</strong></td>
+    <td>11</td>
+    <td>20</td>
+    <td>0</td>
+    <td>166</td>
+    <td><a href="https://www.instagram.com/reel/DWhJNV3FdJ8/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>6</td>
+    <td>Mar 30</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Pra Melissa Gatto, o maior sacrifício não é dieta,...</td>
+    <td><strong>157</strong></td>
+    <td>12</td>
+    <td>28</td>
+    <td>0</td>
+    <td>73</td>
+    <td><a href="https://www.instagram.com/reel/DWgtwabE2YL/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>7</td>
+    <td>Mar 30</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Ricardo Libório e Fernando Yamasaki analisam como ...</td>
+    <td><strong>472</strong></td>
+    <td>31</td>
+    <td>18</td>
+    <td>0</td>
+    <td>209</td>
+    <td><a href="https://www.instagram.com/reel/DWgpQoXDcvd/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>8</td>
+    <td>Mar 29</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Compilado dos momentos da última luta de Eryk Ande...</td>
+    <td><strong>21</strong></td>
+    <td>2</td>
+    <td>2</td>
+    <td>0</td>
+    <td>3</td>
+    <td><a href="https://www.instagram.com/reel/DWe3z66Dct7/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>9</td>
+    <td>Mar 29</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Bruno Lopes relembra a luta contra Dustin e explic...</td>
+    <td><strong>278</strong></td>
+    <td>13</td>
+    <td>25</td>
+    <td>0</td>
+    <td>195</td>
+    <td><a href="https://www.instagram.com/reel/DWeI7ofEXfK/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>10</td>
+    <td>Mar 29</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Compilado do camp de Douglas Silva antes da sua lu...</td>
+    <td><strong>115</strong></td>
+    <td>7</td>
+    <td>3</td>
+    <td>0</td>
+    <td>61</td>
+    <td><a href="https://www.instagram.com/reel/DWd7L1wj80e/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>11</td>
+    <td>Mar 28</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Alexa Grasso fala sobre a luta contra Macy Barber ...</td>
+    <td><strong>21</strong></td>
+    <td>2</td>
+    <td>1</td>
+    <td>0</td>
+    <td>0</td>
+    <td><a href="https://www.instagram.com/reel/DWcTIcNE8sj/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>12</td>
+    <td>Mar 28</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Joe Pyfer explica como essa luta surgiu. A oportun...</td>
+    <td><strong>268</strong></td>
+    <td>14</td>
+    <td>13</td>
+    <td>1</td>
+    <td>210</td>
+    <td><a href="https://www.instagram.com/reel/DWb_nyPAVWm/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>13</td>
+    <td>Mar 28</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Bruno Lopes fala sobre o que aprendeu com as pouca...</td>
+    <td><strong>49</strong></td>
+    <td>6</td>
+    <td>4</td>
+    <td>0</td>
+    <td>19</td>
+    <td><a href="https://www.instagram.com/reel/DWbrumTAhdr/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>14</td>
+    <td>Mar 28</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Imanol Rodriguez mostrou raça do início ao fim em ...</td>
+    <td><strong>68</strong></td>
+    <td>10</td>
+    <td>13</td>
+    <td>0</td>
+    <td>27</td>
+    <td><a href="https://www.instagram.com/reel/DWbd8yPjUgb/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>15</td>
+    <td>Mar 27</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Thalyta Silva fala sobre a transição do jiu-jitsu ...</td>
+    <td><strong>110</strong></td>
+    <td>6</td>
+    <td>6</td>
+    <td>0</td>
+    <td>0</td>
+    <td><a href="https://www.instagram.com/reel/DWZuOWiju6R/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>16</td>
+    <td>Mar 27</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">O treinador já deixou claro: podem esperar o jogo ...</td>
+    <td><strong>245</strong></td>
+    <td>27</td>
+    <td>45</td>
+    <td>14</td>
+    <td>87</td>
+    <td><a href="https://www.instagram.com/reel/DWZaz3fDHBA/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>17</td>
+    <td>Mar 27</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Tawan Regis começou na luta por incentivo do tio —...</td>
+    <td><strong>197</strong></td>
+    <td>14</td>
+    <td>35</td>
+    <td>0</td>
+    <td>107</td>
+    <td><a href="https://www.instagram.com/reel/DWY_eRngQmf/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>18</td>
+    <td>Mar 27</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">A caminhada para o UFC Fight Night Vallejos vs Emm...</td>
+    <td><strong>182</strong></td>
+    <td>10</td>
+    <td>22</td>
+    <td>0</td>
+    <td>123</td>
+    <td><a href="https://www.instagram.com/reel/DWYxnM_CdIk/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>19</td>
+    <td>Mar 26</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Bia Basílio fala sobre sua segunda luta no LFA, ma...</td>
+    <td><strong>88</strong></td>
+    <td>10</td>
+    <td>8</td>
+    <td>0</td>
+    <td>0</td>
+    <td><a href="https://www.instagram.com/reel/DWXJbPqFBRx/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>20</td>
+    <td>Mar 26</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Bruno Lopes fala sobre a pressão de lutar no Conte...</td>
+    <td><strong>243</strong></td>
+    <td>22</td>
+    <td>35</td>
+    <td>0</td>
+    <td>143</td>
+    <td><a href="https://www.instagram.com/reel/DWW2BgHDF8L/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>21</td>
+    <td>Mar 26</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Sua luta mais difícil? Ícaro. Um adversário duro, ...</td>
+    <td><strong>504</strong></td>
+    <td>38</td>
+    <td>34</td>
+    <td>0</td>
+    <td>116</td>
+    <td><a href="https://www.instagram.com/reel/DWWall0CYdM/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>22</td>
+    <td>Mar 26</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Ailín Perez e Ryan Gandra se cruzam no UFC Mexico ...</td>
+    <td><strong>76</strong></td>
+    <td>10</td>
+    <td>21</td>
+    <td>0</td>
+    <td>23</td>
+    <td><a href="https://www.instagram.com/reel/DWWWfzZgYmp/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>23</td>
+    <td>Mar 25</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Leandro Solano fala sobre a perda do pai e o momen...</td>
+    <td><strong>30</strong></td>
+    <td>5</td>
+    <td>4</td>
+    <td>0</td>
+    <td>0</td>
+    <td><a href="https://www.instagram.com/reel/DWUko7riPLU/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>24</td>
+    <td>Mar 25</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">“Na real, minha vida nunca foi fácil… nenhuma luta...</td>
+    <td><strong>340</strong></td>
+    <td>22</td>
+    <td>10</td>
+    <td>0</td>
+    <td>156</td>
+    <td><a href="https://www.instagram.com/reel/DWURO2QgqnT/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>25</td>
+    <td>Mar 25</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Thalyta Silva elevando o nível no camp, intensidad...</td>
+    <td><strong>6</strong></td>
+    <td>2</td>
+    <td>1</td>
+    <td>0</td>
+    <td>0</td>
+    <td><a href="https://www.instagram.com/reel/DWT9QsCCq8x/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>26</td>
+    <td>Mar 25</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Thalyta Silva elevando o nível no camp, intensidad...</td>
+    <td><strong>44</strong></td>
+    <td>12</td>
+    <td>23</td>
+    <td>0</td>
+    <td>0</td>
+    <td><a href="https://www.instagram.com/reel/DWT1xapkfWF/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>27</td>
+    <td>Mar 24</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Vinícius Pires diz que dentro do octógono é o “bad...</td>
+    <td><strong>287</strong></td>
+    <td>24</td>
+    <td>22</td>
+    <td>0</td>
+    <td>106</td>
+    <td><a href="https://www.instagram.com/reel/DWSIhyxErJp/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>28</td>
+    <td>Mar 24</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Bia Basílio em preparação intensa, ritmo alto e fo...</td>
+    <td><strong>142</strong></td>
+    <td>26</td>
+    <td>41</td>
+    <td>0</td>
+    <td>47</td>
+    <td><a href="https://www.instagram.com/reel/DWR09RqkW9v/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>29</td>
+    <td>Mar 24</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">De uma vida intensa nas ruas, onde nem ele acredit...</td>
+    <td><strong>399</strong></td>
+    <td>18</td>
+    <td>33</td>
+    <td>2</td>
+    <td>220</td>
+    <td><a href="https://www.instagram.com/reel/DWRQ-eICm9e/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>30</td>
+    <td>Mar 23</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Thalyta Silva chega para sua terceira luta no MMA ...</td>
+    <td><strong>65</strong></td>
+    <td>11</td>
+    <td>4</td>
+    <td>0</td>
+    <td>39</td>
+    <td><a href="https://www.instagram.com/reel/DWP-h1TFhub/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>31</td>
+    <td>Mar 23</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Bruno Lopes fala sobre a diferença entre o nível d...</td>
+    <td><strong>202</strong></td>
+    <td>18</td>
+    <td>32</td>
+    <td>0</td>
+    <td>145</td>
+    <td><a href="https://www.instagram.com/reel/DWPcO9-k2YL/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>32</td>
+    <td>Mar 23</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Na maioria dos dias, eu não quero treinar. 
+Corpo ...</td>
+    <td><strong>516</strong></td>
+    <td>38</td>
+    <td>7</td>
+    <td>1</td>
+    <td>293</td>
+    <td><a href="https://www.instagram.com/reel/DWPHnu0DTTv/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>33</td>
+    <td>Mar 23</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Bia Mesquita caminhou com confiança e dominou como...</td>
+    <td><strong>342</strong></td>
+    <td>13</td>
+    <td>24</td>
+    <td>1</td>
+    <td>179</td>
+    <td><a href="https://www.instagram.com/reel/DWOzFhgCEje/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>34</td>
+    <td>Mar 22</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Dos momentos finais da luta até o walkout do cage,...</td>
+    <td><strong>284</strong></td>
+    <td>13</td>
+    <td>26</td>
+    <td>0</td>
+    <td>189</td>
+    <td><a href="https://www.instagram.com/reel/DWM3ZvAjlpe/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>35</td>
+    <td>Mar 22</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">O vídeo completo sai hoje às 7PM no YouTube da Pea...</td>
+    <td><strong>284</strong></td>
+    <td>12</td>
+    <td>19</td>
+    <td>14</td>
+    <td>178</td>
+    <td><a href="https://www.instagram.com/reel/DWMHZ4jjpGW/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>36</td>
+    <td>Mar 21</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Uma guerra dentro do cage. Shanelle Dyer e Carol F...</td>
+    <td><strong>400</strong></td>
+    <td>19</td>
+    <td>39</td>
+    <td>0</td>
+    <td>328</td>
+    <td><a href="https://www.instagram.com/reel/DWKSmqBARuH/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>37</td>
+    <td>Mar 21</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Felipe Franco em preparação total para a luta de h...</td>
+    <td><strong>427</strong></td>
+    <td>31</td>
+    <td>56</td>
+    <td>2</td>
+    <td>327</td>
+    <td><a href="https://www.instagram.com/reel/DWJijoOlFxJ/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>38</td>
+    <td>Mar 20</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Felipe Franco no dia da pesagem para sua estreia n...</td>
+    <td><strong>3,764</strong></td>
+    <td>238</td>
+    <td>76</td>
+    <td>1</td>
+    <td>2,645</td>
+    <td><a href="https://www.instagram.com/reel/DWHt0vVgY1W/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>39</td>
+    <td>Mar 20</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Movsar Evloev passou por um camp exaustivo, fez tu...</td>
+    <td><strong>3,496</strong></td>
+    <td>43</td>
+    <td>100</td>
+    <td>11</td>
+    <td>2,950</td>
+    <td><a href="https://www.instagram.com/reel/DWHjfzrkgGc/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>40</td>
+    <td>Mar 20</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Yuri Moura já avisou essa luta vai ser guerra. Con...</td>
+    <td><strong>2,199</strong></td>
+    <td>126</td>
+    <td>58</td>
+    <td>2</td>
+    <td>1,725</td>
+    <td><a href="https://www.instagram.com/reel/DWG9yzvDBEQ/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>41</td>
+    <td>Mar 19</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Luan Lacerda relembra o discurso do Dedé que marco...</td>
+    <td><strong>1,495</strong></td>
+    <td>84</td>
+    <td>79</td>
+    <td>4</td>
+    <td>914</td>
+    <td><a href="https://www.instagram.com/reel/DWFJCFYDwVH/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>42</td>
+    <td>Mar 19</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Vanessa Melo fala sobre Luana Carolina na semana d...</td>
+    <td><strong>2,858</strong></td>
+    <td>196</td>
+    <td>85</td>
+    <td>27</td>
+    <td>1,775</td>
+    <td><a href="https://www.instagram.com/reel/DWEZGHhEqJl/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>43</td>
+    <td>Mar 18</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Felipe Franco vivendo cada segundo da estreia no U...</td>
+    <td><strong>2,281</strong></td>
+    <td>161</td>
+    <td>71</td>
+    <td>4</td>
+    <td>1,510</td>
+    <td><a href="https://www.instagram.com/reel/DWCrFvQFlzi/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>44</td>
+    <td>Mar 18</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Bolaji Oki da caminhada até o cage até o início da...</td>
+    <td><strong>387</strong></td>
+    <td>39</td>
+    <td>45</td>
+    <td>0</td>
+    <td>220</td>
+    <td><a href="https://www.instagram.com/reel/DWB0MS1j2Wr/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>45</td>
+    <td>Mar 17</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Marwan Rahiki da entrada até o cage até a luta. Fo...</td>
+    <td><strong>907</strong></td>
+    <td>50</td>
+    <td>55</td>
+    <td>0</td>
+    <td>561</td>
+    <td><a href="https://www.instagram.com/reel/DV__cmjgh6T/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>46</td>
+    <td>Mar 17</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Kevin Vallejos da caminhada até o cage até o momen...</td>
+    <td><strong>1,856</strong></td>
+    <td>53</td>
+    <td>75</td>
+    <td>16</td>
+    <td>1,458</td>
+    <td><a href="https://www.instagram.com/reel/DV_dMzjjzcL/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>47</td>
+    <td>Mar 17</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Manoel “Manumito” Sousa em ação contra Oki. Intens...</td>
+    <td><strong>4,574</strong></td>
+    <td>309</td>
+    <td>74</td>
+    <td>8</td>
+    <td>2,871</td>
+    <td><a href="https://www.instagram.com/reel/DV_BqYPDIfB/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>48</td>
+    <td>Mar 16</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Gillian Robertson em ação do início ao fim: entrad...</td>
+    <td><strong>634</strong></td>
+    <td>30</td>
+    <td>44</td>
+    <td>0</td>
+    <td>451</td>
+    <td><a href="https://www.instagram.com/reel/DV9oYTYCPTn/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>49</td>
+    <td>Mar 15</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Vitor Petrino vence Steven Asplund por decisão e s...</td>
+    <td><strong>846</strong></td>
+    <td>49</td>
+    <td>61</td>
+    <td>0</td>
+    <td>609</td>
+    <td><a href="https://www.instagram.com/reel/DV7RUDhgeGL/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>50</td>
+    <td>Mar 14</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Kevin “El Chino” Vallejos precisou de apenas um ro...</td>
+    <td><strong>453</strong></td>
+    <td>33</td>
+    <td>63</td>
+    <td>1</td>
+    <td>254</td>
+    <td><a href="https://www.instagram.com/reel/DV47whnAS99/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>51</td>
+    <td>Mar 14</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Confira a seleção dos melhores momentos da prepara...</td>
+    <td><strong>1,869</strong></td>
+    <td>57</td>
+    <td>57</td>
+    <td>3</td>
+    <td>1,497</td>
+    <td><a href="https://www.instagram.com/reel/DV4HEpykgQj/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>52</td>
+    <td>Mar 14</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Kevin Vallejos fala sobre a expectativa para uma d...</td>
+    <td><strong>829</strong></td>
+    <td>36</td>
+    <td>34</td>
+    <td>1</td>
+    <td>584</td>
+    <td><a href="https://www.instagram.com/reel/DV3n4Lujy9n/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>53</td>
+    <td>Mar 14</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Octógono aberto. Treino pesado com Quemuel Ottoni ...</td>
+    <td><strong>4,772</strong></td>
+    <td>140</td>
+    <td>61</td>
+    <td>39</td>
+    <td>5,661</td>
+    <td><a href="https://www.instagram.com/reel/DV3aMlqgeMC/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>54</td>
+    <td>Mar 13</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Christian Navidad fala sobre o irmão Kevin Navidad...</td>
+    <td><strong>402</strong></td>
+    <td>28</td>
+    <td>34</td>
+    <td>1</td>
+    <td>241</td>
+    <td><a href="https://www.instagram.com/reel/DV2A38ClDP8/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>55</td>
+    <td>Mar 13</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Vitor Petrino está se dedicando com algumas sessõe...</td>
+    <td><strong>2,912</strong></td>
+    <td>118</td>
+    <td>50</td>
+    <td>42</td>
+    <td>1,808</td>
+    <td><a href="https://www.instagram.com/reel/DV16ACfiQPP/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>56</td>
+    <td>Mar 13</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Tiwi acredita no nocaute!
+Segundo ele, os treinos ...</td>
+    <td><strong>6,506</strong></td>
+    <td>217</td>
+    <td>86</td>
+    <td>4</td>
+    <td>3,636</td>
+    <td><a href="https://www.instagram.com/reel/DV1Xq8rCbaC/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>57</td>
+    <td>Mar 13</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Kevin Vallejos fala sobre os sacrifícios para cheg...</td>
+    <td><strong>331</strong></td>
+    <td>27</td>
+    <td>31</td>
+    <td>1</td>
+    <td>232</td>
+    <td><a href="https://www.instagram.com/reel/DV08PbWiZjb/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>58</td>
+    <td>Mar 12</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Peace Grappler em frente ao octógono no UFC Apex. ...</td>
+    <td><strong>1,155</strong></td>
+    <td>41</td>
+    <td>31</td>
+    <td>4</td>
+    <td>791</td>
+    <td><a href="https://www.instagram.com/reel/DVzcEZKiuzJ/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>59</td>
+    <td>Mar 12</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Manoel “Manumito” Sousa relembra uma das lutas mai...</td>
+    <td><strong>4,533</strong></td>
+    <td>164</td>
+    <td>79</td>
+    <td>1</td>
+    <td>3,751</td>
+    <td><a href="https://www.instagram.com/reel/DVzHmo3jpNP/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>60</td>
+    <td>Mar 12</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Ryan Gandra fala sobre a amizade e a parceria de t...</td>
+    <td><strong>3,556</strong></td>
+    <td>184</td>
+    <td>75</td>
+    <td>5</td>
+    <td>2,049</td>
+    <td><a href="https://www.instagram.com/reel/DVyy5tFDjjZ/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>61</td>
+    <td>Mar 12</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Kevin Vallejos lembra que a única derrota da carre...</td>
+    <td><strong>784</strong></td>
+    <td>24</td>
+    <td>33</td>
+    <td>1</td>
+    <td>354</td>
+    <td><a href="https://www.instagram.com/reel/DVyeXhaCYaE/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>62</td>
+    <td>Mar 11</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">A luta ensina uma coisa acima de tudo: você aguent...</td>
+    <td><strong>5,417</strong></td>
+    <td>131</td>
+    <td>31</td>
+    <td>5</td>
+    <td>6,175</td>
+    <td><a href="https://www.instagram.com/reel/DVwpjA7AvAn/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>63</td>
+    <td>Mar 11</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Manoel “Manumito” Sousa e seu coach Fred falam sob...</td>
+    <td><strong>6,230</strong></td>
+    <td>262</td>
+    <td>107</td>
+    <td>19</td>
+    <td>4,588</td>
+    <td><a href="https://www.instagram.com/reel/DVvyp6AgTg5/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>64</td>
+    <td>Mar 10</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Kevin Vallejos admite que pensou em desistir muita...</td>
+    <td><strong>1,851</strong></td>
+    <td>96</td>
+    <td>38</td>
+    <td>19</td>
+    <td>931</td>
+    <td><a href="https://www.instagram.com/reel/DVuEwhGjfM5/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>65</td>
+    <td>Mar 10</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Christian Natividad comenta a ideia de Khabib de l...</td>
+    <td><strong>681</strong></td>
+    <td>49</td>
+    <td>36</td>
+    <td>0</td>
+    <td>470</td>
+    <td><a href="https://www.instagram.com/reel/DVtpTNAGeWK/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>66</td>
+    <td>Mar 10</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Treino entre Vitor Petrino e Ryan Gandra durante a...</td>
+    <td><strong>3,301</strong></td>
+    <td>117</td>
+    <td>153</td>
+    <td>5</td>
+    <td>1,969</td>
+    <td><a href="https://www.instagram.com/reel/DVtUswQDdjt/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>67</td>
+    <td>Mar 9</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Antes de encerrar a carreira, ele diz que há um ad...</td>
+    <td><strong>1,156</strong></td>
+    <td>29</td>
+    <td>39</td>
+    <td>2</td>
+    <td>912</td>
+    <td><a href="https://www.instagram.com/reel/DVrSNkSDVA_/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>68</td>
+    <td>Mar 9</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Arthur acredita que Manu chega para a melhor luta ...</td>
+    <td><strong>7,117</strong></td>
+    <td>202</td>
+    <td>82</td>
+    <td>7</td>
+    <td>4,775</td>
+    <td><a href="https://www.instagram.com/reel/DVq2wkbimYY/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>69</td>
+    <td>Mar 8</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Dor e sofrimento no camp de Caio Borralho para che...</td>
+    <td><strong>363</strong></td>
+    <td>35</td>
+    <td>35</td>
+    <td>0</td>
+    <td>164</td>
+    <td><a href="https://www.instagram.com/reel/DVo0RvKiNei/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>70</td>
+    <td>Mar 8</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Treino de intervalos de Caio Borralho durante o ca...</td>
+    <td><strong>522</strong></td>
+    <td>45</td>
+    <td>31</td>
+    <td>1</td>
+    <td>360</td>
+    <td><a href="https://www.instagram.com/reel/DVn9XKQFMLH/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>71</td>
+    <td>Mar 7</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Caio Borralho nos últimos treinos antes da luta co...</td>
+    <td><strong>773</strong></td>
+    <td>37</td>
+    <td>35</td>
+    <td>0</td>
+    <td>497</td>
+    <td><a href="https://www.instagram.com/reel/DVmsvnyk-Xa/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>72</td>
+    <td>Mar 7</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Thiago Moisés acredita em finalização na luta Char...</td>
+    <td><strong>739</strong></td>
+    <td>53</td>
+    <td>19</td>
+    <td>0</td>
+    <td>498</td>
+    <td><a href="https://www.instagram.com/reel/DVmu-qLjpvR/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>73</td>
+    <td>Mar 7</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Caio Borralho pronto para a batalha contra RDR em ...</td>
+    <td><strong>699</strong></td>
+    <td>42</td>
+    <td>22</td>
+    <td>0</td>
+    <td>460</td>
+    <td><a href="https://www.instagram.com/reel/DVmq7TYjkdi/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>74</td>
+    <td>Mar 7</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Thiago Moisés faz sua previsão para a luta de Caio...</td>
+    <td><strong>823</strong></td>
+    <td>61</td>
+    <td>21</td>
+    <td>0</td>
+    <td>546</td>
+    <td><a href="https://www.instagram.com/reel/DVmZxLnAAXo/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>75</td>
+    <td>Mar 7</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Elias Silvério fala o que vai acontecer na luta de...</td>
+    <td><strong>2,829</strong></td>
+    <td>123</td>
+    <td>37</td>
+    <td>5</td>
+    <td>1,728</td>
+    <td><a href="https://www.instagram.com/reel/DVmS5ljgfZu/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>76</td>
+    <td>Mar 7</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Ailin Perez dança no palco do UFC Mex. 
+Ailin Pere...</td>
+    <td><strong>5,600</strong></td>
+    <td>66</td>
+    <td>28</td>
+    <td>1</td>
+    <td>3,418</td>
+    <td><a href="https://www.instagram.com/reel/DVmLecJgUH-/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>77</td>
+    <td>Mar 7</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">O técnico de Caio Borralho explica o sistema energ...</td>
+    <td><strong>1,567</strong></td>
+    <td>89</td>
+    <td>14</td>
+    <td>2</td>
+    <td>878</td>
+    <td><a href="https://www.instagram.com/reel/DVl3cTyjdUj/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>78</td>
+    <td>Mar 7</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Icaro Brito prevê Caio Borralho por nocaute — Roun...</td>
+    <td><strong>3,965</strong></td>
+    <td>186</td>
+    <td>34</td>
+    <td>11</td>
+    <td>2,121</td>
+    <td><a href="https://www.instagram.com/reel/DVlpuhhD5wm/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>79</td>
+    <td>Mar 7</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Caio Borralho em treino — Parte 1.
+Caio Borralho t...</td>
+    <td><strong>465</strong></td>
+    <td>34</td>
+    <td>21</td>
+    <td>0</td>
+    <td>271</td>
+    <td><a href="https://www.instagram.com/reel/DVlpxHnldv4/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>80</td>
+    <td>Mar 7</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Caio Borralho indo para o treino, momentos finais ...</td>
+    <td><strong>665</strong></td>
+    <td>44</td>
+    <td>26</td>
+    <td>1</td>
+    <td>439</td>
+    <td><a href="https://www.instagram.com/reel/DVlps-kiBj1/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>81</td>
+    <td>Mar 7</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Vitor Costa (ex-UFC, Karate Combat), parceiro de t...</td>
+    <td><strong>1,630</strong></td>
+    <td>81</td>
+    <td>27</td>
+    <td>3</td>
+    <td>972</td>
+    <td><a href="https://www.instagram.com/reel/DVlfiCFgNcK/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>82</td>
+    <td>Mar 7</td>
+    <td><span class="badge badge-feed">FEED</span></td>
+    <td class="caption-cell">UFC 326 Card today March 7, 2026. We are following...</td>
+    <td><strong>1,093</strong></td>
+    <td>39</td>
+    <td>19</td>
+    <td>0</td>
+    <td>494</td>
+    <td><a href="https://www.instagram.com/p/DVla9v6kSL3/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>83</td>
+    <td>Mar 6</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Caio Borralho diz que está tudo sob controle: time...</td>
+    <td><strong>1,511</strong></td>
+    <td>58</td>
+    <td>52</td>
+    <td>3</td>
+    <td>1,076</td>
+    <td><a href="https://www.instagram.com/reel/DVj4bXMkc0-/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>84</td>
+    <td>Mar 6</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Peace Grappler com Caio Borralho se encontra com C...</td>
+    <td><strong>3,504</strong></td>
+    <td>139</td>
+    <td>65</td>
+    <td>9</td>
+    <td>2,155</td>
+    <td><a href="https://www.instagram.com/reel/DVj4zFLlFcR/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>85</td>
+    <td>Mar 6</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Ítalo “The Archer” Costa já deu sua previsão para ...</td>
+    <td><strong>2,732</strong></td>
+    <td>119</td>
+    <td>36</td>
+    <td>5</td>
+    <td>1,522</td>
+    <td><a href="https://www.instagram.com/reel/DVjc-EMCbh0/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>86</td>
+    <td>Mar 6</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Reginaldo &quot;THE BEAST&quot; Junior já deu sua previsão p...</td>
+    <td><strong>1,849</strong></td>
+    <td>122</td>
+    <td>32</td>
+    <td>3</td>
+    <td>1,026</td>
+    <td><a href="https://www.instagram.com/reel/DVjPTwdkwbt/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>87</td>
+    <td>Mar 6</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Caio Borralho nos ajustes finais de ground and pou...</td>
+    <td><strong>3,708</strong></td>
+    <td>105</td>
+    <td>101</td>
+    <td>74</td>
+    <td>2,398</td>
+    <td><a href="https://www.instagram.com/reel/DVi6qgyCuX4/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>88</td>
+    <td>Mar 5</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Imanov Rodrigues caminhando para o octógono no UFC...</td>
+    <td><strong>1,675</strong></td>
+    <td>41</td>
+    <td>21</td>
+    <td>2</td>
+    <td>1,148</td>
+    <td><a href="https://www.instagram.com/reel/DVhTnOGkwBT/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td>89</td>
+    <td>Mar 5</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Caio Borralho no ritmo do camp, intensidade alta e...</td>
+    <td><strong>4,449</strong></td>
+    <td>206</td>
+    <td>207</td>
+    <td>204</td>
+    <td>2,950</td>
+    <td><a href="https://www.instagram.com/reel/DVgeLF8jnPq/">View</a></td>
+  </tr>
+  
+</table>
+
+<!-- SECTION 5: REPOSTS & SHARES -->
+<h2>Top Shared/Reposted Content (Last 30 Days)</h2>
+
+<table>
+  <tr>
+    <th>#</th>
+    <th>Shares</th>
+    <th>Type</th>
+    <th>Caption</th>
+    <th>Date</th>
+    <th>Link</th>
+  </tr>
+  
+  <tr>
+    <td class="rank rank-1">1</td>
+    <td class="engagement-val">204</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Caio Borralho no ritmo do camp, intensidade alta e foco tota...</td>
+    <td>Mar 5</td>
+    <td><a href="https://www.instagram.com/reel/DVgeLF8jnPq/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td class="rank rank-2">2</td>
+    <td class="engagement-val">74</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Caio Borralho nos ajustes finais de ground and pound antes d...</td>
+    <td>Mar 6</td>
+    <td><a href="https://www.instagram.com/reel/DVi6qgyCuX4/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td class="rank rank-3">3</td>
+    <td class="engagement-val">42</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Vitor Petrino está se dedicando com algumas sessões intensas...</td>
+    <td>Mar 13</td>
+    <td><a href="https://www.instagram.com/reel/DV16ACfiQPP/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">4</td>
+    <td class="engagement-val">39</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Octógono aberto. Treino pesado com Quemuel Ottoni e Manoel “...</td>
+    <td>Mar 14</td>
+    <td><a href="https://www.instagram.com/reel/DV3aMlqgeMC/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">5</td>
+    <td class="engagement-val">27</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Vanessa Melo fala sobre Luana Carolina na semana da luta no ...</td>
+    <td>Mar 19</td>
+    <td><a href="https://www.instagram.com/reel/DWEZGHhEqJl/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">6</td>
+    <td class="engagement-val">19</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Kevin Vallejos admite que pensou em desistir muitas vezes. D...</td>
+    <td>Mar 10</td>
+    <td><a href="https://www.instagram.com/reel/DVuEwhGjfM5/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">7</td>
+    <td class="engagement-val">19</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Manoel “Manumito” Sousa e seu coach Fred falam sobre a expec...</td>
+    <td>Mar 11</td>
+    <td><a href="https://www.instagram.com/reel/DVvyp6AgTg5/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">8</td>
+    <td class="engagement-val">16</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Kevin Vallejos da caminhada até o cage até o momento da luta...</td>
+    <td>Mar 17</td>
+    <td><a href="https://www.instagram.com/reel/DV_dMzjjzcL/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">9</td>
+    <td class="engagement-val">14</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">O vídeo completo sai hoje às 7PM no YouTube da Peace Grapple...</td>
+    <td>Mar 22</td>
+    <td><a href="https://www.instagram.com/reel/DWMHZ4jjpGW/">View</a></td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">10</td>
+    <td class="engagement-val">14</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">O treinador já deixou claro: podem esperar o jogo forte da B...</td>
+    <td>Mar 27</td>
+    <td><a href="https://www.instagram.com/reel/DWZaz3fDHBA/">View</a></td>
+  </tr>
+  
+</table>
+
+
+<!-- SECTION 6: TOP LIKED POSTS -->
+<h2>Top 10 Most Liked Posts (Last 30 Days)</h2>
+<table>
+  <tr>
+    <th>#</th>
+    <th>Likes</th>
+    <th>Comments</th>
+    <th>Type</th>
+    <th>Caption</th>
+    <th>Date</th>
+  </tr>
+  
+  <tr>
+    <td class="rank rank-1">1</td>
+    <td class="engagement-val">309</td>
+    <td>74</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Manoel “Manumito” Sousa em ação contra Oki. Intensidade do c...</td>
+    <td>Mar 17</td>
+  </tr>
+  
+  <tr>
+    <td class="rank rank-2">2</td>
+    <td class="engagement-val">262</td>
+    <td>107</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Manoel “Manumito” Sousa e seu coach Fred falam sobre a expec...</td>
+    <td>Mar 11</td>
+  </tr>
+  
+  <tr>
+    <td class="rank rank-3">3</td>
+    <td class="engagement-val">238</td>
+    <td>76</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Felipe Franco no dia da pesagem para sua estreia no UFC. Cor...</td>
+    <td>Mar 20</td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">4</td>
+    <td class="engagement-val">217</td>
+    <td>86</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Tiwi acredita no nocaute!
+Segundo ele, os treinos do Manumit...</td>
+    <td>Mar 13</td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">5</td>
+    <td class="engagement-val">206</td>
+    <td>207</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Caio Borralho no ritmo do camp, intensidade alta e foco tota...</td>
+    <td>Mar 5</td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">6</td>
+    <td class="engagement-val">202</td>
+    <td>82</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Arthur acredita que Manu chega para a melhor luta da carreir...</td>
+    <td>Mar 9</td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">7</td>
+    <td class="engagement-val">195</td>
+    <td>85</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Vanessa Melo fala sobre Luana Carolina na semana da luta no ...</td>
+    <td>Mar 19</td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">8</td>
+    <td class="engagement-val">186</td>
+    <td>34</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Icaro Brito prevê Caio Borralho por nocaute — Round 3, na me...</td>
+    <td>Mar 7</td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">9</td>
+    <td class="engagement-val">184</td>
+    <td>75</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Ryan Gandra fala sobre a amizade e a parceria de treinos com...</td>
+    <td>Mar 12</td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">10</td>
+    <td class="engagement-val">164</td>
+    <td>79</td>
+    <td><span class="badge badge-reels">REELS</span></td>
+    <td class="caption-cell">Manoel “Manumito” Sousa relembra uma das lutas mais duras da...</td>
+    <td>Mar 12</td>
+  </tr>
+  
+</table>
+
+<!-- SECTION 7: TOP TAGGED/DISCUSSED POSTS (ALL TIME) -->
+<h2>Top 10 Most Discussed Posts (All Time)</h2>
+<div class="section-note">Posts with the most comments across all time</div>
+<table>
+  <tr>
+    <th>#</th>
+    <th>Comments</th>
+    <th>Likes</th>
+    <th>Engagement</th>
+    <th>Caption</th>
+    <th>Date</th>
+  </tr>
+  
+  <tr>
+    <td class="rank rank-1">1</td>
+    <td class="engagement-val">207</td>
+    <td>206</td>
+    <td>413</td>
+    <td class="caption-cell">Caio Borralho no ritmo do camp, intensidade alta e foco tota...</td>
+    <td>Mar 5</td>
+  </tr>
+  
+  <tr>
+    <td class="rank rank-2">2</td>
+    <td class="engagement-val">153</td>
+    <td>117</td>
+    <td>270</td>
+    <td class="caption-cell">Treino entre Vitor Petrino e Ryan Gandra durante a preparaçã...</td>
+    <td>Mar 10</td>
+  </tr>
+  
+  <tr>
+    <td class="rank rank-3">3</td>
+    <td class="engagement-val">107</td>
+    <td>262</td>
+    <td>369</td>
+    <td class="caption-cell">Manoel “Manumito” Sousa e seu coach Fred falam sobre a expec...</td>
+    <td>Mar 11</td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">4</td>
+    <td class="engagement-val">101</td>
+    <td>105</td>
+    <td>206</td>
+    <td class="caption-cell">Caio Borralho nos ajustes finais de ground and pound antes d...</td>
+    <td>Mar 6</td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">5</td>
+    <td class="engagement-val">100</td>
+    <td>43</td>
+    <td>143</td>
+    <td class="caption-cell">Movsar Evloev passou por um camp exaustivo, fez tudo certo… ...</td>
+    <td>Mar 20</td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">6</td>
+    <td class="engagement-val">86</td>
+    <td>217</td>
+    <td>303</td>
+    <td class="caption-cell">Tiwi acredita no nocaute!
+Segundo ele, os treinos do Manumit...</td>
+    <td>Mar 13</td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">7</td>
+    <td class="engagement-val">85</td>
+    <td>195</td>
+    <td>280</td>
+    <td class="caption-cell">Vanessa Melo fala sobre Luana Carolina na semana da luta no ...</td>
+    <td>Mar 19</td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">8</td>
+    <td class="engagement-val">82</td>
+    <td>202</td>
+    <td>284</td>
+    <td class="caption-cell">Arthur acredita que Manu chega para a melhor luta da carreir...</td>
+    <td>Mar 9</td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">9</td>
+    <td class="engagement-val">79</td>
+    <td>84</td>
+    <td>163</td>
+    <td class="caption-cell">Luan Lacerda relembra o discurso do Dedé que marcou sua traj...</td>
+    <td>Mar 19</td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">10</td>
+    <td class="engagement-val">79</td>
+    <td>164</td>
+    <td>243</td>
+    <td class="caption-cell">Manoel “Manumito” Sousa relembra uma das lutas mais duras da...</td>
+    <td>Mar 12</td>
+  </tr>
+  
+</table>
+
+<!-- SECTION 8: TOP ACTIVE COMMENTERS -->
+<h2>Top Active Commenters (Last 30 Days)</h2>
+<table>
+  <tr>
+    <th>#</th>
+    <th>Username</th>
+    <th>Comments</th>
+    <th>Replies</th>
+    <th>Total</th>
+    <th>Top Posts Commented On</th>
+  </tr>
+  
+  <tr>
+    <td class="rank rank-1">1</td>
+    <td><strong>@peacegrappler_mma</strong></td>
+    <td>57</td>
+    <td>918</td>
+    <td class="engagement-val">975</td>
+    <td class="caption-cell" style="max-width:200px;white-space:normal;font-size:11px;color:#8b8fa3;">
+      40x on "Movsar Evloev passou por um ca..."<br>40x on "Manoel “Manumito” Sousa e seu ..."<br>39x on "Treino entre Vitor Petrino e R..."
+    </td>
+  </tr>
+  
+  <tr>
+    <td class="rank rank-2">2</td>
+    <td><strong>@luis_pequeno_mma</strong></td>
+    <td>66</td>
+    <td>273</td>
+    <td class="engagement-val">339</td>
+    <td class="caption-cell" style="max-width:200px;white-space:normal;font-size:11px;color:#8b8fa3;">
+      13x on "Peace Grappler com Caio Borral..."<br>10x on "Gillian Robertson em ação do i..."<br>10x on "Manoel “Manumito” Sousa em açã..."
+    </td>
+  </tr>
+  
+  <tr>
+    <td class="rank rank-3">3</td>
+    <td><strong>@quemuel_ottoni</strong></td>
+    <td>55</td>
+    <td>257</td>
+    <td class="engagement-val">312</td>
+    <td class="caption-cell" style="max-width:200px;white-space:normal;font-size:11px;color:#8b8fa3;">
+      41x on "Caio Borralho nos ajustes fina..."<br>40x on "Caio Borralho no ritmo do camp..."<br>27x on "Manoel “Manumito” Sousa relemb..."
+    </td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">4</td>
+    <td><strong>@enzocardoso.bjj</strong></td>
+    <td>124</td>
+    <td>46</td>
+    <td class="engagement-val">170</td>
+    <td class="caption-cell" style="max-width:200px;white-space:normal;font-size:11px;color:#8b8fa3;">
+      10x on "Vanessa Melo fala sobre Luana ..."<br>7x on "Felipe Franco em preparação to..."<br>6x on "Felipe Franco vivendo cada seg..."
+    </td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">5</td>
+    <td><strong>@pedr00jj</strong></td>
+    <td>76</td>
+    <td>44</td>
+    <td class="engagement-val">120</td>
+    <td class="caption-cell" style="max-width:200px;white-space:normal;font-size:11px;color:#8b8fa3;">
+      37x on "Treino entre Vitor Petrino e R..."<br>4x on "Bia Basílio em preparação inte..."<br>4x on "Bia Mesquita caminhou com conf..."
+    </td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">6</td>
+    <td><strong>@god.motivacao</strong></td>
+    <td>114</td>
+    <td>2</td>
+    <td class="engagement-val">116</td>
+    <td class="caption-cell" style="max-width:200px;white-space:normal;font-size:11px;color:#8b8fa3;">
+      5x on "Vanessa Melo fala sobre Luana ..."<br>4x on "Precisão, tempo e violência co..."<br>4x on "Imanol Rodriguez mostrou raça ..."
+    </td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">7</td>
+    <td><strong>@pablofiorindi</strong></td>
+    <td>69</td>
+    <td>43</td>
+    <td class="engagement-val">112</td>
+    <td class="caption-cell" style="max-width:200px;white-space:normal;font-size:11px;color:#8b8fa3;">
+      11x on "Kevin “El Chino” Vallejos prec..."<br>5x on "Confira a seleção dos melhores..."<br>5x on "Peace Grappler com Caio Borral..."
+    </td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">8</td>
+    <td><strong>@rpsantos_mma</strong></td>
+    <td>98</td>
+    <td>14</td>
+    <td class="engagement-val">112</td>
+    <td class="caption-cell" style="max-width:200px;white-space:normal;font-size:11px;color:#8b8fa3;">
+      8x on "Felipe Franco no dia da pesage..."<br>6x on "Movsar Evloev passou por um ca..."<br>5x on "Yuri Moura já avisou essa luta..."
+    </td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">9</td>
+    <td><strong>@pg_grappling</strong></td>
+    <td>51</td>
+    <td>31</td>
+    <td class="engagement-val">82</td>
+    <td class="caption-cell" style="max-width:200px;white-space:normal;font-size:11px;color:#8b8fa3;">
+      14x on "Manoel “Manumito” Sousa e seu ..."<br>5x on "Bruno Lopes relembra a luta co..."<br>4x on "Kevin Vallejos admite que pens..."
+    </td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">10</td>
+    <td><strong>@ryangandraufc</strong></td>
+    <td>44</td>
+    <td>19</td>
+    <td class="engagement-val">63</td>
+    <td class="caption-cell" style="max-width:200px;white-space:normal;font-size:11px;color:#8b8fa3;">
+      7x on "Ryan Gandra fala sobre a amiza..."<br>5x on "Caio Borralho nos ajustes fina..."<br>3x on "Bruno Lopes fala sobre a difer..."
+    </td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">11</td>
+    <td><strong>@ronemayanmorais</strong></td>
+    <td>41</td>
+    <td>12</td>
+    <td class="engagement-val">53</td>
+    <td class="caption-cell" style="max-width:200px;white-space:normal;font-size:11px;color:#8b8fa3;">
+      4x on "Manoel “Manumito” Sousa em açã..."<br>3x on "Manoel “Manumito” Sousa relemb..."<br>2x on "Confira a seleção dos melhores..."
+    </td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">12</td>
+    <td><strong>@irmandadefightteam</strong></td>
+    <td>0</td>
+    <td>52</td>
+    <td class="engagement-val">52</td>
+    <td class="caption-cell" style="max-width:200px;white-space:normal;font-size:11px;color:#8b8fa3;">
+      2x on "Movsar Evloev passou por um ca..."<br>1x on "Kevin Vallejos da caminhada at..."<br>1x on "Marwan Rahiki da entrada até o..."
+    </td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">13</td>
+    <td><strong>@anaaj_camargo</strong></td>
+    <td>48</td>
+    <td>0</td>
+    <td class="engagement-val">48</td>
+    <td class="caption-cell" style="max-width:200px;white-space:normal;font-size:11px;color:#8b8fa3;">
+      4x on "O treinador já deixou claro: p..."<br>3x on "José Delano fala sobre sua ver..."<br>3x on "Quem olha o cartel 14-0 ou a r..."
+    </td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">14</td>
+    <td><strong>@erik_.mma</strong></td>
+    <td>0</td>
+    <td>45</td>
+    <td class="engagement-val">45</td>
+    <td class="caption-cell" style="max-width:200px;white-space:normal;font-size:11px;color:#8b8fa3;">
+      1x on "UFC 326 Card today March 7, 20..."<br>1x on "Vitor Costa (ex-UFC, Karate Co..."<br>1x on "Caio Borralho indo para o trei..."
+    </td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">15</td>
+    <td><strong>@bellsouza816</strong></td>
+    <td>0</td>
+    <td>44</td>
+    <td class="engagement-val">44</td>
+    <td class="caption-cell" style="max-width:200px;white-space:normal;font-size:11px;color:#8b8fa3;">
+      1x on "Dor e sofrimento no camp de Ca..."<br>1x on "Treino de intervalos de Caio B..."<br>1x on "Caio Borralho nos últimos trei..."
+    </td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">16</td>
+    <td><strong>@kaua_limamma</strong></td>
+    <td>0</td>
+    <td>43</td>
+    <td class="engagement-val">43</td>
+    <td class="caption-cell" style="max-width:200px;white-space:normal;font-size:11px;color:#8b8fa3;">
+      1x on "Caio Borralho no ritmo do camp..."<br>1x on "Imanov Rodrigues caminhando pa..."<br>1x on "Caio Borralho nos ajustes fina..."
+    </td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">17</td>
+    <td><strong>@rm.nicki</strong></td>
+    <td>39</td>
+    <td>0</td>
+    <td class="engagement-val">39</td>
+    <td class="caption-cell" style="max-width:200px;white-space:normal;font-size:11px;color:#8b8fa3;">
+      3x on "José Delano fala sobre sua ver..."<br>3x on "Precisão, tempo e violência co..."<br>3x on "Quem olha o cartel 14-0 ou a r..."
+    </td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">18</td>
+    <td><strong>@leandro._bjj</strong></td>
+    <td>32</td>
+    <td>3</td>
+    <td class="engagement-val">35</td>
+    <td class="caption-cell" style="max-width:200px;white-space:normal;font-size:11px;color:#8b8fa3;">
+      4x on "O vídeo completo sai hoje às 7..."<br>4x on "Kevin Vallejos da caminhada at..."<br>3x on "Felipe Franco em preparação to..."
+    </td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">19</td>
+    <td><strong>@combintel</strong></td>
+    <td>28</td>
+    <td>4</td>
+    <td class="engagement-val">32</td>
+    <td class="caption-cell" style="max-width:200px;white-space:normal;font-size:11px;color:#8b8fa3;">
+      5x on "Luan Lacerda relembra o discur..."<br>2x on "Vitor Petrino vence Steven Asp..."<br>1x on "Pra Melissa Gatto, o maior sac..."
+    </td>
+  </tr>
+  
+  <tr>
+    <td class="rank ">20</td>
+    <td><strong>@mmmarc20</strong></td>
+    <td>24</td>
+    <td>8</td>
+    <td class="engagement-val">32</td>
+    <td class="caption-cell" style="max-width:200px;white-space:normal;font-size:11px;color:#8b8fa3;">
+      3x on "Bruno Lopes relembra a luta co..."<br>3x on "Vinícius Pires diz que dentro ..."<br>3x on "Movsar Evloev passou por um ca..."
+    </td>
+  </tr>
+  
+</table>
+
+<!-- SECTION 9: COMMENTERS BREAKDOWN BY LAST 5 POSTS -->
+<h2>Commenter Breakdown: Last 5 Posts</h2>
+<div class="section-note">Who commented on each of the 5 most recent posts</div>
+
+<div class="commenter-block">
+  <div class="cb-header">Mar 31 &mdash; José Delano fala sobre sua versatilidade no MMA. Estuda muito o jogo, ...</div>
+  <div class="cb-sub">3 unique commenters</div>
+  <div class="cb-posts">
+    <span>@peacegrappler_mma</span> (7) &bull; <span>@rm.nicki</span> (3) &bull; <span>@anaaj_camargo</span> (3)
+    
+  </div>
+</div>
+
+<div class="commenter-block">
+  <div class="cb-header">Mar 31 &mdash; Precisão, tempo e violência controlada.
+Marcos Tailandes afina cada de...</div>
+  <div class="cb-sub">10 unique commenters</div>
+  <div class="cb-posts">
+    <span>@peacegrappler_mma</span> (17) &bull; <span>@god.motivacao</span> (4) &bull; <span>@rm.nicki</span> (3) &bull; <span>@pg_grappling</span> (2) &bull; <span>@marcos_tailandess</span> (2) &bull; <span>@anaaj_camargo</span> (2) &bull; <span>@quemuel_ottoni</span> (1) &bull; <span>@pablofiorindi</span> (1)
+    <br><span style="color:#8b8fa3;">... and 2 more</span>
+  </div>
+</div>
+
+<div class="commenter-block">
+  <div class="cb-header">Mar 31 &mdash; Quem olha o cartel 14-0 ou a rede social acha que é só vitória, só coi...</div>
+  <div class="cb-sub">9 unique commenters</div>
+  <div class="cb-posts">
+    <span>@peacegrappler_mma</span> (15) &bull; <span>@rm.nicki</span> (3) &bull; <span>@pg_grappling</span> (3) &bull; <span>@anaaj_camargo</span> (3) &bull; <span>@luis_pequeno_mma</span> (2) &bull; <span>@ryangandraufc</span> (1) &bull; <span>@quemuel_ottoni</span> (1) &bull; <span>@cleyton_jesuss</span> (1)
+    <br><span style="color:#8b8fa3;">... and 1 more</span>
+  </div>
+</div>
+
+<div class="commenter-block">
+  <div class="cb-header">Mar 30 &mdash; O card do UFC Vegas vem carregado de nomes fortes e vários brasileiros...</div>
+  <div class="cb-sub">1 unique commenters</div>
+  <div class="cb-posts">
+    <span>@peacegrappler_mma</span> (1)
+    
+  </div>
+</div>
+
+<div class="commenter-block">
+  <div class="cb-header">Mar 30 &mdash; José Delano fala sobre sua paixão pelo esporte — e deixa claro: enquan...</div>
+  <div class="cb-sub">7 unique commenters</div>
+  <div class="cb-posts">
+    <span>@peacegrappler_mma</span> (10) &bull; <span>@anaaj_camargo</span> (3) &bull; <span>@ryangandraufc</span> (2) &bull; <span>@rm.nicki</span> (2) &bull; <span>@quemuel_ottoni</span> (1) &bull; <span>@cleyton_jesuss</span> (1) &bull; <span>@_beegomes_</span> (1)
+    
+  </div>
+</div>
+
+
+<!-- SECTION 10: UFC HYPE & FIGHTER NEWS -->
+<h2>UFC Hype & Fighter News</h2>
+<div class="section-note">Analysis based on recent post captions and engagement patterns</div>
+
+  <div class="post-card">
+    <h3 style="margin-top:0">Algorithm Status</h3>
+    <div style="font-size:18px;font-weight:700;color:#f87171;margin:8px 0">LOW - Recent posts underperforming</div>
+    <div style="font-size:12px;color:#8b8fa3">
+      Recent 5 posts: 722 views &bull;
+      Previous 5 posts: 1,043 views
+    </div>
+  </div>
+
+  
+  <h3>Top UFC/Fight Content (Last 30 Days)</h3>
+  <div class="section-note">Posts mentioning fights with highest engagement</div>
+  
+  <div class="post-card">
+    <div class="post-header">
+      <span><span class="rank rank-1">#1</span></span>
+      <span style="font-size:12px;color:#8b8fa3">Mar 5</span>
+    </div>
+    <div class="post-caption">Caio Borralho no ritmo do camp, intensidade alta e foco total enquanto o UFC Fight Night se aproxima. Trabalho diário, d...</div>
+    <div class="post-metrics">
+      <div class="pm"><div class="pm-val">413</div><div class="pm-label">Engagement</div></div>
+      <div class="pm"><div class="pm-val">4,449</div><div class="pm-label">Views</div></div>
+      <div class="pm"><div class="pm-val">204</div><div class="pm-label">Shares</div></div>
+    </div>
+  </div>
+  
+  <div class="post-card">
+    <div class="post-header">
+      <span><span class="rank rank-2">#2</span></span>
+      <span style="font-size:12px;color:#8b8fa3">Mar 17</span>
+    </div>
+    <div class="post-caption">Manoel “Manumito” Sousa em ação contra Oki. Intensidade do começo ao fim, trocação franca e mais um capítulo importante ...</div>
+    <div class="post-metrics">
+      <div class="pm"><div class="pm-val">383</div><div class="pm-label">Engagement</div></div>
+      <div class="pm"><div class="pm-val">4,574</div><div class="pm-label">Views</div></div>
+      <div class="pm"><div class="pm-val">8</div><div class="pm-label">Shares</div></div>
+    </div>
+  </div>
+  
+  <div class="post-card">
+    <div class="post-header">
+      <span><span class="rank rank-3">#3</span></span>
+      <span style="font-size:12px;color:#8b8fa3">Mar 11</span>
+    </div>
+    <div class="post-caption">Manoel “Manumito” Sousa e seu coach Fred falam sobre a expectativa para a estreia no UFC. Confiança alta, foco total e a...</div>
+    <div class="post-metrics">
+      <div class="pm"><div class="pm-val">369</div><div class="pm-label">Engagement</div></div>
+      <div class="pm"><div class="pm-val">6,230</div><div class="pm-label">Views</div></div>
+      <div class="pm"><div class="pm-val">19</div><div class="pm-label">Shares</div></div>
+    </div>
+  </div>
+  
+  <div class="post-card">
+    <div class="post-header">
+      <span><span class="rank ">#4</span></span>
+      <span style="font-size:12px;color:#8b8fa3">Mar 20</span>
+    </div>
+    <div class="post-caption">Felipe Franco no dia da pesagem para sua estreia no UFC. Corte de peso feito, foco total e tudo alinhado para dar o próx...</div>
+    <div class="post-metrics">
+      <div class="pm"><div class="pm-val">314</div><div class="pm-label">Engagement</div></div>
+      <div class="pm"><div class="pm-val">3,764</div><div class="pm-label">Views</div></div>
+      <div class="pm"><div class="pm-val">1</div><div class="pm-label">Shares</div></div>
+    </div>
+  </div>
+  
+  <div class="post-card">
+    <div class="post-header">
+      <span><span class="rank ">#5</span></span>
+      <span style="font-size:12px;color:#8b8fa3">Mar 13</span>
+    </div>
+    <div class="post-caption">Tiwi acredita no nocaute!
+Segundo ele, os treinos do Manumito estão em um nível altíssimo e o lutador vem mostrando muit...</div>
+    <div class="post-metrics">
+      <div class="pm"><div class="pm-val">303</div><div class="pm-label">Engagement</div></div>
+      <div class="pm"><div class="pm-val">6,506</div><div class="pm-label">Views</div></div>
+      <div class="pm"><div class="pm-val">4</div><div class="pm-label">Shares</div></div>
+    </div>
+  </div>
+  
+  
+
+  
+  <h3>Athletes with Highest Interest</h3>
+  <div class="section-note">Athletes mentioned in posts, ranked by engagement generated</div>
+  <table>
+    <tr>
+      <th>#</th>
+      <th>Athlete</th>
+      <th>Mentions</th>
+      <th>Total Engagement</th>
+    </tr>
+    
+    <tr>
+      <td class="rank rank-1">1</td>
+      <td><strong>Caio Borralho</strong></td>
+      <td>28</td>
+      <td class="engagement-val">3,402</td>
+    </tr>
+    
+    <tr>
+      <td class="rank rank-2">2</td>
+      <td><strong>Vitor Petrino</strong></td>
+      <td>6</td>
+      <td class="engagement-val">1,031</td>
+    </tr>
+    
+    <tr>
+      <td class="rank rank-3">3</td>
+      <td><strong>Felipe Franco</strong></td>
+      <td>4</td>
+      <td class="engagement-val">817</td>
+    </tr>
+    
+    <tr>
+      <td class="rank ">4</td>
+      <td><strong>Peace Grappler</strong></td>
+      <td>7</td>
+      <td class="engagement-val">810</td>
+    </tr>
+    
+    <tr>
+      <td class="rank ">5</td>
+      <td><strong>Fight Night</strong></td>
+      <td>2</td>
+      <td class="engagement-val">619</td>
+    </tr>
+    
+    <tr>
+      <td class="rank ">6</td>
+      <td><strong>Ryan Gandra</strong></td>
+      <td>4</td>
+      <td class="engagement-val">591</td>
+    </tr>
+    
+    <tr>
+      <td class="rank ">7</td>
+      <td><strong>Vanessa Melo</strong></td>
+      <td>2</td>
+      <td class="engagement-val">560</td>
+    </tr>
+    
+    <tr>
+      <td class="rank ">8</td>
+      <td><strong>Kevin Vallejos</strong></td>
+      <td>5</td>
+      <td class="engagement-val">447</td>
+    </tr>
+    
+    <tr>
+      <td class="rank ">9</td>
+      <td><strong>Icaro Brito</strong></td>
+      <td>2</td>
+      <td class="engagement-val">440</td>
+    </tr>
+    
+    <tr>
+      <td class="rank ">10</td>
+      <td><strong>Quemuel Ottoni</strong></td>
+      <td>2</td>
+      <td class="engagement-val">402</td>
+    </tr>
+    
+  </table>
+  
+  
+
+<!-- FOOTER -->
+<div class="footer">
+  <p>Report generated by PeaceGrappler Automation for @peacegrappler_mma</p>
+  <p>Data from Instagram Meta Graph API &bull; Tuesday, March 31, 2026 at 9:00 PM</p>
+  <p>
+    <a href="https://paxlucta.github.io/peace-grappler/report.html">Full Interactive Report</a> &bull;
+    <a href="https://paxlucta.github.io/peace-grappler/rankings.html">Community Rankings</a>
+  </p>
+</div>
+
+</div>
+</body>
+</html>
