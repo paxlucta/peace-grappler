@@ -57,6 +57,11 @@
   .page-panel { display: none; }
   .page-panel.active { display: block; }
 
+  .site-nav { display: flex; align-items: center; gap: 16px; padding: 12px 0; margin-bottom: 12px; border-bottom: 1px solid var(--border); }
+  .site-nav a { color: var(--accent2); text-decoration: none; font-size: 13px; font-weight: 600; }
+  .site-nav a:hover { opacity: 0.8; }
+  .site-nav-label { color: var(--muted); font-size: 13px; }
+
   .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
   .stat-card {
     background: var(--card); border: 1px solid var(--border); border-radius: 12px;
@@ -127,8 +132,12 @@
 <body>
 
 <div class="page-header">
+  <div class="site-nav">
+    <a href="index.html">&#8592; All Reports</a>
+    <span class="site-nav-label">Peace Grappler MMA</span>
+  </div>
   <h1>@peacegrappler_mma</h1>
-  <div class="subtitle">Peace Grappler | MMA Stories &mdash; Report generated Apr 9, 2026, 8:55 PM</div>
+  <div class="subtitle">Peace Grappler | MMA Stories &mdash; Report generated Apr 9, 2026, 9:12 PM</div>
   <div class="nav-tabs">
     <div class="nav-tab active" onclick="switchPage('overview')">Overview</div>
     <div class="nav-tab" onclick="switchPage('posts')">Post Performance</div>

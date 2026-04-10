@@ -9,6 +9,10 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); padding: 24px; }
   h1 { font-size: 28px; margin-bottom: 24px; }
+  .site-nav { display: flex; align-items: center; gap: 16px; padding: 0 0 12px; margin-bottom: 16px; border-bottom: 1px solid var(--border); }
+  .site-nav a { color: var(--accent2); text-decoration: none; font-size: 13px; font-weight: 600; }
+  .site-nav a:hover { opacity: 0.8; }
+  .site-nav-label { color: var(--muted); font-size: 13px; }
   .tabs { display: flex; gap: 0; margin-bottom: 0; }
   .tab { padding: 10px 20px; cursor: pointer; border: 1px solid var(--border); background: var(--bg); color: var(--muted); font-size: 14px; font-weight: 600; border-bottom: none; border-radius: 8px 8px 0 0; margin-right: -1px; user-select: none; }
   .tab.active { background: var(--card); color: var(--accent2); }
@@ -22,8 +26,12 @@
 </style>
 </head>
 <body>
+  <div class="site-nav">
+    <a href="index.html">&#8592; All Reports</a>
+    <span class="site-nav-label">Peace Grappler MMA</span>
+  </div>
   <h1>Community Engagement Rankings</h1>
-  <div style="color: var(--muted); font-size: 14px; margin-bottom: 16px;">Report generated Apr 9, 2026, 8:55 PM</div>
+  <div style="color: var(--muted); font-size: 14px; margin-bottom: 16px;">Report generated Apr 9, 2026, 9:12 PM</div>
   <div class="tabs">
     <div class="tab active" onclick="switchTab('alltime')">All Time</div>
     <div class="tab" onclick="switchTab('last30')">Last 30 Days</div>
