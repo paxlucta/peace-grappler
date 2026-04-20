@@ -1,0 +1,804 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><title>Video Analysis 2026-04-20</title>
+<style>
+:root{--bg:#0f1117;--card:#1a1d27;--border:#2a2d3a;--text:#e1e4ed;--muted:#8b8fa3;
+  --accent:#6366f1;--accent2:#818cf8;--green:#34d399;--yellow:#f59e0b;--red:#f87171;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  background:var(--bg);color:var(--text);line-height:1.6;padding:24px;}
+.wrap{max-width:900px;margin:0 auto;}
+h1{font-size:28px;color:var(--accent2);margin-bottom:4px;}
+.sub{color:var(--muted);font-size:13px;margin-bottom:32px;}
+h2{font-size:18px;color:var(--accent2);margin:32px 0 14px;border-bottom:1px solid var(--border);padding-bottom:8px;}
+h3{font-size:15px;color:var(--text);margin-bottom:8px;}
+.kpi-row{display:table;width:100%;border-collapse:separate;border-spacing:12px;}
+.kpi{display:table-cell;background:var(--card);border:1px solid var(--border);
+  border-radius:10px;padding:16px 20px;text-align:center;width:16%;}
+.kpi .val{font-size:24px;font-weight:700;color:var(--accent2);}
+.kpi .lbl{font-size:11px;color:var(--muted);margin-top:2px;}
+table{width:100%;border-collapse:collapse;font-size:13px;}
+th{background:var(--card);color:var(--muted);font-weight:600;padding:10px 12px;
+   text-align:left;border-bottom:2px solid var(--border);}
+td{padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:top;}
+tr:last-child td{border-bottom:none;}
+.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:700;}
+.top{background:#064e3b;color:var(--green);}
+.avg{background:#451a03;color:var(--yellow);}
+.low{background:#450a0a;color:var(--red);}
+.score{font-size:18px;font-weight:700;}
+.bar-wrap{background:#1e2130;border-radius:4px;height:6px;margin-top:4px;}
+.bar{height:6px;border-radius:4px;}
+.cap{color:var(--muted);font-size:12px;max-width:280px;line-height:1.4;}
+.cap a{color:var(--accent2);text-decoration:none;}
+.insight-list{list-style:none;}
+.insight-list li{padding:10px 14px;border-left:3px solid var(--accent);
+  background:var(--card);margin-bottom:8px;border-radius:0 8px 8px 0;font-size:14px;}
+.insight-list.avoid li{border-left-color:var(--red);}
+.insight-list.do li{border-left-color:var(--green);}
+.pct{font-weight:700;color:var(--accent2);}
+.footer{margin-top:48px;text-align:center;color:var(--muted);font-size:11px;
+  border-top:1px solid var(--border);padding-top:20px;}
+.no-new{background:var(--card);border:1px solid var(--border);border-radius:10px;
+  padding:32px;text-align:center;color:var(--muted);}
+.reel-card{background:var(--card);border:1px solid var(--border);border-radius:12px;
+  padding:20px;margin-bottom:20px;}
+.reel-header{display:flex;align-items:flex-start;gap:16px;margin-bottom:14px;}
+.reel-score-block{text-align:center;min-width:60px;}
+.reel-meta{flex:1;}
+.reel-caption{font-size:13px;color:var(--muted);margin-top:4px;line-height:1.5;}
+.reel-stats{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px;font-size:13px;}
+.stat{color:var(--muted);}
+.stat b{color:var(--text);}
+.ai-section{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;}
+.ai-col{background:#0f1117;border-radius:8px;padding:12px 14px;}
+.ai-col h4{font-size:12px;font-weight:700;letter-spacing:.05em;margin-bottom:8px;}
+.ai-col.good h4{color:#34d399;}
+.ai-col.bad  h4{color:#f87171;}
+.ai-col ul{list-style:none;padding:0;}
+.ai-col li{font-size:12px;line-height:1.5;padding:3px 0;border-bottom:1px solid var(--border);}
+.ai-col li:last-child{border-bottom:none;}
+.ai-col.good li::before{content:"✓ ";color:#34d399;font-weight:700;}
+.ai-col.bad  li::before{content:"✗ ";color:#f87171;font-weight:700;}
+.top-tip{font-size:12px;color:#f59e0b;margin-top:10px;padding:8px 12px;
+  background:#1c1500;border-radius:6px;border-left:3px solid #f59e0b;}
+.top-tip b{color:#fbbf24;}
+</style>
+</head><body>
+<div class="wrap">
+<h1>Instagram Video Analysis</h1>
+<div class="sub">Reels from the last 7 days with metrics &mdash; Generated Apr 20, 2026 11:00 PM</div>
+
+<h2>New Content Summary (20 reels)</h2>
+<table class="kpi-row">
+<tr>
+<td class="kpi"><div class="val">870 <span style="color:#f87171;font-size:11px">▼24%</span></div><div class="lbl">Avg Views</div></td>
+<td class="kpi"><div class="val">501 <span style="color:#f87171;font-size:11px">▼34%</span></div><div class="lbl">Avg Reach</div></td>
+<td class="kpi"><div class="val">5</div><div class="lbl">Avg Shares</div></td>
+<td class="kpi"><div class="val">2</div><div class="lbl">Avg Saves</div></td>
+<td class="kpi"><div class="val">7.1s <span style="color:#f87171;font-size:11px">▼20%</span></div><div class="lbl">Avg Watch</div></td>
+<td class="kpi"><div class="val">18.32%</div><div class="lbl">Eng Rate</div></td>
+</tr>
+</table>
+<h2>Per-Reel Breakdown (20 reels)</h2>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#34d399">98</span><br>
+      <span class="badge top">🔥 Top Performer</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DXNU-2LgvFu/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        Os vencedores do nosso patrocínio já estão definidos. Isso aqui é simples, quem engaja mais recebe mais. A Peace Grapple…
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-04-16</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>3.1k</b><div class="bar-wrap"><div class="bar" style="width:100%;background:#34d399"></div></div></span>
+    <span class="stat">📡 Reach <b>576</b><div class="bar-wrap"><div class="bar" style="width:38%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:#34d399">🔁 Shares <b>17</b></span>
+    <span class="stat">🔖 Saves <b>2</b></span>
+    <span class="stat">❤️ Likes <b>76</b></span>
+    <span class="stat">💬 Comments <b>110</b></span>
+    <span class="stat" style="color:#34d399">⏱ Watch <b>17.3s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">35.59%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>Analysis error: Expecting value: line 1 column 1 (char 0)</li></ul>
+    </div>
+  </div>
+  
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#34d399">90</span><br>
+      <span class="badge top">🔥 Top Performer</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DXJ6jUwjEtd/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        Isaque Bahiense e Erick Barbosa foram diretos: o foco é grappling, é controle, é levar pro chão e buscar o fim. A aposta…
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-04-15</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>2.7k</b><div class="bar-wrap"><div class="bar" style="width:100%;background:#34d399"></div></div></span>
+    <span class="stat">📡 Reach <b>1.6k</b><div class="bar-wrap"><div class="bar" style="width:100%;background:#34d399"></div></div></span>
+    <span class="stat" style="color:#34d399">🔁 Shares <b>7</b></span>
+    <span class="stat">🔖 Saves <b>4</b></span>
+    <span class="stat">❤️ Likes <b>105</b></span>
+    <span class="stat">💬 Comments <b>158</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>7.7s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">16.81%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>Analysis error: Expecting value: line 1 column 1 (char 0)</li></ul>
+    </div>
+  </div>
+  
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#34d399">88</span><br>
+      <span class="badge top">🔥 Top Performer</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DXHH6ZED_39/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        Um pouco do aquecimento e da luta de Felipe Bunes em mais um passo na carreira. Ritmo, foco e execução dentro do cage — …
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-04-14</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>2.8k</b><div class="bar-wrap"><div class="bar" style="width:100%;background:#34d399"></div></div></span>
+    <span class="stat">📡 Reach <b>1.5k</b><div class="bar-wrap"><div class="bar" style="width:99%;background:#34d399"></div></div></span>
+    <span class="stat" style="color:#34d399">🔁 Shares <b>6</b></span>
+    <span class="stat">🔖 Saves <b>2</b></span>
+    <span class="stat">❤️ Likes <b>188</b></span>
+    <span class="stat">💬 Comments <b>56</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>8.4s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">16.72%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>Analysis error: Expecting value: line 1 column 1 (char 0)</li></ul>
+    </div>
+  </div>
+  
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f59e0b">57</span><br>
+      <span class="badge avg">📊 Average</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DXJss_Sgeuc/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        Direto do México, imagens exclusivas do camp de Tane Trembley, preparação intensa para a luta principal do LFA no dia 17…
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-04-15</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>760</b><div class="bar-wrap"><div class="bar" style="width:33%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>473</b><div class="bar-wrap"><div class="bar" style="width:31%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:#34d399">🔁 Shares <b>18</b></span>
+    <span class="stat">🔖 Saves <b>0</b></span>
+    <span class="stat">❤️ Likes <b>49</b></span>
+    <span class="stat">💬 Comments <b>52</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>6.5s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">25.16%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>Analysis error: Expecting value: line 1 column 1 (char 0)</li></ul>
+    </div>
+  </div>
+  
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f59e0b">52</span><br>
+      <span class="badge avg">📊 Average</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DXU9qTiiLnC/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        Vai um repost do UFC Mexico? Douglas D’Silva caminhando para o octógono. Luzes acesas, pressão lá em cima e aquele silên…
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-04-19</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>745</b><div class="bar-wrap"><div class="bar" style="width:32%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>457</b><div class="bar-wrap"><div class="bar" style="width:30%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>1</b></span>
+    <span class="stat">🔖 Saves <b>2</b></span>
+    <span class="stat">❤️ Likes <b>44</b></span>
+    <span class="stat">💬 Comments <b>13</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>6.1s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">13.13%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>Analysis error: Expecting value: line 1 column 1 (char 0)</li></ul>
+    </div>
+  </div>
+  
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f59e0b">52</span><br>
+      <span class="badge avg">📊 Average</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DXMfQMvDX_Z/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        Fica ligado 👀🔥 na próxima quinta (23/04) sai o vlog completo no YouTube da Peace Grappler com os bastidores da preparaçã…
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-04-16</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>468</b><div class="bar-wrap"><div class="bar" style="width:20%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>330</b><div class="bar-wrap"><div class="bar" style="width:21%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>1</b></span>
+    <span class="stat">🔖 Saves <b>2</b></span>
+    <span class="stat">❤️ Likes <b>27</b></span>
+    <span class="stat">💬 Comments <b>38</b></span>
+    <span class="stat" style="color:#34d399">⏱ Watch <b>10.0s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">20.61%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>Analysis error: Expecting value: line 1 column 1 (char 0)</li></ul>
+    </div>
+  </div>
+  
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f59e0b">51</span><br>
+      <span class="badge avg">📊 Average</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DXRo3X6kwo8/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        Gilbert Burns, Karine Silva, Allan Nascimento, Marcio Barbosa e Thiago Moisés representando o Brasil com intensidade, fo…
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-04-18</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>503</b><div class="bar-wrap"><div class="bar" style="width:21%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>377</b><div class="bar-wrap"><div class="bar" style="width:24%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>2</b></span>
+    <span class="stat">🔖 Saves <b>3</b></span>
+    <span class="stat">❤️ Likes <b>34</b></span>
+    <span class="stat">💬 Comments <b>62</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>4.5s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">26.79%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>Analysis error: Expecting value: line 1 column 1 (char 0)</li></ul>
+    </div>
+  </div>
+  
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f59e0b">49</span><br>
+      <span class="badge avg">📊 Average</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DXHxGorjYrw/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        Aos 35 anos, muitos acreditam que o melhor já passou. No UFC, a idade pode limitar oportunidades. Mas Kaynan “Bahia” Kru…
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-04-14</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>328</b><div class="bar-wrap"><div class="bar" style="width:14%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>164</b><div class="bar-wrap"><div class="bar" style="width:10%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>0</b></span>
+    <span class="stat">🔖 Saves <b>2</b></span>
+    <span class="stat">❤️ Likes <b>23</b></span>
+    <span class="stat">💬 Comments <b>25</b></span>
+    <span class="stat" style="color:#34d399">⏱ Watch <b>11.8s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">30.49%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>Analysis error: Expecting value: line 1 column 1 (char 0)</li></ul>
+    </div>
+  </div>
+  
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f59e0b">47</span><br>
+      <span class="badge avg">📊 Average</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DXM6vrmidFE/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        Ronaldo Rodríguez, o “Lazy Boy”, veio de uma realidade difícil no México e entrou no MMA como sobrevivência, não como so…
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-04-16</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>520</b><div class="bar-wrap"><div class="bar" style="width:22%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>275</b><div class="bar-wrap"><div class="bar" style="width:18%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>1</b></span>
+    <span class="stat">🔖 Saves <b>1</b></span>
+    <span class="stat">❤️ Likes <b>29</b></span>
+    <span class="stat">💬 Comments <b>27</b></span>
+    <span class="stat" style="color:#34d399">⏱ Watch <b>16.1s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">21.09%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>Analysis error: Expecting value: line 1 column 1 (char 0)</li></ul>
+    </div>
+  </div>
+  
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f59e0b">42</span><br>
+      <span class="badge avg">📊 Average</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DXUcf-btxMq/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        Knockouts and Submissions @ UFC 273 Burns x Malott @ Winnipeg, Canada.  #ufc #mma #peacegrappler #ufcfightnight
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-04-19</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>1.0k</b><div class="bar-wrap"><div class="bar" style="width:44%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>829</b><div class="bar-wrap"><div class="bar" style="width:54%;background:#34d399"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>2</b></span>
+    <span class="stat">🔖 Saves <b>1</b></span>
+    <span class="stat">❤️ Likes <b>12</b></span>
+    <span class="stat">💬 Comments <b>36</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>2.1s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">6.15%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>Analysis error: Expecting value: line 1 column 1 (char 0)</li></ul>
+    </div>
+  </div>
+  
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f59e0b">41</span><br>
+      <span class="badge avg">📊 Average</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DXMRhdjkUMd/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        Luan Lacerda relembra sua saída de Macapá e como uma oportunidade abriu caminho dentro do MMA. O que parecia distante co…
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-04-16</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>418</b><div class="bar-wrap"><div class="bar" style="width:18%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>309</b><div class="bar-wrap"><div class="bar" style="width:20%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>1</b></span>
+    <span class="stat">🔖 Saves <b>1</b></span>
+    <span class="stat">❤️ Likes <b>19</b></span>
+    <span class="stat">💬 Comments <b>42</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>8.7s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">20.39%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>Analysis error: Expecting value: line 1 column 1 (char 0)</li></ul>
+    </div>
+  </div>
+  
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f87171">39</span><br>
+      <span class="badge low">⚠️ Needs Work</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DXPED-DlNiu/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        Márcio carrega uma imagem que o coach colocou na mente dele anos atrás: dentro do cage é você ou o outro cara. Antes de …
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-04-17</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>1.1k</b><div class="bar-wrap"><div class="bar" style="width:46%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>867</b><div class="bar-wrap"><div class="bar" style="width:57%;background:#34d399"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>1</b></span>
+    <span class="stat">🔖 Saves <b>1</b></span>
+    <span class="stat">❤️ Likes <b>20</b></span>
+    <span class="stat">💬 Comments <b>28</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>2.7s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">5.77%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>Analysis error: Expecting value: line 1 column 1 (char 0)</li></ul>
+    </div>
+  </div>
+  
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f87171">37</span><br>
+      <span class="badge low">⚠️ Needs Work</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DXTOj7JjtN-/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        Marcio Ticoto knockout of the night #mma #peacegrappler #fightnight #ufc
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-04-19</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>548</b><div class="bar-wrap"><div class="bar" style="width:23%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>384</b><div class="bar-wrap"><div class="bar" style="width:25%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:#34d399">🔁 Shares <b>6</b></span>
+    <span class="stat">🔖 Saves <b>0</b></span>
+    <span class="stat">❤️ Likes <b>13</b></span>
+    <span class="stat">💬 Comments <b>3</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>5.9s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">5.73%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>Analysis error: Expecting value: line 1 column 1 (char 0)</li></ul>
+    </div>
+  </div>
+  
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f87171">37</span><br>
+      <span class="badge low">⚠️ Needs Work</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DXKV5NnjL1g/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        Thiago Moisés intensifica o ritmo no camp, ajustando cada detalhe para o próximo desafio no Ultimate Fighting Championsh…
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-04-15</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>403</b><div class="bar-wrap"><div class="bar" style="width:17%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>287</b><div class="bar-wrap"><div class="bar" style="width:18%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>0</b></span>
+    <span class="stat">🔖 Saves <b>1</b></span>
+    <span class="stat">❤️ Likes <b>25</b></span>
+    <span class="stat">💬 Comments <b>33</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>7.2s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">20.56%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>Analysis error: Expecting value: line 1 column 1 (char 0)</li></ul>
+    </div>
+  </div>
+  
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f87171">36</span><br>
+      <span class="badge low">⚠️ Needs Work</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DXEw3-_FTef/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        O coach Rafael revelou que Marcio “Ticoto” Barbosa entrou na luta com a tíbia fraturada. No começo acharam que era só do…
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-04-13</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>352</b><div class="bar-wrap"><div class="bar" style="width:15%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>285</b><div class="bar-wrap"><div class="bar" style="width:18%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>0</b></span>
+    <span class="stat">🔖 Saves <b>1</b></span>
+    <span class="stat">❤️ Likes <b>11</b></span>
+    <span class="stat">💬 Comments <b>29</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>7.0s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">14.39%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>Analysis error: Expecting value: line 1 column 1 (char 0)</li></ul>
+    </div>
+  </div>
+  
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f87171">34</span><br>
+      <span class="badge low">⚠️ Needs Work</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DXPfk_BDYDA/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        Canon Swanson não esconde o que muitos evitam falar. Durante a luta, no camp, até no treino… aqueles pensamentos aparece…
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-04-17</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>349</b><div class="bar-wrap"><div class="bar" style="width:15%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>295</b><div class="bar-wrap"><div class="bar" style="width:19%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>0</b></span>
+    <span class="stat">🔖 Saves <b>1</b></span>
+    <span class="stat">❤️ Likes <b>15</b></span>
+    <span class="stat">💬 Comments <b>40</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>4.6s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">18.98%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>Analysis error: Expecting value: line 1 column 1 (char 0)</li></ul>
+    </div>
+  </div>
+  
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f87171">32</span><br>
+      <span class="badge low">⚠️ Needs Work</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DXP52DSBlDE/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        Mike Malott sabe o nível do desafio. Gilbert Burns já enfrentou os melhores e é perigoso em todas as áreas. Mas a confia…
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-04-17</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>269</b><div class="bar-wrap"><div class="bar" style="width:11%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>207</b><div class="bar-wrap"><div class="bar" style="width:13%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>0</b></span>
+    <span class="stat">🔖 Saves <b>1</b></span>
+    <span class="stat">❤️ Likes <b>9</b></span>
+    <span class="stat">💬 Comments <b>34</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>3.7s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">21.26%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>Analysis error: Expecting value: line 1 column 1 (char 0)</li></ul>
+    </div>
+  </div>
+  
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f87171">32</span><br>
+      <span class="badge low">⚠️ Needs Work</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DXFTJmmBf9q/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        Genesis Cejudo cresceu assistindo o sacrifício dentro de casa. Desde bebê, via o pai e o tio treinando todos os dias — s…
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-04-13</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>273</b><div class="bar-wrap"><div class="bar" style="width:11%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>215</b><div class="bar-wrap"><div class="bar" style="width:14%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>0</b></span>
+    <span class="stat">🔖 Saves <b>1</b></span>
+    <span class="stat">❤️ Likes <b>6</b></span>
+    <span class="stat">💬 Comments <b>23</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>3.6s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">13.95%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>Analysis error: Expecting value: line 1 column 1 (char 0)</li></ul>
+    </div>
+  </div>
+  
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f87171">25</span><br>
+      <span class="badge low">⚠️ Needs Work</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DXKpVZPjCef/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        Faltando menos de um mês, o ritmo sobe e o corpo começa a sentir cada detalhe do camp.
+Carlos Prates intensifica o trein…
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-04-15</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>498</b><div class="bar-wrap"><div class="bar" style="width:21%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>366</b><div class="bar-wrap"><div class="bar" style="width:24%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>0</b></span>
+    <span class="stat">🔖 Saves <b>0</b></span>
+    <span class="stat">❤️ Likes <b>29</b></span>
+    <span class="stat">💬 Comments <b>42</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>5.1s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">19.4%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>Analysis error: Expecting value: line 1 column 1 (char 0)</li></ul>
+    </div>
+  </div>
+  
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f87171">20</span><br>
+      <span class="badge low">⚠️ Needs Work</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DXSelb-vURt/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        Gilbert Burns sabe o momento que está vivendo. Sem margem, sem desculpa, é entrar, performar e buscar a finalização. Mas…
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-04-18</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>244</b><div class="bar-wrap"><div class="bar" style="width:10%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>187</b><div class="bar-wrap"><div class="bar" style="width:12%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>0</b></span>
+    <span class="stat">🔖 Saves <b>0</b></span>
+    <span class="stat">❤️ Likes <b>8</b></span>
+    <span class="stat">💬 Comments <b>17</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>3.8s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">13.37%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>Analysis error: Expecting value: line 1 column 1 (char 0)</li></ul>
+    </div>
+  </div>
+  
+</div><h2>What to Keep Doing</h2><p style="color:var(--muted);font-size:13px;">Not enough data yet — patterns will appear after more reels are posted and analyzed.</p><ul class="insight-list do" style="margin-top:8px"><li><b>Top reels get 13.6× more shares per viewer</b> — your best content triggers sharing instincts. Keep creating that type.</li></ul><h2>What to Stop / Fix</h2><p style="color:var(--muted);font-size:13px;">No strong negative patterns detected yet.</p>
+<ul class="insight-list avoid" style="margin-top:8px">
+  <li><b>8 reels had watch time well below average (&lt;60% of 8.9s)</b> —
+  viewers are dropping off early. The first 2–3 seconds likely aren't grabbing attention.
+  Try opening with a bold statement, action shot, or question before anything else.</li>
+</ul>
+<h2>90-Day Benchmarks</h2>
+<table style="width:auto">
+<thead><tr><th>Metric</th><th>90-Day Average</th><th>Top Quartile (P75)</th></tr></thead>
+<tbody>
+<tr><td>Views</td><td>1.1k</td><td>1.5k</td></tr>
+<tr><td>Reach</td><td>756</td><td>912</td></tr>
+<tr><td>Shares</td><td>5</td><td>3</td></tr>
+<tr><td>Saves</td><td>0</td><td>1</td></tr>
+<tr><td>Avg Watch Time</td><td>8.9s</td><td>10.1s</td></tr>
+</tbody>
+</table>
+
+<div class="footer">
+  PeaceGrappler MMA Video Analysis &mdash; 2026-04-20 23:00 &mdash; Data from Instagram Graph API
+</div>
+</div></body></html>
