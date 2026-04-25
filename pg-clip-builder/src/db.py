@@ -67,6 +67,20 @@ CREATE TABLE IF NOT EXISTS generated_videos (
     timeline_json TEXT NOT NULL,
     generated_at TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS wizard_research (
+    id INTEGER PRIMARY KEY,
+    topic TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    researched_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS wizard_feedback (
+    id INTEGER PRIMARY KEY,
+    generated_video_id INTEGER NOT NULL REFERENCES generated_videos(id) ON DELETE CASCADE,
+    feedback TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+);
 """
 
 

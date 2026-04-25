@@ -551,11 +551,13 @@ td{font-size:13px}
     <a href="/analyze" class="active">Analyze</a>
     <a href="/generate">Generate</a>
     <a href="/library">Library</a>
+    <a href="/wizard">AI Wizard</a>
   </nav>
 </header>
 
 <div class="controls">
   <button class="primary" onclick="scanVideos()">Scan for New Videos</button>
+  <button class="primary" id="analyze-all-btn" onclick="analyzeAll()" style="display:none">Analyze All</button>
   <span id="scan-status" style="font-size:13px;color:#888"></span>
 </div>
 
@@ -579,6 +581,7 @@ td{font-size:13px}
 <script>
 var videos = [];
 var analyzing = false;
+var analyzingAll = false;
 
 async function scanVideos() {
   document.getElementById('scan-status').textContent = 'Scanning...';
@@ -592,6 +595,12 @@ async function scanVideos() {
   } catch(e) {
     document.getElementById('scan-status').textContent = 'Scan failed: ' + e.message;
   }
+}
+
+function getPendingVideos() {
+  return videos.filter(function(v) {
+    return !v.analyzed_at || v.needs_update;
+  });
 }
 
 function renderList() {
@@ -623,52 +632,107 @@ function renderList() {
       + (analyzing ? 'disabled' : '') + '>' + btnLabel + '</button></td>'
       + '</tr>';
   }
+
+  // Show/hide Analyze All button
+  var pending = getPendingVideos();
+  var allBtn = document.getElementById('analyze-all-btn');
+  if (pending.length > 0 && !analyzing) {
+    allBtn.style.display = '';
+    allBtn.textContent = 'Analyze All (' + pending.length + ')';
+    allBtn.disabled = false;
+  } else if (analyzing) {
+    allBtn.style.display = '';
+    allBtn.disabled = true;
+  } else {
+    allBtn.style.display = 'none';
+  }
 }
 
-async function analyzeVideo(videoId, force) {
-  if (analyzing) return;
+function analyzeVideo(videoId, force) {
+  if (analyzing) return Promise.resolve(false);
   analyzing = true;
   renderList();
 
   var prog = document.getElementById('progress');
-  var lines = document.getElementById('progress-lines');
   prog.classList.add('active');
-  lines.innerHTML = '';
+  if (!analyzingAll) {
+    document.getElementById('progress-lines').innerHTML = '';
+  }
 
   addLine('Starting analysis...');
 
-  try {
-    await fetch('/analyze/run/' + videoId, {
+  return new Promise(function(resolve) {
+    fetch('/analyze/run/' + videoId, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({force: force}),
-    });
-
-    var es = new EventSource('/analyze/status');
-    es.onmessage = function(e) {
-      var data = JSON.parse(e.data);
-      var msg = data.message;
-      if (msg.startsWith('DONE:')) {
+    }).then(function() {
+      var es = new EventSource('/analyze/status');
+      es.onmessage = function(e) {
+        var data = JSON.parse(e.data);
+        var msg = data.message;
+        if (msg.startsWith('DONE:')) {
+          es.close();
+          analyzing = false;
+          var ok = msg === 'DONE:ok';
+          addLine(ok ? 'Analysis complete!' : 'Analysis failed',
+                  ok ? 'done' : 'error');
+          if (!analyzingAll) scanVideos();
+          resolve(ok);
+        } else {
+          addLine(msg);
+        }
+      };
+      es.onerror = function() {
         es.close();
         analyzing = false;
-        addLine(msg === 'DONE:ok' ? 'Analysis complete!' : 'Analysis failed',
-                msg === 'DONE:ok' ? 'done' : 'error');
-        scanVideos();
-      } else {
-        addLine(msg);
-      }
-    };
-    es.onerror = function() {
-      es.close();
+        addLine('Connection lost', 'error');
+        renderList();
+        resolve(false);
+      };
+    }).catch(function(e) {
       analyzing = false;
-      addLine('Connection lost', 'error');
+      addLine('Error: ' + e.message, 'error');
       renderList();
-    };
-  } catch(e) {
-    analyzing = false;
-    addLine('Error: ' + e.message, 'error');
-    renderList();
+      resolve(false);
+    });
+  });
+}
+
+async function analyzeAll() {
+  if (analyzing || analyzingAll) return;
+  analyzingAll = true;
+  document.getElementById('progress-lines').innerHTML = '';
+
+  // Refresh list first
+  await scanVideos();
+  var pending = getPendingVideos();
+  if (!pending.length) {
+    addLine('No videos pending analysis.');
+    analyzingAll = false;
+    return;
   }
+
+  addLine('Analyzing all ' + pending.length + ' pending videos...', 'done');
+
+  for (var i = 0; i < pending.length; i++) {
+    var v = pending[i];
+    var force = !v.needs_update && v.analyzed_at;
+    addLine('\n--- Video ' + (i + 1) + '/' + pending.length + ': ' + v.filename + ' ---');
+    var ok = await analyzeVideo(v.id, force);
+    // Refresh videos list after each to update statuses
+    await scanVideos();
+    // Re-get pending in case list changed
+    pending = getPendingVideos();
+    if (!ok) {
+      addLine('Skipping remaining due to failure', 'error');
+      break;
+    }
+  }
+
+  analyzingAll = false;
+  addLine('\nAll done! Analyzed videos.', 'done');
+  scanVideos();
 }
 
 function addLine(text, cls) {

@@ -424,6 +424,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
     <a href="/analyze">Analyze</a>
     <a href="/generate" class="active">Generate</a>
     <a href="/library">Library</a>
+    <a href="/wizard">AI Wizard</a>
   </nav>
 </header>
 
