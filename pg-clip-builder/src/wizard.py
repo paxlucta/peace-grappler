@@ -24,8 +24,9 @@ from db import (
 )
 from video import (
     ASSETS_DIR, AUDIO_EXTENSIONS, OUTPUT_DIR, TRANSITIONS, XFADE_DUR,
-    concatenate_clips, detect_beats, extract_subclip, find_asset,
-    get_video_duration, normalize_clip, overlay_music,
+    add_text_overlay, concatenate_clips, detect_beats, extract_subclip,
+    extract_wide_split, find_asset, get_video_duration, normalize_clip,
+    overlay_music,
 )
 
 wizard_bp = Blueprint("wizard", __name__)
@@ -399,6 +400,8 @@ Output a JSON object with EXACTLY this structure:
       "scene_id": <id>,
       "start": <start seconds>,
       "end": <end seconds>,
+      "wide_split": <true if this WIDE scene should use split-screen>,
+      "text_overlay": "<optional text to overlay on this clip, or null>",
       "reason": "<why this clip, why this position>"
     }}
   ],
@@ -413,12 +416,19 @@ RULES:
 - only use scene IDs from the list above
 - only use music names from the list above (or null)
 - only use transition names from the list above
+- For WIDE scenes: set "wide_split": true to display as split-screen \
+(top + bottom halves, filling the full 9:16 frame with no black bars)
+- "text_overlay": only include if text overlays are enabled (see below). \
+Use short punchy text (max 6 words) for impact moments, fighter names, \
+or engagement hooks. null if no text needed for this clip.
+{text_overlay_instruction}
 - Return ONLY the JSON object
 """
 
 
 def _plan_video(model, research, scenes, music_files, feedback,
-                used_scene_ids=None, variation_ctx=None):
+                used_scene_ids=None, variation_ctx=None,
+                enable_text_overlays=False):
     """Ask Claude to plan a single video.
 
     variation_ctx: optional dict {"num": 2, "total": 3,
@@ -529,6 +539,18 @@ def _plan_video(model, research, scenes, music_files, feedback,
     optimal = research.get("optimal_duration", 22)
     cuts = research.get("pacing_cuts_per_minute", 20)
 
+    if enable_text_overlays:
+        text_instruction = (
+            "- TEXT OVERLAYS ARE ENABLED. Add \"text_overlay\" to clips where "
+            "short punchy text would boost engagement (impact moments, fighter "
+            "names, stats, hooks like 'WATCH THIS'). Max 6 words per overlay. "
+            "Don't add text to every clip — only where it adds value."
+        )
+    else:
+        text_instruction = (
+            "- Text overlays are DISABLED. Set \"text_overlay\" to null for all clips."
+        )
+
     prompt = CREATIVE_PROMPT.format(
         research=json.dumps(research, indent=2),
         scenes="\n".join(scene_lines),
@@ -537,6 +559,7 @@ def _plan_video(model, research, scenes, music_files, feedback,
         beat_info=beat_str,
         feedback=feedback_str,
         variation_info=variation_str,
+        text_overlay_instruction=text_instruction,
         cuts_per_min=cuts,
         target_dur=optimal,
         dur_min=dur_range.get("min", 15),
@@ -611,7 +634,8 @@ def _validate_plan(plan, scenes, music_files):
 
 # ── Video assembly ───────────────────────────────────────────────────────────
 
-def _assemble_video(plan, music_files, video_num, total):
+def _assemble_video(plan, music_files, video_num, total,
+                    mute_source=False):
     """Assemble a video from Claude's plan. Returns output path or None."""
     clips = plan.get("clips", [])
     if len(clips) < 2:
@@ -669,9 +693,45 @@ def _assemble_video(plan, music_files, video_num, total):
             start = clip["start"]
             duration = round(clip["end"] - clip["start"], 2)
             src = Path(scene["video_path"]).name
-            emit(f"Video {video_num}/{total}: clip {i+1}/{len(clips)} "
-                 f"[{start:.1f}s +{duration:.1f}s] from {src}")
-            if extract_subclip(scene["video_path"], start, duration, clip_out):
+            is_wide = scene.get("wide", False)
+            use_split = clip.get("wide_split", False) and is_wide
+
+            if use_split:
+                emit(f"Video {video_num}/{total}: clip {i+1}/{len(clips)} "
+                     f"[{start:.1f}s +{duration:.1f}s] from {src} (split-screen)")
+                ok = extract_wide_split(scene["video_path"], start, duration, clip_out)
+            else:
+                emit(f"Video {video_num}/{total}: clip {i+1}/{len(clips)} "
+                     f"[{start:.1f}s +{duration:.1f}s] from {src}")
+                ok = extract_subclip(scene["video_path"], start, duration, clip_out)
+
+            if ok:
+                # Apply text overlay if specified
+                overlay_text = clip.get("text_overlay")
+                if overlay_text and overlay_text.strip():
+                    text_out = os.path.join(tmp, f"clip_{i:03d}_txt.mp4")
+                    if add_text_overlay(clip_out, overlay_text.strip(), text_out):
+                        clip_out = text_out
+                    else:
+                        emit(f"  Text overlay failed, using clip without text")
+
+                # Mute source audio if requested
+                if mute_source:
+                    muted_out = os.path.join(tmp, f"clip_{i:03d}_mute.mp4")
+                    try:
+                        subprocess.run(
+                            ["ffmpeg", "-y", "-i", clip_out,
+                             "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
+                             "-map", "0:v", "-map", "1:a",
+                             "-c:v", "copy", "-c:a", "aac", "-shortest",
+                             muted_out],
+                            capture_output=True, timeout=30,
+                        )
+                        if os.path.exists(muted_out):
+                            clip_out = muted_out
+                    except Exception:
+                        pass
+
                 clip_paths.append(clip_out)
 
         # Outro
@@ -875,7 +935,9 @@ def _auto_analyze_folders(model, folders):
     emit("Auto-analysis complete")
 
 
-def _generate(model, num_videos, num_variations=1, folders=None):
+def _generate(model, num_videos, num_variations=1, folders=None,
+              mute_source=False, enable_text_overlays=False,
+              music_folders=None):
     """Full wizard generation flow. Runs in a background thread."""
     try:
         # 0. Auto-analyze unanalyzed videos in selected folders
@@ -905,10 +967,30 @@ def _generate(model, num_videos, num_variations=1, folders=None):
             return
 
         music_files = _find_music_files()
+        # Filter music by selected folders if specified
+        if music_folders:
+            music_dir = ASSETS_DIR / "music"
+            filtered_music = []
+            for m in music_files:
+                mpath = Path(m["path"])
+                try:
+                    rel = str(mpath.parent.relative_to(music_dir))
+                except ValueError:
+                    rel = "(root)"
+                if rel == ".":
+                    rel = "(root)"
+                if rel in music_folders:
+                    filtered_music.append(m)
+            music_files = filtered_music
+
         feedback = _get_all_feedback()
 
         emit(f"Found {len(scenes)} scenes, {len(music_files)} music tracks, "
              f"{len(feedback)} feedback entries")
+        if mute_source:
+            emit("Source audio will be muted (music only)")
+        if enable_text_overlays:
+            emit("Text overlays enabled")
 
         if num_variations > 1:
             emit(f"Generating {num_variations} A/B variations per video")
@@ -937,7 +1019,8 @@ def _generate(model, num_videos, num_variations=1, folders=None):
 
                 plan = _plan_video(model, research, scenes, music_files,
                                    feedback, used_scene_ids,
-                                   variation_ctx=variation_ctx)
+                                   variation_ctx=variation_ctx,
+                                   enable_text_overlays=enable_text_overlays)
                 if not plan or not plan.get("clips"):
                     emit(f"{var_label}: Claude couldn't create a plan")
                     continue
@@ -957,7 +1040,8 @@ def _generate(model, num_videos, num_variations=1, folders=None):
                     used_scene_ids.add(clip["scene_id"])
 
                 emit(f"\nPhase 3: Assembling {var_label}...")
-                result = _assemble_video(plan, music_files, vid_num, num_videos)
+                result = _assemble_video(plan, music_files, vid_num, num_videos,
+                                        mute_source=mute_source)
                 if result:
                     # Generate caption
                     emit("Generating Instagram caption...")
@@ -1168,17 +1252,38 @@ def api_generate():
     model = data.get("model", "claude-opus-4-6")
     num_videos = max(1, min(10, data.get("num_videos", 1)))
     num_variations = max(1, min(3, data.get("variations", 1)))
-    folders = data.get("folders", [])  # empty = all
+    folders = data.get("folders", [])
+    mute_source = data.get("mute_source", False)
+    enable_text_overlays = data.get("text_overlays", False)
+    music_folders = data.get("music_folders", [])
 
-    # Validate model
     valid_ids = {m["id"] for m in MODELS}
     if model not in valid_ids:
         model = "claude-opus-4-6"
 
     threading.Thread(target=_generate,
-                     args=(model, num_videos, num_variations, folders),
+                     args=(model, num_videos, num_variations, folders,
+                           mute_source, enable_text_overlays, music_folders),
                      daemon=True).start()
     return jsonify({"status": "started"})
+
+
+@wizard_bp.route("/wizard/api/music-folders")
+def api_music_folders():
+    """List all folders under assets/music/ that contain audio files."""
+    music_dir = ASSETS_DIR / "music"
+    if not music_dir.exists():
+        return jsonify(["(root)"])
+    folders = set()
+    for root, dirs, files in os.walk(music_dir):
+        has_audio = any(
+            Path(f).suffix.lower() in AUDIO_EXTENSIONS
+            for f in files if not f.startswith(".")
+        )
+        if has_audio:
+            rel = os.path.relpath(root, music_dir)
+            folders.add(rel if rel != "." else "(root)")
+    return jsonify(sorted(folders) if folders else ["(root)"])
 
 
 @wizard_bp.route("/wizard/api/caption/<int:video_id>", methods=["POST"])
@@ -1749,15 +1854,33 @@ button:disabled{opacity:.5;cursor:not-allowed}
         <input type="number" id="num-variations" value="1" min="1" max="3">
       </div>
       <div class="field">
-        <label>Source Folders</label>
+        <label>Video Source</label>
         <div class="folder-picker" id="folder-picker">
-          <button class="folder-btn" type="button" onclick="toggleFolderDropdown()">
+          <button class="folder-btn" type="button" onclick="toggleDropdown('folder-dropdown')">
             <span id="folder-btn-label">All Folders</span>
             <span class="arrow">&#9660;</span>
           </button>
           <div class="folder-dropdown" id="folder-dropdown"></div>
         </div>
       </div>
+      <div class="field">
+        <label>Music Source</label>
+        <div class="folder-picker" id="music-picker">
+          <button class="folder-btn" type="button" onclick="toggleDropdown('music-dropdown')">
+            <span id="music-btn-label">All Music</span>
+            <span class="arrow">&#9660;</span>
+          </button>
+          <div class="folder-dropdown" id="music-dropdown"></div>
+        </div>
+      </div>
+    </div>
+    <div class="config-row" style="margin-top:12px">
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#aaa;cursor:pointer">
+        <input type="checkbox" id="mute-source"> Mute source audio (music only)
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#aaa;cursor:pointer">
+        <input type="checkbox" id="text-overlays"> Enable text overlays
+      </label>
       <div class="btn-row">
         <button class="btn-primary" id="gen-btn" onclick="startGeneration()">Generate</button>
       </div>
@@ -1839,6 +1962,7 @@ async function init() {
   loadResearch();
   loadExcluded();
   loadFolders();
+  loadMusicFolders();
   loadHistory();
 }
 
@@ -1907,62 +2031,75 @@ function toggleHistCard(id) {
   arrow.classList.toggle('open');
 }
 
-// ── Folder picker ──
-var allFolders = [];
+// ── Folder & Music pickers ──
+
+function toggleDropdown(id) {
+  // Close all other dropdowns first
+  document.querySelectorAll('.folder-dropdown.open').forEach(function(el) {
+    if (el.id !== id) el.classList.remove('open');
+  });
+  document.getElementById(id).classList.toggle('open');
+}
+
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.folder-picker')) {
+    document.querySelectorAll('.folder-dropdown.open').forEach(function(el) {
+      el.classList.remove('open');
+    });
+  }
+});
 
 async function loadFolders() {
-  allFolders = await fetch('/wizard/api/folders').then(function(r){return r.json()});
+  var folders = await fetch('/wizard/api/folders').then(function(r){return r.json()});
   var dd = document.getElementById('folder-dropdown');
   var html = '';
-  for (var i = 0; i < allFolders.length; i++) {
-    var f = allFolders[i];
+  for (var i = 0; i < folders.length; i++) {
     html += '<label class="folder-item">'
-      + '<input type="checkbox" value="' + f + '" checked onchange="updateFolderLabel()"/>'
-      + '<span class="fi-name">' + f + '</span>'
-      + '</label>';
+      + '<input type="checkbox" value="' + folders[i] + '" checked onchange="updatePickerLabel(\'folder-dropdown\',\'folder-btn-label\',\'All Folders\')"/>'
+      + '<span class="fi-name">' + folders[i] + '</span></label>';
   }
   dd.innerHTML = html;
-  updateFolderLabel();
+  updatePickerLabel('folder-dropdown', 'folder-btn-label', 'All Folders');
 }
 
-function toggleFolderDropdown() {
-  document.getElementById('folder-dropdown').classList.toggle('open');
+async function loadMusicFolders() {
+  var folders = await fetch('/wizard/api/music-folders').then(function(r){return r.json()});
+  var dd = document.getElementById('music-dropdown');
+  var html = '';
+  for (var i = 0; i < folders.length; i++) {
+    html += '<label class="folder-item">'
+      + '<input type="checkbox" value="' + folders[i] + '" checked onchange="updatePickerLabel(\'music-dropdown\',\'music-btn-label\',\'All Music\')"/>'
+      + '<span class="fi-name">' + folders[i] + '</span></label>';
+  }
+  dd.innerHTML = html;
+  updatePickerLabel('music-dropdown', 'music-btn-label', 'All Music');
 }
 
-function updateFolderLabel() {
-  var checks = document.querySelectorAll('#folder-dropdown input[type=checkbox]');
+function updatePickerLabel(ddId, labelId, allText) {
+  var checks = document.querySelectorAll('#' + ddId + ' input[type=checkbox]');
   var total = checks.length;
   var checked = 0;
   for (var i = 0; i < checks.length; i++) {
     if (checks[i].checked) checked++;
   }
-  var label = document.getElementById('folder-btn-label');
+  var label = document.getElementById(labelId);
   if (checked === 0 || checked === total) {
-    label.textContent = 'All Folders';
+    label.textContent = allText;
   } else {
-    label.textContent = checked + ' of ' + total + ' folders';
+    label.textContent = checked + ' of ' + total;
   }
 }
 
-function getSelectedFolders() {
-  var checks = document.querySelectorAll('#folder-dropdown input[type=checkbox]');
+function getSelectedFromPicker(ddId) {
+  var checks = document.querySelectorAll('#' + ddId + ' input[type=checkbox]');
   var total = checks.length;
   var selected = [];
   for (var i = 0; i < checks.length; i++) {
     if (checks[i].checked) selected.push(checks[i].value);
   }
-  // If all selected, return empty (means "all")
   if (selected.length === total) return [];
   return selected;
 }
-
-// Close dropdown when clicking outside
-document.addEventListener('click', function(e) {
-  var picker = document.getElementById('folder-picker');
-  if (picker && !picker.contains(e.target)) {
-    document.getElementById('folder-dropdown').classList.remove('open');
-  }
-});
 
 function startGeneration() {
   if (generating) return;
@@ -1989,7 +2126,15 @@ function startGeneration() {
   fetch('/wizard/api/generate', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({model: model, num_videos: numVids, variations: numVars, folders: getSelectedFolders()}),
+    body: JSON.stringify({
+      model: model,
+      num_videos: numVids,
+      variations: numVars,
+      folders: getSelectedFromPicker('folder-dropdown'),
+      music_folders: getSelectedFromPicker('music-dropdown'),
+      mute_source: document.getElementById('mute-source').checked,
+      text_overlays: document.getElementById('text-overlays').checked,
+    }),
   }).then(function() {
     var es = new EventSource('/wizard/api/status');
     es.onmessage = function(e) {

@@ -651,6 +651,87 @@ def process_split_section(top_items, bottom_items, tmp_dir, prefix, out_path,
     return stack_split_videos(top_path, bottom_path, out_path)
 
 
+def extract_wide_split(video_path, start, duration, out_path):
+    """Extract a wide scene as split-screen (top + bottom) filling 1080x1920.
+
+    Top and bottom show the same clip but bottom starts slightly later
+    and uses a different crop region, creating a dynamic split effect.
+    """
+    _has_audio = has_audio_stream(video_path)
+    offset = min(0.3, duration * 0.15)
+
+    # Top: left crop region, bottom: right crop region (shifted)
+    # Both scaled to fill 1080x960
+    filter_complex = (
+        f"[0:v]trim=start={start:.2f}:duration={duration:.2f},setpts=PTS-STARTPTS,"
+        f"scale=-1:960,crop=1080:960:(iw-1080)/2:0,setsar=1,fps=30[top];"
+        f"[0:v]trim=start={start + offset:.2f}:duration={duration:.2f},setpts=PTS-STARTPTS,"
+        f"scale=-1:960,crop=1080:960:(iw-1080)/2:0,setsar=1,fps=30,"
+        f"fade=t=in:st=0:d=0.4[bot];"
+        f"[top][bot]vstack=inputs=2[vout]"
+    )
+
+    if _has_audio:
+        filter_complex += (
+            f";[0:a]atrim=start={start:.2f}:duration={duration:.2f},"
+            f"asetpts=PTS-STARTPTS[aout]"
+        )
+        map_args = ["-map", "[vout]", "-map", "[aout]"]
+    else:
+        map_args = ["-map", "[vout]",
+                    "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo"]
+        # Re-add null audio input after filter
+        filter_complex += ";[1:a]atrim=0:" + f"{duration:.2f}[aout]"
+        map_args = ["-map", "[vout]", "-map", "[aout]"]
+
+    try:
+        cmd = ["ffmpeg", "-y", "-i", str(video_path)]
+        if not _has_audio:
+            cmd += ["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo"]
+        cmd += ["-filter_complex", filter_complex] + map_args + [
+            "-t", f"{duration:.2f}",
+            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+            "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "128k",
+            "-pix_fmt", "yuv420p", "-movflags", "+faststart", out_path]
+        r = subprocess.run(cmd, capture_output=True, timeout=60)
+        return r.returncode == 0 and os.path.exists(out_path)
+    except Exception:
+        return False
+
+
+def add_text_overlay(video_path, text, out_path, position="bottom",
+                     fontsize=42, fontcolor="white", box_opacity=0.5):
+    """Add a text overlay to a video using FFmpeg drawtext."""
+    # Escape text for FFmpeg
+    safe_text = text.replace("'", "'\\''").replace(":", "\\:")
+    if position == "top":
+        y_expr = "h*0.08"
+    elif position == "center":
+        y_expr = "(h-text_h)/2"
+    else:
+        y_expr = "h*0.85"
+
+    vf = (
+        f"drawtext=text='{safe_text}':"
+        f"fontsize={fontsize}:fontcolor={fontcolor}:"
+        f"x=(w-text_w)/2:y={y_expr}:"
+        f"box=1:boxcolor=black@{box_opacity}:boxborderw=8:"
+        f"enable='between(t,0.3,99)'"
+    )
+
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-y", "-i", str(video_path),
+             "-vf", vf,
+             "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+             "-c:a", "copy", "-movflags", "+faststart", out_path],
+            capture_output=True, timeout=60,
+        )
+        return r.returncode == 0 and os.path.exists(out_path)
+    except Exception:
+        return False
+
+
 def detect_beats(music_path):
     """Detect beat positions in a music file using FFmpeg + onset detection.
 
