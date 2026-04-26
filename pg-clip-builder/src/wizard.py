@@ -140,13 +140,26 @@ def _get_wizard_history(limit=20):
                             "SELECT tag FROM scene_tags WHERE scene_id=? "
                             "ORDER BY tag LIMIT 3", (sid,),
                         ).fetchall()
-                        excluded = conn.execute(
+                        scene_row = conn.execute(
                             "SELECT excluded FROM scenes WHERE id=?", (sid,),
                         ).fetchone()
+                        is_excluded = bool(scene_row["excluded"]) if scene_row else False
+                        grade_row = conn.execute(
+                            "SELECT SUM(score) as total, COUNT(*) as cnt "
+                            "FROM grades WHERE scene_id=?", (sid,),
+                        ).fetchone()
+                        if is_excluded:
+                            vote_status = "down"
+                        elif grade_row and grade_row["cnt"] and grade_row["cnt"] > 0:
+                            avg = grade_row["total"] / grade_row["cnt"]
+                            vote_status = "up" if avg >= 3 else "down"
+                        else:
+                            vote_status = "unrated"
                         scenes_used.append({
                             "scene_id": sid,
                             "tags": [t["tag"] for t in tags],
-                            "excluded": bool(excluded["excluded"]) if excluded else False,
+                            "excluded": is_excluded,
+                            "status": vote_status,
                         })
             except Exception:
                 pass
@@ -1449,13 +1462,23 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .scene-chip .sc-info{display:flex;flex-direction:column;gap:1px}
 .scene-chip .sc-name{color:#ccc;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px}
 .scene-chip .sc-tags{color:#666;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px}
-.scene-chip .sc-exclude{
-  background:none;border:1px solid #555;color:#888;border-radius:4px;
-  padding:2px 6px;font-size:10px;cursor:pointer;margin-left:auto;white-space:nowrap;
+.scene-chip .sc-votes{display:flex;gap:4px;margin-left:auto}
+.scene-chip .sv{
+  width:22px;height:22px;border-radius:50%;border:1.5px solid #444;
+  background:none;cursor:pointer;display:flex;align-items:center;justify-content:center;
+  transition:all .12s;padding:0;
 }
-.scene-chip .sc-exclude:hover{border-color:#e53935;color:#e53935}
-.scene-chip.excluded{opacity:.4;text-decoration:line-through}
-.scene-chip.excluded .sc-exclude{border-color:#4caf50;color:#4caf50}
+.scene-chip .sv svg{width:12px;height:12px;fill:#555}
+.scene-chip .sv:hover{transform:scale(1.15)}
+.scene-chip .sv.sv-down:hover{background:#ef5350;border-color:#ef5350}
+.scene-chip .sv.sv-down:hover svg{fill:#fff}
+.scene-chip .sv.sv-down.active{background:#ef5350;border-color:#ef5350}
+.scene-chip .sv.sv-down.active svg{fill:#fff}
+.scene-chip .sv.sv-up:hover{background:#4caf50;border-color:#4caf50}
+.scene-chip .sv.sv-up:hover svg{fill:#fff}
+.scene-chip .sv.sv-up.active{background:#4caf50;border-color:#4caf50}
+.scene-chip .sv.sv-up.active svg{fill:#fff}
+.scene-chip.excluded{opacity:.35}
 
 /* -- Excluded scenes panel -- */
 .excluded-panel{
@@ -1953,40 +1976,51 @@ function buildSceneChips(scenes) {
   for (var i = 0; i < scenes.length; i++) {
     var s = scenes[i];
     var cls = s.excluded ? 'scene-chip excluded' : 'scene-chip';
-    var btnLabel = s.excluded ? 'Unblock' : 'Exclude';
     var tags = s.tags.length ? s.tags.join(', ') : 'no tags';
+    // Determine current vote state
+    var downActive = s.excluded ? ' active' : '';
+    var upActive = (!s.excluded && s.status === 'up') ? ' active' : '';
+
     html += '<div class="' + cls + '" id="sc-' + s.scene_id + '">'
       + '<img src="/api/thumbnail/' + s.scene_id + '" loading="lazy"/>'
       + '<div class="sc-info">'
       + '<span class="sc-name">#' + s.scene_id + '</span>'
       + '<span class="sc-tags">' + escHtml(tags) + '</span>'
       + '</div>'
-      + '<button class="sc-exclude" onclick="toggleExclude(' + s.scene_id + ',' + !s.excluded + ')">' + btnLabel + '</button>'
+      + '<div class="sc-votes">'
+      + '<button class="sv sv-down' + downActive + '" onclick="voteScene(' + s.scene_id + ',\'down\')" title="Hide">'
+      + '<svg viewBox="0 0 24 24"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>'
+      + '</button>'
+      + '<button class="sv sv-up' + upActive + '" onclick="voteScene(' + s.scene_id + ',\'up\')" title="Keep">'
+      + '<svg viewBox="0 0 24 24"><path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg>'
+      + '</button>'
+      + '</div>'
       + '</div>';
   }
   html += '</div></div>';
   return html;
 }
 
-async function toggleExclude(sceneId, exclude) {
-  await fetch('/wizard/api/exclude', {
+async function voteScene(sceneId, action) {
+  await fetch('/rate/api/grade', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({scene_id: sceneId, exclude: exclude}),
+    body: JSON.stringify({scene_id: sceneId, action: action}),
   });
   // Update all chips for this scene across the page
   var chips = document.querySelectorAll('#sc-' + sceneId);
   for (var i = 0; i < chips.length; i++) {
     var chip = chips[i];
-    var btn = chip.querySelector('.sc-exclude');
-    if (exclude) {
+    var downBtn = chip.querySelector('.sv-down');
+    var upBtn = chip.querySelector('.sv-up');
+    if (action === 'down') {
       chip.classList.add('excluded');
-      btn.textContent = 'Unblock';
-      btn.setAttribute('onclick', 'toggleExclude(' + sceneId + ',false)');
+      downBtn.classList.add('active');
+      upBtn.classList.remove('active');
     } else {
       chip.classList.remove('excluded');
-      btn.textContent = 'Exclude';
-      btn.setAttribute('onclick', 'toggleExclude(' + sceneId + ',true)');
+      downBtn.classList.remove('active');
+      upBtn.classList.add('active');
     }
   }
   loadExcluded();
