@@ -55,11 +55,79 @@ echo ""
 echo "DMG created: ${DMG_PATH}"
 echo "Size: $(du -h "$DMG_PATH" | cut -f1)"
 
-# Open email with DMG attached
+# Open email with DMG attached and detailed instructions
 echo "Opening Mail with DMG attached..."
+
+EMAIL_BODY="Hi!
+
+Here's PeaceGrappler — the AI-powered MMA highlight reel builder.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+HOW TO INSTALL (one-time setup, ~5 min)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Download the attached PeaceGrappler.dmg file
+2. Double-click the DMG file to open it
+3. Drag the \"PeaceGrappler\" folder to your Desktop (or wherever you like)
+4. Open the PeaceGrappler folder
+5. Double-click \"Install.command\"
+   - If macOS says it can't be opened: right-click it → Open → click Open
+   - A Terminal window will appear — let it finish (it installs everything automatically)
+   - You may be asked for your Mac password — this is normal
+6. Wait until you see \"Installation complete!\" — then close the Terminal window
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+HOW TO USE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Double-click \"PeaceGrappler.command\" to launch the app
+   - If macOS says it can't be opened: right-click it → Open → click Open
+   - The app will open in your web browser at localhost:5555
+
+2. ADD YOUR VIDEOS
+   - Drop your raw MMA video files (.mp4, .mov) into the \"videos\" folder inside PeaceGrappler
+
+3. ANALYZE (one-time per video)
+   - Click \"Analyze\" in the top menu
+   - Click \"Scan for New Videos\" to find your files
+   - Click \"Analyze All\" to let the AI tag every scene (takes a few minutes per video)
+
+4. GENERATE HIGHLIGHTS
+   - Click \"AI Wizard\" in the top menu
+   - Choose your AI model (Sonnet is recommended)
+   - Click \"Generate\" — the AI will create an Instagram-ready highlight reel
+   - Watch the video, leave feedback to improve future videos
+
+5. BROWSE & POST
+   - Click \"Library\" to see all generated videos
+   - Click any video to watch it, copy the AI-generated caption, and post to Instagram
+
+6. RATE SCENES
+   - Click \"Scenes\" to browse all detected scenes
+   - Thumbs up scenes you like, thumbs down scenes you don't want used
+   - The AI learns from your ratings!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TIPS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+• To add background music: drop .mp3 files into PeaceGrappler → assets → music
+• To add an intro/outro: put intro.mp4 or outro.mp4 in PeaceGrappler → assets → videos
+• The app auto-updates: click \"Check for Updates\" in the top-right corner
+• To stop the app: close the Terminal window that opened when you launched it
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+REQUIREMENTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+• Mac computer (macOS 12 or later)
+• Internet connection (for initial setup and AI features)
+
+Everything else is installed automatically. Enjoy!"
+
 osascript -e "
 tell application \"Mail\"
-    set newMsg to make new outgoing message with properties {subject:\"PeaceGrappler Installer\", content:\"Here's the PeaceGrappler installer.\n\nInstructions:\n1. Open the DMG\n2. Drag the PeaceGrappler folder to a location on your Mac (e.g. Desktop or Applications)\n3. Double-click Install.command to install dependencies\n4. Double-click PeaceGrappler.command to launch the app\n\nRequirements: macOS with internet connection (installs Homebrew, Python, FFmpeg automatically).\", visible:true}
+    set newMsg to make new outgoing message with properties {subject:\"PeaceGrappler — MMA Highlight Reel Builder\", content:\"$(echo "$EMAIL_BODY" | sed 's/"/\\"/g')\", visible:true}
     tell newMsg
         make new attachment with properties {file name:POSIX file \"${DMG_PATH}\"} at after the last paragraph
     end tell
