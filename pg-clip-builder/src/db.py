@@ -91,14 +91,14 @@ def get_db():
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
-    # Migrate: add caption column if missing
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.executescript(SCHEMA)
+    # Migrate: add caption column if missing (for DBs created before this field)
     try:
         conn.execute("SELECT caption FROM generated_videos LIMIT 0")
     except sqlite3.OperationalError:
         conn.execute("ALTER TABLE generated_videos ADD COLUMN caption TEXT DEFAULT ''")
         conn.commit()
-    conn.execute("PRAGMA foreign_keys=ON")
-    conn.executescript(SCHEMA)
     conn.commit()
     return conn
 
