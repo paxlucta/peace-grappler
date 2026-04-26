@@ -800,9 +800,88 @@ def _generate_caption(model, plan, duration):
 
 # ── Main generation flow ────────────────────────────────────────────────────
 
-def _generate(model, num_videos, num_variations=1):
+def _filter_scenes_by_folders(scenes, folders, video_dir):
+    """Filter scenes to only those whose source video is in selected folders."""
+    filtered = []
+    for s in scenes:
+        vpath = Path(s["video_path"])
+        try:
+            rel = str(vpath.parent.relative_to(video_dir))
+        except ValueError:
+            rel = "(root)"
+        if rel == ".":
+            rel = "(root)"
+        if rel in folders:
+            filtered.append(s)
+    return filtered
+
+
+def _auto_analyze_folders(model, folders):
+    """Scan and analyze any unanalyzed videos in the selected folders."""
+    from video import VIDEO_DIR, VIDEO_EXTENSIONS
+    from db import register_video, get_all_videos, get_analyzed_tags
+    from analyzer import analyze_full, ALL_TAG_SET
+
+    VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Find video files in selected folders
+    target_files = []
+    for folder in folders:
+        folder_path = VIDEO_DIR if folder == "(root)" else VIDEO_DIR / folder
+        if not folder_path.exists():
+            continue
+        for f in sorted(folder_path.iterdir()):
+            if f.suffix.lower() in VIDEO_EXTENSIONS and not f.name.startswith("."):
+                target_files.append(f)
+
+    if not target_files:
+        return
+
+    # Register all files
+    for f in target_files:
+        register_video(f)
+
+    # Find unanalyzed ones
+    all_videos = get_all_videos()
+    pending = []
+    for v in all_videos:
+        vpath = Path(v["path"])
+        if vpath not in target_files:
+            continue
+        analyzed_tags = get_analyzed_tags(v["id"])
+        if not analyzed_tags or (ALL_TAG_SET - analyzed_tags):
+            pending.append(v)
+
+    if not pending:
+        return
+
+    emit(f"Auto-analyzing {len(pending)} unanalyzed video(s) in selected folders...")
+    for i, v in enumerate(pending):
+        emit(f"  Analyzing {i+1}/{len(pending)}: {v['filename']}...")
+        if v["duration"] <= 0:
+            emit(f"  Skipping {v['filename']} (no duration)")
+            continue
+        try:
+            result = analyze_full(v["path"], v["duration"])
+            if result:
+                from db import save_analysis
+                save_analysis(v["id"], result["tags"],
+                              result["moments"], list(ALL_TAG_SET))
+                emit(f"  Got {len(result['tags'])} tags")
+            else:
+                emit(f"  Analysis failed for {v['filename']}")
+        except Exception as e:
+            emit(f"  Error: {e}")
+    emit("Auto-analysis complete")
+
+
+def _generate(model, num_videos, num_variations=1, folders=None):
     """Full wizard generation flow. Runs in a background thread."""
     try:
+        # 0. Auto-analyze unanalyzed videos in selected folders
+        if folders:
+            _auto_analyze_folders(model, folders)
+
         # 1. Research
         emit("Phase 1: Instagram Reels research...")
         research = _run_research(model)
@@ -813,8 +892,15 @@ def _generate(model, num_videos, num_variations=1):
         # 2. Load data
         emit("Loading scenes and music...")
         scenes = get_all_scenes()
+
+        # Filter by folders if specified
+        if folders:
+            from video import VIDEO_DIR
+            scenes = _filter_scenes_by_folders(scenes, folders, VIDEO_DIR)
+            emit(f"Filtered to {len(scenes)} scenes from selected folders")
+
         if not scenes:
-            emit("No analyzed scenes found. Run the Analyzer first.")
+            emit("No analyzed scenes found for the selected folders.")
             emit("DONE:error")
             return
 
@@ -1057,20 +1143,40 @@ def api_models():
     return jsonify(MODELS)
 
 
+@wizard_bp.route("/wizard/api/folders")
+def api_folders():
+    """List all leaf folders under videos/."""
+    from video import VIDEO_DIR
+    VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+    folders = set()
+    for root, dirs, files in os.walk(VIDEO_DIR):
+        # Only include folders that contain video files
+        from video import VIDEO_EXTENSIONS
+        has_videos = any(
+            Path(f).suffix.lower() in VIDEO_EXTENSIONS
+            for f in files if not f.startswith(".")
+        )
+        if has_videos:
+            rel = os.path.relpath(root, VIDEO_DIR)
+            folders.add(rel if rel != "." else "(root)")
+    return jsonify(sorted(folders))
+
+
 @wizard_bp.route("/wizard/api/generate", methods=["POST"])
 def api_generate():
     data = request.json or {}
-    model = data.get("model", "claude-sonnet-4-6")
+    model = data.get("model", "claude-opus-4-6")
     num_videos = max(1, min(10, data.get("num_videos", 1)))
     num_variations = max(1, min(3, data.get("variations", 1)))
+    folders = data.get("folders", [])  # empty = all
 
     # Validate model
     valid_ids = {m["id"] for m in MODELS}
     if model not in valid_ids:
-        model = "claude-sonnet-4-6"
+        model = "claude-opus-4-6"
 
     threading.Thread(target=_generate,
-                     args=(model, num_videos, num_variations),
+                     args=(model, num_videos, num_variations, folders),
                      daemon=True).start()
     return jsonify({"status": "started"})
 
@@ -1362,6 +1468,30 @@ select:focus,input:focus{outline:none;border-color:#e53935}
 select{min-width:260px}
 input[type="number"]{width:80px}
 
+/* -- Folder picker -- */
+.folder-picker{position:relative}
+.folder-btn{
+  background:#222;color:#e0e0e0;border:1px solid #444;border-radius:6px;
+  padding:8px 12px;font-size:13px;cursor:pointer;min-width:180px;
+  text-align:left;display:flex;align-items:center;justify-content:space-between;
+}
+.folder-btn:hover{border-color:#666}
+.folder-btn .arrow{font-size:10px;color:#888}
+.folder-dropdown{
+  display:none;position:absolute;top:100%;left:0;right:0;
+  background:#222;border:1px solid #444;border-radius:6px;
+  margin-top:4px;max-height:250px;overflow-y:auto;z-index:20;
+  padding:4px 0;min-width:220px;
+}
+.folder-dropdown.open{display:block}
+.folder-item{
+  display:flex;align-items:center;gap:8px;padding:6px 12px;
+  cursor:pointer;font-size:12px;color:#ccc;
+}
+.folder-item:hover{background:#333}
+.folder-item input{accent-color:#e53935}
+.folder-item .fi-name{flex:1}
+
 .btn-row{display:flex;gap:10px;align-items:flex-end}
 button{
   background:#222;color:#e0e0e0;border:1px solid #444;border-radius:6px;
@@ -1618,6 +1748,16 @@ button:disabled{opacity:.5;cursor:not-allowed}
         <label>A/B Variations</label>
         <input type="number" id="num-variations" value="1" min="1" max="3">
       </div>
+      <div class="field">
+        <label>Source Folders</label>
+        <div class="folder-picker" id="folder-picker">
+          <button class="folder-btn" type="button" onclick="toggleFolderDropdown()">
+            <span id="folder-btn-label">All Folders</span>
+            <span class="arrow">&#9660;</span>
+          </button>
+          <div class="folder-dropdown" id="folder-dropdown"></div>
+        </div>
+      </div>
       <div class="btn-row">
         <button class="btn-primary" id="gen-btn" onclick="startGeneration()">Generate</button>
       </div>
@@ -1639,7 +1779,8 @@ button:disabled{opacity:.5;cursor:not-allowed}
     </div>
   </div>
 
-  <div class="pipeline-section">
+  <!-- pipeline section hidden -->
+  <div class="pipeline-section" style="display:none">
     <h3>Auto-Pipeline</h3>
     <p>Scan for new videos, analyze them with AI, and generate an optimized reel — all in one click.</p>
     <div class="pipeline-btns">
@@ -1691,12 +1832,13 @@ async function init() {
     var o = document.createElement('option');
     o.value = models[i].id;
     o.textContent = models[i].name;
-    if (i === 1) o.selected = true;  // default to Sonnet
+    if (i === 0) o.selected = true;  // default to most capable
     sel.appendChild(o);
   }
 
   loadResearch();
   loadExcluded();
+  loadFolders();
   loadHistory();
 }
 
@@ -1765,6 +1907,63 @@ function toggleHistCard(id) {
   arrow.classList.toggle('open');
 }
 
+// ── Folder picker ──
+var allFolders = [];
+
+async function loadFolders() {
+  allFolders = await fetch('/wizard/api/folders').then(function(r){return r.json()});
+  var dd = document.getElementById('folder-dropdown');
+  var html = '';
+  for (var i = 0; i < allFolders.length; i++) {
+    var f = allFolders[i];
+    html += '<label class="folder-item">'
+      + '<input type="checkbox" value="' + f + '" checked onchange="updateFolderLabel()"/>'
+      + '<span class="fi-name">' + f + '</span>'
+      + '</label>';
+  }
+  dd.innerHTML = html;
+  updateFolderLabel();
+}
+
+function toggleFolderDropdown() {
+  document.getElementById('folder-dropdown').classList.toggle('open');
+}
+
+function updateFolderLabel() {
+  var checks = document.querySelectorAll('#folder-dropdown input[type=checkbox]');
+  var total = checks.length;
+  var checked = 0;
+  for (var i = 0; i < checks.length; i++) {
+    if (checks[i].checked) checked++;
+  }
+  var label = document.getElementById('folder-btn-label');
+  if (checked === 0 || checked === total) {
+    label.textContent = 'All Folders';
+  } else {
+    label.textContent = checked + ' of ' + total + ' folders';
+  }
+}
+
+function getSelectedFolders() {
+  var checks = document.querySelectorAll('#folder-dropdown input[type=checkbox]');
+  var total = checks.length;
+  var selected = [];
+  for (var i = 0; i < checks.length; i++) {
+    if (checks[i].checked) selected.push(checks[i].value);
+  }
+  // If all selected, return empty (means "all")
+  if (selected.length === total) return [];
+  return selected;
+}
+
+// Close dropdown when clicking outside
+document.addEventListener('click', function(e) {
+  var picker = document.getElementById('folder-picker');
+  if (picker && !picker.contains(e.target)) {
+    document.getElementById('folder-dropdown').classList.remove('open');
+  }
+});
+
 function startGeneration() {
   if (generating) return;
   generating = true;
@@ -1790,7 +1989,7 @@ function startGeneration() {
   fetch('/wizard/api/generate', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({model: model, num_videos: numVids, variations: numVars}),
+    body: JSON.stringify({model: model, num_videos: numVids, variations: numVars, folders: getSelectedFolders()}),
   }).then(function() {
     var es = new EventSource('/wizard/api/status');
     es.onmessage = function(e) {
