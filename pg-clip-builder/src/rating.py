@@ -1,8 +1,13 @@
 """rating.py — Scene rating page for PeaceGrappler."""
 
-from flask import Blueprint, jsonify, request
+import hashlib
+import subprocess
+from pathlib import Path
+
+from flask import Blueprint, jsonify, request, send_file
 
 from db import get_all_scenes, get_scene_grades, save_grade
+from video import THUMB_DIR
 
 rating_bp = Blueprint("rating", __name__)
 
@@ -62,6 +67,41 @@ def api_tags():
     return jsonify(dict(sorted(tag_counts.items())))
 
 
+@rating_bp.route("/rate/api/clip/<int:scene_id>")
+def api_clip(scene_id):
+    """Extract and stream a scene's video clip."""
+    from db import get_scene_by_id
+    scene = get_scene_by_id(scene_id)
+    if not scene:
+        return "", 404
+
+    # Cache extracted clips
+    THUMB_DIR.mkdir(parents=True, exist_ok=True)
+    key = hashlib.md5(
+        f"clip:{scene['video_path']}@{scene['start_time']}@{scene['end_time']}".encode()
+    ).hexdigest()
+    clip_path = THUMB_DIR / f"clip_{key}.mp4"
+
+    if not clip_path.exists():
+        dur = scene["end_time"] - scene["start_time"]
+        try:
+            subprocess.run(
+                ["ffmpeg", "-ss", f"{scene['start_time']:.2f}",
+                 "-i", scene["video_path"],
+                 "-t", f"{dur:.2f}",
+                 "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+                 "-c:a", "aac", "-b:a", "96k",
+                 "-y", str(clip_path)],
+                capture_output=True, timeout=60,
+            )
+        except Exception:
+            return "", 500
+
+    if clip_path.exists():
+        return send_file(str(clip_path), mimetype="video/mp4")
+    return "", 500
+
+
 RATE_HTML = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -107,11 +147,26 @@ select:focus{outline:none;border-color:#e53935}
   width:100%;max-width:400px;overflow:hidden;
 }
 .rate-card .thumb-wrap{
-  position:relative;width:100%;aspect-ratio:9/16;background:#111;
+  position:relative;width:100%;aspect-ratio:9/16;background:#111;cursor:pointer;
 }
 .rate-card .thumb-wrap img{
   width:100%;height:100%;object-fit:cover;display:block;
 }
+.rate-card .thumb-wrap video{
+  width:100%;height:100%;object-fit:cover;display:block;
+}
+.rate-card .play-overlay{
+  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  background:rgba(0,0,0,.35);transition:opacity .2s;
+}
+.rate-card .thumb-wrap:hover .play-overlay{background:rgba(0,0,0,.5)}
+.play-circle{
+  width:64px;height:64px;background:rgba(229,57,53,.9);border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  transition:transform .15s;
+}
+.play-circle:hover{transform:scale(1.1)}
+.play-circle svg{width:28px;height:28px;fill:#fff;margin-left:4px}
 .rate-card .meta{padding:14px 16px}
 .rate-card .meta .filename{font-size:12px;color:#666;margin-bottom:4px}
 .rate-card .meta .tags{font-size:13px;color:#aaa;margin-bottom:4px}
@@ -182,7 +237,7 @@ select:focus{outline:none;border-color:#e53935}
   </div>
 
   <div id="card-area"></div>
-  <div class="hint">Keyboard: 1-5 to rate, S to skip, R to include already-rated</div>
+  <div class="hint">Keyboard: 1-5 to rate, S to skip, P to play clip</div>
 </div>
 
 <script>
@@ -235,8 +290,11 @@ function renderCard() {
   var tags = s.tags.length ? s.tags.join(', ') : 'no tags';
 
   area.innerHTML = '<div class="rate-card">'
-    + '<div class="thumb-wrap">'
+    + '<div class="thumb-wrap" id="thumb-wrap" onclick="playScene(' + s.id + ')">'
     + '<img src="/api/thumbnail/' + s.id + '" loading="lazy"/>'
+    + '<div class="play-overlay"><div class="play-circle">'
+    + '<svg viewBox="0 0 24 24"><polygon points="8,5 19,12 8,19"/></svg>'
+    + '</div></div>'
     + '</div>'
     + '<div class="meta">'
     + '<div class="filename">' + s.filename + ' [' + s.start.toFixed(1) + '-' + s.end.toFixed(1) + ']</div>'
@@ -271,6 +329,14 @@ function skip() {
   renderCard();
 }
 
+function playScene(sceneId) {
+  var wrap = document.getElementById('thumb-wrap');
+  if (wrap.querySelector('video')) return; // already playing
+  wrap.innerHTML = '<video controls autoplay src="/rate/api/clip/' + sceneId + '"></video>';
+  wrap.onclick = null;
+  wrap.style.cursor = 'default';
+}
+
 // Keyboard shortcuts
 document.addEventListener('keydown', function(e) {
   if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
@@ -279,6 +345,8 @@ document.addEventListener('keydown', function(e) {
     rate(parseInt(key));
   } else if (key === 's' || key === 'S') {
     skip();
+  } else if (key === 'p' || key === 'P') {
+    if (currentIdx < scenes.length) playScene(scenes[currentIdx].id);
   }
 });
 
