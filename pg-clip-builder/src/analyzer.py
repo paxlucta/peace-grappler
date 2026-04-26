@@ -532,6 +532,9 @@ td{font-size:13px}
 .status-done{background:#1b5e20;color:#a5d6a7}
 .status-partial{background:#e65100;color:#ffcc80}
 .status-new{background:#333;color:#888}
+.status-analyzing{background:#1565c0;color:#90caf9}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+.status-analyzing{animation:pulse 1.5s ease-in-out infinite}
 .progress{
   margin-top:20px;padding:16px;background:#1a1a1a;border-radius:8px;
   font-size:13px;max-height:300px;overflow-y:auto;display:none;
@@ -582,6 +585,7 @@ td{font-size:13px}
 var videos = [];
 var analyzing = false;
 var analyzingAll = false;
+var analyzingVideoId = null;
 
 async function scanVideos() {
   document.getElementById('scan-status').textContent = 'Scanning...';
@@ -609,7 +613,10 @@ function renderList() {
   for (var i = 0; i < videos.length; i++) {
     var v = videos[i];
     var status, statusClass;
-    if (!v.analyzed_at) {
+    if (analyzing && analyzingVideoId === v.id) {
+      status = 'Analyzing\u2026';
+      statusClass = 'status-analyzing';
+    } else if (!v.analyzed_at) {
       status = 'New';
       statusClass = 'status-new';
     } else if (v.needs_update) {
@@ -651,6 +658,7 @@ function renderList() {
 function analyzeVideo(videoId, force) {
   if (analyzing) return Promise.resolve(false);
   analyzing = true;
+  analyzingVideoId = videoId;
   renderList();
 
   var prog = document.getElementById('progress');
@@ -674,6 +682,7 @@ function analyzeVideo(videoId, force) {
         if (msg.startsWith('DONE:')) {
           es.close();
           analyzing = false;
+          analyzingVideoId = null;
           var ok = msg === 'DONE:ok';
           addLine(ok ? 'Analysis complete!' : 'Analysis failed',
                   ok ? 'done' : 'error');
@@ -686,12 +695,14 @@ function analyzeVideo(videoId, force) {
       es.onerror = function() {
         es.close();
         analyzing = false;
+        analyzingVideoId = null;
         addLine('Connection lost', 'error');
         renderList();
         resolve(false);
       };
     }).catch(function(e) {
       analyzing = false;
+      analyzingVideoId = null;
       addLine('Error: ' + e.message, 'error');
       renderList();
       resolve(false);
