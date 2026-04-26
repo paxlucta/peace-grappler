@@ -541,10 +541,14 @@ def _plan_video(model, research, scenes, music_files, feedback,
 
     if enable_text_overlays:
         text_instruction = (
-            "- TEXT OVERLAYS ARE ENABLED. Add \"text_overlay\" to clips where "
-            "short punchy text would boost engagement (impact moments, fighter "
-            "names, stats, hooks like 'WATCH THIS'). Max 6 words per overlay. "
-            "Don't add text to every clip — only where it adds value."
+            "- TEXT OVERLAYS ARE ENABLED AND REQUIRED. You MUST add \"text_overlay\" "
+            "to at least 3-4 clips. Use short punchy ALL-CAPS text (2-6 words) that "
+            "drives engagement:\n"
+            "  Examples: 'WATCH THIS', 'KO OF THE YEAR', 'HE DIDN'T SEE IT COMING', "
+            "'DEVASTATING', 'PURE POWER', 'SUBMISSION LOCKED'\n"
+            "  Add text to: the hook clip, the climax, any dramatic moment, the ending.\n"
+            "  Works on both portrait AND widescreen scenes.\n"
+            "  Set to null only for clips where text would distract."
         )
     else:
         text_instruction = (
@@ -937,7 +941,7 @@ def _auto_analyze_folders(model, folders):
 
 def _generate(model, num_videos, num_variations=1, folders=None,
               mute_source=False, enable_text_overlays=False,
-              music_folders=None):
+              music_folders=None, include_wide=True):
     """Full wizard generation flow. Runs in a background thread."""
     try:
         # 0. Auto-analyze unanalyzed videos in selected folders
@@ -960,6 +964,13 @@ def _generate(model, num_videos, num_variations=1, folders=None,
             from video import VIDEO_DIR
             scenes = _filter_scenes_by_folders(scenes, folders, VIDEO_DIR)
             emit(f"Filtered to {len(scenes)} scenes from selected folders")
+
+        # Filter out wide scenes if not included
+        if not include_wide:
+            before = len(scenes)
+            scenes = [s for s in scenes if not s.get("wide", False)]
+            if len(scenes) < before:
+                emit(f"Excluded {before - len(scenes)} widescreen scenes")
 
         if not scenes:
             emit("No analyzed scenes found for the selected folders.")
@@ -1256,6 +1267,7 @@ def api_generate():
     mute_source = data.get("mute_source", False)
     enable_text_overlays = data.get("text_overlays", False)
     music_folders = data.get("music_folders", [])
+    include_wide = data.get("include_wide", True)
 
     valid_ids = {m["id"] for m in MODELS}
     if model not in valid_ids:
@@ -1263,7 +1275,8 @@ def api_generate():
 
     threading.Thread(target=_generate,
                      args=(model, num_videos, num_variations, folders,
-                           mute_source, enable_text_overlays, music_folders),
+                           mute_source, enable_text_overlays, music_folders,
+                           include_wide),
                      daemon=True).start()
     return jsonify({"status": "started"})
 
@@ -1881,6 +1894,9 @@ button:disabled{opacity:.5;cursor:not-allowed}
       <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#aaa;cursor:pointer">
         <input type="checkbox" id="text-overlays"> Enable text overlays
       </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#aaa;cursor:pointer">
+        <input type="checkbox" id="include-wide" checked> Include widescreen scenes
+      </label>
       <div class="btn-row">
         <button class="btn-primary" id="gen-btn" onclick="startGeneration()">Generate</button>
       </div>
@@ -2134,6 +2150,7 @@ function startGeneration() {
       music_folders: getSelectedFromPicker('music-dropdown'),
       mute_source: document.getElementById('mute-source').checked,
       text_overlays: document.getElementById('text-overlays').checked,
+      include_wide: document.getElementById('include-wide').checked,
     }),
   }).then(function() {
     var es = new EventSource('/wizard/api/status');
