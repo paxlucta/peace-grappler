@@ -1760,11 +1760,15 @@ button:disabled{opacity:.5;cursor:not-allowed}
 }
 .result-card .result-header .filename{font-weight:600;color:#fff}
 .result-card .result-header .dur{color:#888;font-size:13px}
-.result-card .result-header .rationale{
-  font-size:12px;color:#818cf8;font-style:italic;margin-left:auto;
+.result-card .result-layout{display:flex;gap:20px;align-items:flex-start}
+.result-card .result-video{flex-shrink:0;width:280px}
+.result-card .result-video video{
+  width:100%;border-radius:8px;background:#000;
 }
-.result-card video{
-  width:100%;max-height:500px;border-radius:8px;background:#000;
+.result-card .result-detail{flex:1;min-width:0}
+@media(max-width:700px){
+  .result-card .result-layout{flex-direction:column}
+  .result-card .result-video{width:100%}
 }
 .feedback-form{margin-top:12px}
 .feedback-form textarea{
@@ -1803,10 +1807,15 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .hist-expand-arrow.open{transform:rotate(90deg)}
 .hist-body{display:none;padding:0 16px 16px;border-top:1px solid #2a2a2a}
 .hist-body.open{display:block}
-.hist-body video{
-  width:100%;max-height:500px;border-radius:8px;background:#000;margin-top:12px;
-}
+.hist-layout{display:flex;gap:20px;align-items:flex-start;margin-top:12px}
+.hist-video{flex-shrink:0;width:280px}
+.hist-video video{width:100%;border-radius:8px;background:#000}
+.hist-detail{flex:1;min-width:0}
 .hist-body .feedback-form{margin-top:12px}
+@media(max-width:700px){
+  .hist-layout{flex-direction:column}
+  .hist-video{width:100%}
+}
 .hist-actions{
   display:flex;gap:8px;margin-top:12px;align-items:center;flex-wrap:wrap;
 }
@@ -2019,7 +2028,11 @@ async function loadHistory() {
       + '<span class="hist-expand-arrow" id="hc-arrow-' + v.id + '">&#9654;</span>'
       + '</div>'
       + '<div class="hist-body" id="hc-body-' + v.id + '">'
+      + '<div class="hist-layout">'
+      + '<div class="hist-video">'
       + '<video controls preload="none" src="/wizard/api/video/' + v.id + '"></video>'
+      + '</div>'
+      + '<div class="hist-detail">'
       + buildCaptionBox(v.caption || '', v.id)
       + buildSceneChips(v.scenes || [])
       + fbBodyHtml
@@ -2034,6 +2047,7 @@ async function loadHistory() {
       + '<svg viewBox="0 0 24 24"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/></svg>'
       + 'Email Video</button>'
       + '</div>'
+      + '</div></div>'
       + '</div>'
       + '</div>';
   }
@@ -2222,7 +2236,11 @@ function showResults() {
         + '<span class="filename">' + escHtml(match.filename) + '</span>'
         + '<span class="dur">' + match.duration + 's</span>'
         + '</div>'
+        + '<div class="result-layout">'
+        + '<div class="result-video">'
         + '<video controls src="/wizard/api/video/' + match.id + '"></video>'
+        + '</div>'
+        + '<div class="result-detail">'
         + buildCaptionBox(match.caption, match.id)
         + buildSceneChips(match.scenes || [])
         + '<div class="hist-actions">'
@@ -2235,6 +2253,7 @@ function showResults() {
         + '<div class="fb-row">'
         + '<button onclick="submitFeedback(' + match.id + ')">Submit Feedback</button>'
         + '<span class="fb-status" id="fb-status-' + match.id + '"></span>'
+        + '</div></div>'
         + '</div></div>';
       cards.appendChild(card);
     }
