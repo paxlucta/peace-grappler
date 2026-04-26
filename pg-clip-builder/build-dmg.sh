@@ -55,18 +55,57 @@ echo ""
 echo "DMG created: ${DMG_PATH}"
 echo "Size: $(du -h "$DMG_PATH" | cut -f1)"
 
-# Open email with DMG attached and detailed instructions
-echo "Opening Mail with DMG attached..."
+# Upload DMG as a GitHub release
+echo "Creating GitHub release..."
+VERSION="v$(date +%Y%m%d-%H%M%S)"
+RELEASE_URL=""
+
+if command -v gh &>/dev/null; then
+    # Delete previous 'latest' release if it exists
+    gh release delete latest --yes --repo paxlucta/peace-grappler 2>/dev/null || true
+    git tag -d latest 2>/dev/null || true
+    git push origin :refs/tags/latest 2>/dev/null || true
+
+    # Create new release with DMG
+    gh release create latest "$DMG_PATH" \
+        --repo paxlucta/peace-grappler \
+        --title "PeaceGrappler Installer" \
+        --notes "Latest PeaceGrappler installer for macOS." \
+        --latest 2>/dev/null
+
+    RELEASE_URL=$(gh release view latest --repo paxlucta/peace-grappler --json assets --jq '.assets[0].url' 2>/dev/null)
+
+    if [ -z "$RELEASE_URL" ]; then
+        RELEASE_URL="https://github.com/paxlucta/peace-grappler/releases/latest"
+    fi
+    echo "Release created: $RELEASE_URL"
+else
+    echo "Warning: gh CLI not found. Skipping GitHub release."
+    echo "Install with: brew install gh"
+    RELEASE_URL="https://github.com/paxlucta/peace-grappler/releases/latest"
+fi
+
+# Open email with download link
+echo "Opening Mail..."
+
+DOWNLOAD_LINK="$RELEASE_URL"
 
 EMAIL_BODY="Hi!
 
 Here's PeaceGrappler — the AI-powered MMA highlight reel builder.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DOWNLOAD
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Download the installer here:
+${DOWNLOAD_LINK}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 HOW TO INSTALL (one-time setup, ~5 min)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-1. Download the attached PeaceGrappler.dmg file
+1. Click the download link above to get PeaceGrappler.dmg
 2. Double-click the DMG file to open it
 3. Drag the \"PeaceGrappler\" folder to your Desktop (or wherever you like)
 4. Open the PeaceGrappler folder
@@ -128,9 +167,6 @@ Everything else is installed automatically. Enjoy!"
 osascript -e "
 tell application \"Mail\"
     set newMsg to make new outgoing message with properties {subject:\"PeaceGrappler — MMA Highlight Reel Builder\", content:\"$(echo "$EMAIL_BODY" | sed 's/"/\\"/g')\", visible:true}
-    tell newMsg
-        make new attachment with properties {file name:POSIX file \"${DMG_PATH}\"} at after the last paragraph
-    end tell
     activate
 end tell
 "
