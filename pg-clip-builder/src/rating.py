@@ -1,4 +1,4 @@
-"""rating.py — Scene rating page for PeaceGrappler."""
+"""rating.py — Scenes page for PeaceGrappler."""
 
 import hashlib
 import subprocess
@@ -14,24 +14,28 @@ rating_bp = Blueprint("rating", __name__)
 
 @rating_bp.route("/rate")
 def rate_page():
-    return RATE_HTML
+    return SCENES_HTML
 
 
 @rating_bp.route("/rate/api/scenes")
 def api_scenes():
-    """Return all scenes with grade info for rating."""
-    scenes = get_all_scenes(include_ignored=True, include_excluded=False)
+    """Return all scenes including excluded, with grade/status info."""
+    scenes = get_all_scenes(include_ignored=True, include_excluded=True)
     grades = get_scene_grades()
-    tag = request.args.get("tag", "")
 
     result = []
     for s in scenes:
-        if tag and tag not in s["tags"]:
-            continue
         dur = round(s["end_time"] - s["start_time"], 1)
         grade_info = grades.get(s["id"])
         avg = round(grade_info["total_score"] / grade_info["times_graded"], 1) \
             if grade_info else None
+        # Determine rating status
+        if s.get("excluded"):
+            status = "down"
+        elif grade_info and avg >= 3:
+            status = "up"
+        else:
+            status = "unrated"
         result.append({
             "id": s["id"],
             "filename": s["video_filename"],
@@ -40,15 +44,15 @@ def api_scenes():
             "duration": dur,
             "tags": s["tags"],
             "wide": s["wide"],
-            "avg_grade": avg,
-            "times_graded": grade_info["times_graded"] if grade_info else 0,
+            "excluded": s.get("excluded", False),
+            "status": status,
         })
     return jsonify(result)
 
 
 @rating_bp.route("/rate/api/grade", methods=["POST"])
 def api_grade():
-    """Thumbs up (score=5) or thumbs down (score=1 + exclude)."""
+    """Thumbs up (keep) or thumbs down (exclude)."""
     from db import set_scene_excluded
     data = request.json or {}
     scene_id = data.get("scene_id")
@@ -57,20 +61,11 @@ def api_grade():
         return jsonify({"error": "scene_id and action (up/down) required"}), 400
     if action == "up":
         save_grade(scene_id, 5)
+        set_scene_excluded(scene_id, False)
     else:
         save_grade(scene_id, 1)
         set_scene_excluded(scene_id, True)
     return jsonify({"status": "ok", "action": action})
-
-
-@rating_bp.route("/rate/api/tags")
-def api_tags():
-    scenes = get_all_scenes(include_ignored=True)
-    tag_counts = {}
-    for s in scenes:
-        for t in s["tags"]:
-            tag_counts[t] = tag_counts.get(t, 0) + 1
-    return jsonify(dict(sorted(tag_counts.items())))
 
 
 @rating_bp.route("/rate/api/clip/<int:scene_id>")
@@ -81,7 +76,6 @@ def api_clip(scene_id):
     if not scene:
         return "", 404
 
-    # Cache extracted clips
     THUMB_DIR.mkdir(parents=True, exist_ok=True)
     key = hashlib.md5(
         f"clip:{scene['video_path']}@{scene['start_time']}@{scene['end_time']}".encode()
@@ -108,12 +102,12 @@ def api_clip(scene_id):
     return "", 500
 
 
-RATE_HTML = r"""<!DOCTYPE html>
+SCENES_HTML = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PeaceGrappler - Rate Scenes</title>
+<title>PeaceGrappler - Scenes</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{
@@ -133,88 +127,110 @@ nav a{color:#aaa;text-decoration:none;font-size:12px;padding:4px 8px;
 nav a:hover{color:#fff;border-color:#888}
 nav a.active{color:#e53935;border-color:#e53935}
 
-.content{flex:1;display:flex;flex-direction:column;align-items:center;padding:24px}
+.content{flex:1;padding:16px 20px;overflow-y:auto}
 
-/* -- Controls -- */
-.controls{
-  display:flex;gap:12px;align-items:center;margin-bottom:20px;flex-wrap:wrap;
+/* -- Tag filters -- */
+.tag-bar{
+  display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;
 }
-.controls label{font-size:12px;color:#888;font-weight:600;text-transform:uppercase}
-select{
-  background:#222;color:#e0e0e0;border:1px solid #444;border-radius:6px;
-  padding:6px 12px;font-size:13px;
+.tag-chip{
+  padding:4px 10px;border-radius:14px;font-size:11px;font-weight:600;
+  background:#1a1a1a;border:1px solid #333;cursor:pointer;
+  transition:all .15s;user-select:none;color:#aaa;
 }
-select:focus{outline:none;border-color:#e53935}
-.progress-text{font-size:13px;color:#888}
+.tag-chip:hover{border-color:#666;color:#fff}
+.tag-chip.active{background:#e53935;border-color:#e53935;color:#fff}
+.tag-chip .chip-count{opacity:.6;margin-left:2px}
+.scene-count{font-size:13px;color:#666;margin-bottom:12px}
 
-/* -- Rating card -- */
-.rate-card{
-  background:#141414;border:1px solid #2a2a2a;border-radius:12px;
-  width:100%;max-width:400px;overflow:hidden;
+/* -- Scene grid -- */
+.scene-grid{
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;
 }
-.rate-card .thumb-wrap{
-  position:relative;width:100%;aspect-ratio:9/16;background:#111;cursor:pointer;
+.scene-card{
+  background:#1a1a1a;border-radius:8px;overflow:hidden;
+  position:relative;transition:transform .15s,opacity .2s;
 }
-.rate-card .thumb-wrap img{
-  width:100%;height:100%;object-fit:cover;display:block;
+.scene-card:hover{transform:translateY(-2px)}
+.scene-card.excluded{opacity:.35}
+.scene-card .thumb{
+  width:100%;aspect-ratio:9/16;object-fit:cover;display:block;background:#111;
+  cursor:pointer;
 }
-.rate-card .thumb-wrap video{
-  width:100%;height:100%;object-fit:cover;display:block;
+.scene-card .play-overlay{
+  position:absolute;top:0;left:0;right:0;bottom:56px;
+  display:flex;align-items:center;justify-content:center;
+  background:rgba(0,0,0,.3);opacity:0;transition:opacity .2s;cursor:pointer;
 }
-.rate-card .play-overlay{
-  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-  background:rgba(0,0,0,.35);transition:opacity .2s;
-}
-.rate-card .thumb-wrap:hover .play-overlay{background:rgba(0,0,0,.5)}
+.scene-card:hover .play-overlay{opacity:1}
 .play-circle{
-  width:64px;height:64px;background:rgba(229,57,53,.9);border-radius:50%;
-  display:flex;align-items:center;justify-content:center;
-  transition:transform .15s;
-}
-.play-circle:hover{transform:scale(1.1)}
-.play-circle svg{width:28px;height:28px;fill:#fff;margin-left:4px}
-.rate-card .meta{padding:14px 16px}
-.rate-card .meta .filename{font-size:12px;color:#666;margin-bottom:4px}
-.rate-card .meta .tags{font-size:13px;color:#aaa;margin-bottom:4px}
-.rate-card .meta .dur{font-size:12px;color:#555}
-.rate-card .meta .prev-grade{
-  font-size:12px;color:#818cf8;margin-top:4px;
-}
-
-/* -- Thumbs buttons -- */
-.thumbs{
-  display:flex;justify-content:center;gap:24px;padding:16px;
-  border-top:1px solid #2a2a2a;
-}
-.thumb-btn{
-  width:64px;height:64px;border-radius:50%;border:2px solid #444;
-  background:#1a1a1a;cursor:pointer;transition:all .15s;
+  width:40px;height:40px;background:rgba(229,57,53,.9);border-radius:50%;
   display:flex;align-items:center;justify-content:center;
 }
-.thumb-btn:hover{transform:scale(1.15)}
-.thumb-btn svg{width:28px;height:28px}
-.thumb-btn.down{border-color:#ef5350}
-.thumb-btn.down:hover{background:#ef5350}
-.thumb-btn.down svg{fill:#ef5350}
-.thumb-btn.down:hover svg{fill:#fff}
-.thumb-btn.up{border-color:#4caf50}
-.thumb-btn.up:hover{background:#4caf50}
-.thumb-btn.up svg{fill:#4caf50}
-.thumb-btn.up:hover svg{fill:#fff}
-
-.skip-btn{
-  display:block;margin:0 auto 20px;background:none;border:1px solid #333;
-  color:#666;border-radius:6px;padding:6px 20px;font-size:12px;cursor:pointer;
+.play-circle svg{width:18px;height:18px;fill:#fff;margin-left:2px}
+.scene-card .dur-badge{
+  position:absolute;top:6px;right:6px;
+  background:rgba(0,0,0,.75);color:#fff;font-size:10px;font-weight:600;
+  padding:2px 5px;border-radius:3px;
 }
-.skip-btn:hover{color:#aaa;border-color:#555}
-
-/* -- Empty / done -- */
-.done-msg{
-  text-align:center;padding:40px;color:#4caf50;font-size:18px;font-weight:600;
+.scene-card .unrated-badge{
+  position:absolute;top:6px;left:6px;
+  background:rgba(255,152,0,.85);color:#fff;font-size:9px;font-weight:700;
+  padding:1px 5px;border-radius:3px;
+}
+.scene-card .excluded-badge{
+  position:absolute;top:6px;left:6px;
+  background:rgba(229,57,53,.85);color:#fff;font-size:9px;font-weight:700;
+  padding:1px 5px;border-radius:3px;
+}
+.scene-card .info{padding:4px 8px 2px}
+.scene-card .fn{
+  font-size:9px;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.scene-card .tg{
+  font-size:9px;color:#888;margin-top:1px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
 
-/* -- Keyboard hint -- */
-.hint{text-align:center;font-size:11px;color:#444;margin-top:12px}
+/* -- Thumbs row on each card -- */
+.scene-card .vote-row{
+  display:flex;justify-content:center;gap:8px;padding:6px;
+  border-top:1px solid #222;
+}
+.vote-btn{
+  width:32px;height:32px;border-radius:50%;border:1.5px solid #444;
+  background:#111;cursor:pointer;transition:all .12s;
+  display:flex;align-items:center;justify-content:center;
+}
+.vote-btn:hover{transform:scale(1.15)}
+.vote-btn svg{width:16px;height:16px}
+.vote-btn.vdown{border-color:#555}
+.vote-btn.vdown svg{fill:#666}
+.vote-btn.vdown:hover{background:#ef5350;border-color:#ef5350}
+.vote-btn.vdown:hover svg{fill:#fff}
+.vote-btn.vdown.active{background:#ef5350;border-color:#ef5350}
+.vote-btn.vdown.active svg{fill:#fff}
+.vote-btn.vup{border-color:#555}
+.vote-btn.vup svg{fill:#666}
+.vote-btn.vup:hover{background:#4caf50;border-color:#4caf50}
+.vote-btn.vup:hover svg{fill:#fff}
+.vote-btn.vup.active{background:#4caf50;border-color:#4caf50}
+.vote-btn.vup.active svg{fill:#fff}
+
+/* -- Video player overlay -- */
+.player-overlay{
+  display:none;position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:100;
+  flex-direction:column;align-items:center;justify-content:center;
+}
+.player-overlay.active{display:flex}
+.player-wrap{position:relative;max-width:90vw;max-height:85vh}
+.player-wrap video{max-width:90vw;max-height:85vh;border-radius:8px;background:#000}
+.player-close{
+  position:absolute;top:-36px;right:0;
+  background:none;color:#fff;border:none;font-size:28px;
+  cursor:pointer;padding:4px 8px;opacity:.7;
+}
+.player-close:hover{opacity:1}
 </style>
 </head>
 <body>
@@ -226,147 +242,178 @@ select:focus{outline:none;border-color:#e53935}
     <a href="/analyze">Analyze</a>
     <a href="/library">Library</a>
     <a href="/wizard">AI Wizard</a>
-    <a href="/rate" class="active">Rate</a>
+    <a href="/rate" class="active">Scenes</a>
   </nav>
 </header>
 
 <div class="content">
-  <div class="controls">
-    <label>Filter</label>
-    <select id="tag-filter" onchange="loadScenes()">
-      <option value="">All Scenes</option>
-      <option value="__unrated__">Unrated Only</option>
-    </select>
-    <span class="progress-text" id="progress-text"></span>
-  </div>
+  <div class="tag-bar" id="tag-bar"></div>
+  <div class="scene-count" id="scene-count"></div>
+  <div class="scene-grid" id="scene-grid"></div>
+</div>
 
-  <div id="card-area"></div>
-  <div class="hint">Keyboard: Y or &rarr; thumbs up, N or &larr; thumbs down, Space to play, S to skip</div>
+<div class="player-overlay" id="player-overlay">
+  <div class="player-wrap">
+    <button class="player-close" onclick="closePlayer()">&times;</button>
+    <video id="player-video" controls></video>
+  </div>
 </div>
 
 <script>
-var scenes = [];
-var currentIdx = 0;
-var showRated = true;
+var allScenes = [];
+var activeTag = '';
 
-async function loadScenes() {
-  var tag = document.getElementById('tag-filter').value;
-  var url = '/rate/api/scenes';
-  if (tag && tag !== '__unrated__') {
-    url += '?tag=' + encodeURIComponent(tag);
-  }
-
-  var data = await fetch(url).then(function(r){return r.json()});
-
-  if (tag === '__unrated__') {
-    scenes = data.filter(function(s) { return s.times_graded === 0; });
-  } else {
-    scenes = data;
-  }
-
-  // Shuffle for variety
-  for (var i = scenes.length - 1; i > 0; i--) {
-    var j = Math.floor(Math.random() * (i + 1));
-    var tmp = scenes[i]; scenes[i] = scenes[j]; scenes[j] = tmp;
-  }
-
-  currentIdx = 0;
-  renderCard();
+async function init() {
+  allScenes = await fetch('/rate/api/scenes').then(function(r){return r.json()});
+  renderTagBar();
+  renderGrid();
 }
 
-function renderCard() {
-  var area = document.getElementById('card-area');
-  var prog = document.getElementById('progress-text');
-
-  if (currentIdx >= scenes.length) {
-    area.innerHTML = '<div class="done-msg">All scenes rated!</div>';
-    prog.textContent = scenes.length + ' / ' + scenes.length;
-    return;
+function renderTagBar() {
+  var bar = document.getElementById('tag-bar');
+  // Collect tags + counts
+  var tagCounts = {};
+  var unratedCount = 0;
+  var hiddenCount = 0;
+  for (var i = 0; i < allScenes.length; i++) {
+    var s = allScenes[i];
+    if (s.status === 'unrated') unratedCount++;
+    if (s.excluded) hiddenCount++;
+    for (var j = 0; j < s.tags.length; j++) {
+      tagCounts[s.tags[j]] = (tagCounts[s.tags[j]] || 0) + 1;
+    }
   }
 
-  var s = scenes[currentIdx];
-  prog.textContent = (currentIdx + 1) + ' / ' + scenes.length;
-
-  var tags = s.tags.length ? s.tags.join(', ') : 'no tags';
-
-  area.innerHTML = '<div class="rate-card">'
-    + '<div class="thumb-wrap" id="thumb-wrap" onclick="playScene(' + s.id + ')">'
-    + '<img src="/api/thumbnail/' + s.id + '" loading="lazy"/>'
-    + '<div class="play-overlay"><div class="play-circle">'
-    + '<svg viewBox="0 0 24 24"><polygon points="8,5 19,12 8,19"/></svg>'
-    + '</div></div>'
-    + '</div>'
-    + '<div class="meta">'
-    + '<div class="filename">' + s.filename + ' [' + s.start.toFixed(1) + '-' + s.end.toFixed(1) + ']</div>'
-    + '<div class="tags">' + tags + '</div>'
-    + '<div class="dur">' + s.duration + 's' + (s.wide ? ' (wide)' : '') + '</div>'
-    + '</div>'
-    + '<div class="thumbs">'
-    + '<button class="thumb-btn down" onclick="rate(\'down\')" title="Exclude this scene">'
-    + '<svg viewBox="0 0 24 24"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>'
-    + '</button>'
-    + '<button class="thumb-btn up" onclick="rate(\'up\')" title="Keep this scene">'
-    + '<svg viewBox="0 0 24 24"><path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg>'
-    + '</button>'
-    + '</div>'
-    + '</div>'
-    + '<button class="skip-btn" onclick="skip()">Skip</button>';
+  var html = '';
+  // All chip
+  html += '<span class="tag-chip' + (activeTag === '' ? ' active' : '') + '" onclick="setTag(\'\')">'
+    + 'All <span class="chip-count">(' + allScenes.length + ')</span></span>';
+  // Unrated chip
+  if (unratedCount > 0) {
+    html += '<span class="tag-chip' + (activeTag === '__unrated__' ? ' active' : '')
+      + '" style="border-color:#ff9800;color:#ffb74d" onclick="setTag(\'__unrated__\')">'
+      + 'Unrated <span class="chip-count">(' + unratedCount + ')</span></span>';
+  }
+  // Hidden chip
+  if (hiddenCount > 0) {
+    html += '<span class="tag-chip' + (activeTag === '__hidden__' ? ' active' : '')
+      + '" style="border-color:#ef5350;color:#ef9a9a" onclick="setTag(\'__hidden__\')">'
+      + 'Hidden <span class="chip-count">(' + hiddenCount + ')</span></span>';
+  }
+  // Regular tags
+  var sortedTags = Object.keys(tagCounts).sort();
+  for (var k = 0; k < sortedTags.length; k++) {
+    var t = sortedTags[k];
+    html += '<span class="tag-chip' + (activeTag === t ? ' active' : '') + '" onclick="setTag(\'' + t + '\')">'
+      + t + ' <span class="chip-count">(' + tagCounts[t] + ')</span></span>';
+  }
+  bar.innerHTML = html;
 }
 
-async function rate(action) {
-  var s = scenes[currentIdx];
+function setTag(tag) {
+  activeTag = tag;
+  renderTagBar();
+  renderGrid();
+}
+
+function getFiltered() {
+  if (activeTag === '__unrated__') {
+    return allScenes.filter(function(s) { return s.status === 'unrated'; });
+  }
+  if (activeTag === '__hidden__') {
+    return allScenes.filter(function(s) { return s.excluded; });
+  }
+  if (activeTag) {
+    return allScenes.filter(function(s) { return s.tags.indexOf(activeTag) >= 0 && !s.excluded; });
+  }
+  return allScenes.filter(function(s) { return !s.excluded; });
+}
+
+function renderGrid() {
+  var filtered = getFiltered();
+  document.getElementById('scene-count').textContent = filtered.length + ' scene' + (filtered.length !== 1 ? 's' : '');
+
+  var grid = document.getElementById('scene-grid');
+  var html = '';
+  for (var i = 0; i < filtered.length; i++) {
+    var s = filtered[i];
+    var tags = s.tags.length > 3
+      ? s.tags.slice(0,3).join(', ') + '\u2026'
+      : s.tags.join(', ');
+    var cls = 'scene-card' + (s.excluded ? ' excluded' : '');
+
+    var badge = '';
+    if (s.excluded) {
+      badge = '<span class="excluded-badge">HIDDEN</span>';
+    } else if (s.status === 'unrated') {
+      badge = '<span class="unrated-badge">UNRATED</span>';
+    }
+
+    html += '<div class="' + cls + '" id="sc-' + s.id + '">'
+      + '<img class="thumb" src="/api/thumbnail/' + s.id + '" loading="lazy" onclick="playScene(' + s.id + ')"/>'
+      + '<div class="play-overlay" onclick="playScene(' + s.id + ')"><div class="play-circle">'
+      + '<svg viewBox="0 0 24 24"><polygon points="8,5 19,12 8,19"/></svg></div></div>'
+      + '<span class="dur-badge">' + s.duration + 's</span>'
+      + badge
+      + '<div class="info">'
+      + '<div class="fn">' + s.filename + ' [' + s.start.toFixed(1) + '-' + s.end.toFixed(1) + ']</div>'
+      + '<div class="tg">' + tags + '</div>'
+      + '</div>'
+      + '<div class="vote-row">'
+      + '<button class="vote-btn vdown' + (s.status === 'down' ? ' active' : '') + '" onclick="vote(' + s.id + ',\'down\')" title="Hide scene">'
+      + '<svg viewBox="0 0 24 24"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>'
+      + '</button>'
+      + '<button class="vote-btn vup' + (s.status === 'up' ? ' active' : '') + '" onclick="vote(' + s.id + ',\'up\')" title="Keep scene">'
+      + '<svg viewBox="0 0 24 24"><path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg>'
+      + '</button>'
+      + '</div>'
+      + '</div>';
+  }
+  grid.innerHTML = html;
+}
+
+async function vote(sceneId, action) {
   await fetch('/rate/api/grade', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({scene_id: s.id, action: action}),
+    body: JSON.stringify({scene_id: sceneId, action: action}),
   });
-  currentIdx++;
-  renderCard();
-}
-
-function skip() {
-  currentIdx++;
-  renderCard();
+  // Update local state
+  for (var i = 0; i < allScenes.length; i++) {
+    if (allScenes[i].id === sceneId) {
+      allScenes[i].status = action;
+      allScenes[i].excluded = action === 'down';
+      break;
+    }
+  }
+  renderTagBar();
+  renderGrid();
 }
 
 function playScene(sceneId) {
-  var wrap = document.getElementById('thumb-wrap');
-  if (wrap.querySelector('video')) return; // already playing
-  wrap.innerHTML = '<video controls autoplay src="/rate/api/clip/' + sceneId + '"></video>';
-  wrap.onclick = null;
-  wrap.style.cursor = 'default';
+  var overlay = document.getElementById('player-overlay');
+  var video = document.getElementById('player-video');
+  video.src = '/rate/api/clip/' + sceneId;
+  overlay.classList.add('active');
+  video.play();
 }
 
-// Keyboard shortcuts
+function closePlayer() {
+  var overlay = document.getElementById('player-overlay');
+  var video = document.getElementById('player-video');
+  video.pause();
+  video.src = '';
+  overlay.classList.remove('active');
+}
+
 document.addEventListener('keydown', function(e) {
-  if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
-  var key = e.key;
-  if (key === 'ArrowRight' || key === 'y' || key === 'Y') {
-    rate('up');
-  } else if (key === 'ArrowLeft' || key === 'n' || key === 'N') {
-    rate('down');
-  } else if (key === 's' || key === 'S') {
-    skip();
-  } else if (key === 'p' || key === 'P' || key === ' ') {
-    e.preventDefault();
-    if (currentIdx < scenes.length) playScene(scenes[currentIdx].id);
-  }
+  if (e.key === 'Escape') closePlayer();
+});
+document.getElementById('player-overlay').addEventListener('click', function(e) {
+  if (e.target === this) closePlayer();
 });
 
-// Load tags into filter
-async function loadTags() {
-  var tags = await fetch('/rate/api/tags').then(function(r){return r.json()});
-  var sel = document.getElementById('tag-filter');
-  for (var tag in tags) {
-    var o = document.createElement('option');
-    o.value = tag;
-    o.textContent = tag + ' (' + tags[tag] + ')';
-    sel.appendChild(o);
-  }
-}
-
-loadTags();
-loadScenes();
+init();
 </script>
 </body>
 </html>"""

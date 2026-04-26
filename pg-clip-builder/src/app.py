@@ -108,11 +108,21 @@ header{position:sticky !important;top:0;z-index:50}
   var nav = document.querySelector('header nav');
   if (nav) {
     if (!nav.querySelector('a[href="/rate"]')) {
-      var rateLink = document.createElement('a');
-      rateLink.href = '/rate';
-      rateLink.textContent = 'Rate';
-      if (location.pathname === '/rate') rateLink.className = 'active';
-      nav.appendChild(rateLink);
+      var scenesLink = document.createElement('a');
+      scenesLink.href = '/rate';
+      scenesLink.textContent = 'Scenes';
+      scenesLink.style.position = 'relative';
+      if (location.pathname === '/rate') scenesLink.className = 'active';
+      nav.appendChild(scenesLink);
+      fetch('/rate/api/scenes').then(function(r){return r.json()}).then(function(data){
+        var unrated = data.filter(function(s){return !s.excluded && s.status==='unrated'}).length;
+        if (unrated > 0) {
+          var badge = document.createElement('span');
+          badge.style.cssText = 'position:absolute;top:-6px;right:-6px;background:#e53935;color:#fff;font-size:9px;font-weight:700;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 4px;';
+          badge.textContent = unrated;
+          scenesLink.appendChild(badge);
+        }
+      });
     }
     var btn = document.createElement('button');
     btn.className = 'update-btn';
