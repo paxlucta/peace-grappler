@@ -20,7 +20,7 @@ def rate_page():
 @rating_bp.route("/rate/api/scenes")
 def api_scenes():
     """Return all scenes with grade info for rating."""
-    scenes = get_all_scenes(include_ignored=True)
+    scenes = get_all_scenes(include_ignored=True, include_excluded=False)
     grades = get_scene_grades()
     tag = request.args.get("tag", "")
 
@@ -48,13 +48,19 @@ def api_scenes():
 
 @rating_bp.route("/rate/api/grade", methods=["POST"])
 def api_grade():
+    """Thumbs up (score=5) or thumbs down (score=1 + exclude)."""
+    from db import set_scene_excluded
     data = request.json or {}
     scene_id = data.get("scene_id")
-    score = data.get("score")
-    if not scene_id or score not in (1, 2, 3, 4, 5):
-        return jsonify({"error": "scene_id and score (1-5) required"}), 400
-    save_grade(scene_id, score)
-    return jsonify({"status": "ok"})
+    action = data.get("action")  # "up" or "down"
+    if not scene_id or action not in ("up", "down"):
+        return jsonify({"error": "scene_id and action (up/down) required"}), 400
+    if action == "up":
+        save_grade(scene_id, 5)
+    else:
+        save_grade(scene_id, 1)
+        set_scene_excluded(scene_id, True)
+    return jsonify({"status": "ok", "action": action})
 
 
 @rating_bp.route("/rate/api/tags")
@@ -175,28 +181,26 @@ select:focus{outline:none;border-color:#e53935}
   font-size:12px;color:#818cf8;margin-top:4px;
 }
 
-/* -- Star buttons -- */
-.stars{
-  display:flex;justify-content:center;gap:8px;padding:16px;
+/* -- Thumbs buttons -- */
+.thumbs{
+  display:flex;justify-content:center;gap:24px;padding:16px;
   border-top:1px solid #2a2a2a;
 }
-.star-btn{
-  width:52px;height:52px;border-radius:50%;border:2px solid #444;
-  background:#1a1a1a;color:#aaa;font-size:18px;font-weight:700;
-  cursor:pointer;transition:all .15s;
+.thumb-btn{
+  width:64px;height:64px;border-radius:50%;border:2px solid #444;
+  background:#1a1a1a;cursor:pointer;transition:all .15s;
   display:flex;align-items:center;justify-content:center;
 }
-.star-btn:hover{transform:scale(1.1)}
-.star-btn[data-score="1"]{border-color:#ef5350}
-.star-btn[data-score="1"]:hover{background:#ef5350;color:#fff}
-.star-btn[data-score="2"]{border-color:#ff9800}
-.star-btn[data-score="2"]:hover{background:#ff9800;color:#fff}
-.star-btn[data-score="3"]{border-color:#fdd835}
-.star-btn[data-score="3"]:hover{background:#fdd835;color:#000}
-.star-btn[data-score="4"]{border-color:#66bb6a}
-.star-btn[data-score="4"]:hover{background:#66bb6a;color:#fff}
-.star-btn[data-score="5"]{border-color:#4caf50}
-.star-btn[data-score="5"]:hover{background:#4caf50;color:#fff}
+.thumb-btn:hover{transform:scale(1.15)}
+.thumb-btn svg{width:28px;height:28px}
+.thumb-btn.down{border-color:#ef5350}
+.thumb-btn.down:hover{background:#ef5350}
+.thumb-btn.down svg{fill:#ef5350}
+.thumb-btn.down:hover svg{fill:#fff}
+.thumb-btn.up{border-color:#4caf50}
+.thumb-btn.up:hover{background:#4caf50}
+.thumb-btn.up svg{fill:#4caf50}
+.thumb-btn.up:hover svg{fill:#fff}
 
 .skip-btn{
   display:block;margin:0 auto 20px;background:none;border:1px solid #333;
@@ -237,7 +241,7 @@ select:focus{outline:none;border-color:#e53935}
   </div>
 
   <div id="card-area"></div>
-  <div class="hint">Keyboard: 1-5 to rate, S to skip, P to play clip</div>
+  <div class="hint">Keyboard: Y or &rarr; thumbs up, N or &larr; thumbs down, Space to play, S to skip</div>
 </div>
 
 <script>
@@ -283,10 +287,6 @@ function renderCard() {
   var s = scenes[currentIdx];
   prog.textContent = (currentIdx + 1) + ' / ' + scenes.length;
 
-  var prevGrade = s.avg_grade
-    ? '<div class="prev-grade">Previously rated: ' + s.avg_grade + '/5 (' + s.times_graded + 'x)</div>'
-    : '';
-
   var tags = s.tags.length ? s.tags.join(', ') : 'no tags';
 
   area.innerHTML = '<div class="rate-card">'
@@ -300,25 +300,25 @@ function renderCard() {
     + '<div class="filename">' + s.filename + ' [' + s.start.toFixed(1) + '-' + s.end.toFixed(1) + ']</div>'
     + '<div class="tags">' + tags + '</div>'
     + '<div class="dur">' + s.duration + 's' + (s.wide ? ' (wide)' : '') + '</div>'
-    + prevGrade
     + '</div>'
-    + '<div class="stars">'
-    + '<button class="star-btn" data-score="1" onclick="rate(1)">1</button>'
-    + '<button class="star-btn" data-score="2" onclick="rate(2)">2</button>'
-    + '<button class="star-btn" data-score="3" onclick="rate(3)">3</button>'
-    + '<button class="star-btn" data-score="4" onclick="rate(4)">4</button>'
-    + '<button class="star-btn" data-score="5" onclick="rate(5)">5</button>'
+    + '<div class="thumbs">'
+    + '<button class="thumb-btn down" onclick="rate(\'down\')" title="Exclude this scene">'
+    + '<svg viewBox="0 0 24 24"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>'
+    + '</button>'
+    + '<button class="thumb-btn up" onclick="rate(\'up\')" title="Keep this scene">'
+    + '<svg viewBox="0 0 24 24"><path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg>'
+    + '</button>'
     + '</div>'
     + '</div>'
     + '<button class="skip-btn" onclick="skip()">Skip</button>';
 }
 
-async function rate(score) {
+async function rate(action) {
   var s = scenes[currentIdx];
   await fetch('/rate/api/grade', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({scene_id: s.id, score: score}),
+    body: JSON.stringify({scene_id: s.id, action: action}),
   });
   currentIdx++;
   renderCard();
@@ -341,11 +341,14 @@ function playScene(sceneId) {
 document.addEventListener('keydown', function(e) {
   if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
   var key = e.key;
-  if (key >= '1' && key <= '5') {
-    rate(parseInt(key));
+  if (key === 'ArrowRight' || key === 'y' || key === 'Y') {
+    rate('up');
+  } else if (key === 'ArrowLeft' || key === 'n' || key === 'N') {
+    rate('down');
   } else if (key === 's' || key === 'S') {
     skip();
-  } else if (key === 'p' || key === 'P') {
+  } else if (key === 'p' || key === 'P' || key === ' ') {
+    e.preventDefault();
     if (currentIdx < scenes.length) playScene(scenes[currentIdx].id);
   }
 });
