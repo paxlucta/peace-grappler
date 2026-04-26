@@ -629,7 +629,7 @@ function renderList() {
     var dims = v.width + 'x' + v.height;
     if (v.wide) dims += ' (wide)';
     var btnLabel = v.analyzed_at ? (v.needs_update ? 'Update' : 'Re-analyze') : 'Analyze';
-    var force = !v.needs_update && v.analyzed_at;
+    var force = !!(v.analyzed_at && !v.needs_update);
     tbody.innerHTML += '<tr>'
       + '<td>' + v.filename + '</td>'
       + '<td>' + v.duration + 's</td>'
