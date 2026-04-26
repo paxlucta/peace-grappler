@@ -55,28 +55,41 @@ def library_page():
 
 @library_bp.route("/library/api/videos")
 def library_videos():
-    """Return all generated videos with metadata."""
+    """Return all generated videos with metadata, caption, and feedback."""
+    from db import get_db
     videos = get_all_generated_videos()
-    result = []
-    for v in videos:
-        path = Path(v["path"])
-        # Extract tags from timeline clips
-        tags = set()
-        for item in v.get("timeline", []):
-            if item.get("type") == "clip":
-                vf = item.get("video_file", "")
-                if vf:
-                    tags.add(Path(vf).stem)
-        result.append({
-            "id": v["id"],
-            "filename": path.name,
-            "path": v["path"],
-            "duration": v["duration"],
-            "generated_at": v["generated_at"],
-            "exists": path.exists(),
-            "tags": sorted(tags),
-        })
-    return jsonify(result)
+    conn = get_db()
+    try:
+        result = []
+        for v in videos:
+            path = Path(v["path"])
+            # Extract tags from timeline clips
+            tags = set()
+            for item in v.get("timeline", []):
+                if item.get("type") == "clip":
+                    vf = item.get("video_file", "")
+                    if vf:
+                        tags.add(Path(vf).stem)
+            # Get feedback
+            fb_rows = conn.execute(
+                "SELECT feedback FROM wizard_feedback "
+                "WHERE generated_video_id=? ORDER BY created_at DESC",
+                (v["id"],),
+            ).fetchall()
+            result.append({
+                "id": v["id"],
+                "filename": path.name,
+                "path": v["path"],
+                "duration": v["duration"],
+                "generated_at": v["generated_at"],
+                "exists": path.exists(),
+                "tags": sorted(tags),
+                "caption": v.get("caption", ""),
+                "feedback": [r["feedback"] for r in fb_rows],
+            })
+        return jsonify(result)
+    finally:
+        conn.close()
 
 
 @library_bp.route("/library/api/video/<int:video_id>")
@@ -216,14 +229,15 @@ select:focus{outline:none;border-color:#e53935}
 /* -- Video player overlay -- */
 .player-overlay{
   display:none;position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:100;
-  flex-direction:column;align-items:center;justify-content:center;
+  align-items:center;justify-content:center;
 }
 .player-overlay.active{display:flex}
-.player-wrap{
-  position:relative;max-width:90vw;max-height:85vh;
+.player-layout{
+  display:flex;gap:24px;max-width:95vw;max-height:90vh;align-items:flex-start;
 }
-.player-wrap video{
-  max-width:90vw;max-height:85vh;border-radius:8px;background:#000;
+.player-video-col{position:relative;flex-shrink:0}
+.player-video-col video{
+  max-width:50vw;max-height:85vh;border-radius:8px;background:#000;display:block;
 }
 .player-close{
   position:absolute;top:-36px;right:0;
@@ -231,8 +245,44 @@ select:focus{outline:none;border-color:#e53935}
   cursor:pointer;padding:4px 8px;opacity:.7;transition:opacity .15s;
 }
 .player-close:hover{opacity:1}
-.player-info{
-  margin-top:12px;text-align:center;font-size:13px;color:#888;
+.player-detail{
+  width:340px;max-height:85vh;overflow-y:auto;flex-shrink:0;
+}
+.player-detail .pd-filename{font-size:15px;font-weight:600;color:#fff;margin-bottom:4px}
+.player-detail .pd-meta{font-size:12px;color:#666;margin-bottom:12px}
+.player-detail .pd-section{margin-bottom:14px}
+.player-detail .pd-label{
+  font-size:11px;color:#e53935;font-weight:600;text-transform:uppercase;margin-bottom:4px;
+}
+.player-detail .pd-caption{
+  font-size:13px;color:#ccc;white-space:pre-wrap;line-height:1.5;
+  background:#1a1a1a;border-radius:6px;padding:10px;
+}
+.player-detail .pd-no-caption{font-size:12px;color:#555;font-style:italic}
+.player-detail .pd-tags{display:flex;gap:4px;flex-wrap:wrap}
+.player-detail .pd-tags .ptag{
+  font-size:10px;color:#888;background:#222;padding:2px 7px;border-radius:8px;
+}
+.player-detail .pd-feedback{
+  font-size:12px;color:#818cf8;font-style:italic;margin-top:4px;
+}
+.player-detail .pd-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+.pd-btn{
+  display:inline-flex;align-items:center;gap:6px;
+  background:#222;color:#e0e0e0;border:1px solid #444;border-radius:6px;
+  padding:7px 14px;font-size:12px;cursor:pointer;transition:all .15s;
+}
+.pd-btn:hover{border-color:#666;color:#fff}
+.pd-btn svg{width:16px;height:16px;fill:currentColor}
+.pd-btn.ig{border-color:#c13584;color:#c13584}
+.pd-btn.ig:hover{background:#c13584;color:#fff}
+.pd-btn.ig:hover svg{fill:#fff}
+.pd-btn.copy-btn.copied{border-color:#4caf50;color:#4caf50}
+
+@media (max-width:800px) {
+  .player-layout{flex-direction:column;align-items:center}
+  .player-video-col video{max-width:90vw}
+  .player-detail{width:90vw}
 }
 </style>
 </head>
@@ -270,10 +320,12 @@ select:focus{outline:none;border-color:#e53935}
 </div>
 
 <div class="player-overlay" id="player-overlay">
-  <div class="player-wrap">
-    <button class="player-close" onclick="closePlayer()">&times;</button>
-    <video id="player-video" controls></video>
-    <div class="player-info" id="player-info"></div>
+  <div class="player-layout">
+    <div class="player-video-col">
+      <button class="player-close" onclick="closePlayer()">&times;</button>
+      <video id="player-video" controls></video>
+    </div>
+    <div class="player-detail" id="player-detail"></div>
   </div>
 </div>
 
@@ -428,12 +480,62 @@ function escHtml(s) {
 }
 
 function playVideo(id, filename) {
+  var v = allVideos.find(function(x) { return x.id === id; });
+  if (!v) return;
+
   var overlay = document.getElementById('player-overlay');
   var video = document.getElementById('player-video');
-  var info = document.getElementById('player-info');
+  var detail = document.getElementById('player-detail');
 
   video.src = '/library/api/video/' + id;
-  info.textContent = filename;
+
+  // Build detail panel
+  var html = '<div class="pd-filename">' + escHtml(v.filename) + '</div>'
+    + '<div class="pd-meta">' + formatDuration(v.duration) + ' &middot; ' + formatDate(v.generated_at) + '</div>';
+
+  // Tags
+  if (v.tags.length) {
+    html += '<div class="pd-section"><div class="pd-label">Tags</div><div class="pd-tags">';
+    for (var i = 0; i < v.tags.length; i++) {
+      html += '<span class="ptag">' + escHtml(v.tags[i]) + '</span>';
+    }
+    html += '</div></div>';
+  }
+
+  // Caption
+  html += '<div class="pd-section"><div class="pd-label">Caption</div>';
+  if (v.caption) {
+    html += '<div class="pd-caption" id="pd-caption-text">' + escHtml(v.caption) + '</div>';
+  } else {
+    html += '<div class="pd-no-caption">No caption generated</div>';
+  }
+  html += '</div>';
+
+  // Feedback
+  if (v.feedback && v.feedback.length) {
+    html += '<div class="pd-section"><div class="pd-label">Feedback</div>';
+    for (var j = 0; j < v.feedback.length; j++) {
+      html += '<div class="pd-feedback">"' + escHtml(v.feedback[j]) + '"</div>';
+    }
+    html += '</div>';
+  }
+
+  // Action buttons
+  html += '<div class="pd-actions">';
+  if (v.caption) {
+    html += '<button class="pd-btn copy-btn" id="copy-cap-btn" onclick="copyCaption()">'
+      + '<svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>'
+      + 'Copy Caption</button>';
+  }
+  html += '<button class="pd-btn ig" onclick="postToInstagram(' + v.id + ')">'
+    + '<svg viewBox="0 0 24 24"><path d="M7.8 2h8.4C19.4 2 22 4.6 22 7.8v8.4a5.8 5.8 0 0 1-5.8 5.8H7.8C4.6 22 2 19.4 2 16.2V7.8A5.8 5.8 0 0 1 7.8 2m-.2 2A3.6 3.6 0 0 0 4 7.6v8.8C4 18.39 5.61 20 7.6 20h8.8a3.6 3.6 0 0 0 3.6-3.6V7.6C20 5.61 18.39 4 16.4 4H7.6m9.65 1.5a1.25 1.25 0 0 1 1.25 1.25A1.25 1.25 0 0 1 17.25 8 1.25 1.25 0 0 1 16 6.75a1.25 1.25 0 0 1 1.25-1.25M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/></svg>'
+    + 'Post to Instagram</button>';
+  html += '<button class="pd-btn" onclick="emailFromLibrary(' + v.id + ',\'' + escHtml(v.filename) + '\')">'
+    + '<svg viewBox="0 0 24 24"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/></svg>'
+    + 'Email</button>';
+  html += '</div>';
+
+  detail.innerHTML = html;
   overlay.classList.add('active');
   video.play();
 }
@@ -446,7 +548,46 @@ function closePlayer() {
   overlay.classList.remove('active');
 }
 
-// Close on escape or clicking outside
+function copyCaption() {
+  var el = document.getElementById('pd-caption-text');
+  if (!el) return;
+  navigator.clipboard.writeText(el.textContent).then(function() {
+    var btn = document.getElementById('copy-cap-btn');
+    btn.classList.add('copied');
+    btn.innerHTML = btn.querySelector('svg').outerHTML + ' Copied!';
+    setTimeout(function() {
+      btn.classList.remove('copied');
+      btn.innerHTML = btn.querySelector('svg').outerHTML + ' Copy Caption';
+    }, 2000);
+  });
+}
+
+function postToInstagram(videoId) {
+  var v = allVideos.find(function(x) { return x.id === videoId; });
+  if (!v) return;
+  // Copy caption to clipboard first so user can paste it
+  if (v.caption) {
+    navigator.clipboard.writeText(v.caption);
+  }
+  // Open Instagram create page — user drags video from Finder
+  // Also open the video file in Finder for easy drag
+  fetch('/api/open', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({path: v.path, reveal: true}),
+  });
+  window.open('https://www.instagram.com/reels/create/', '_blank');
+  alert('Caption copied to clipboard!\\n\\n1. Instagram opened in a new tab\\n2. Video revealed in Finder\\n3. Drag the video into Instagram\\n4. Paste the caption (Cmd+V)');
+}
+
+async function emailFromLibrary(videoId, filename) {
+  await fetch('/wizard/api/email/' + videoId, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({subject: 'PeaceGrappler Video - ' + filename}),
+  });
+}
+
 document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape') closePlayer();
 });

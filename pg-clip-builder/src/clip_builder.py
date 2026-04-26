@@ -283,9 +283,14 @@ def api_load_video():
 
 @clip_builder_bp.route("/api/open", methods=["POST"])
 def api_open():
-    path = request.json.get("path", "")
+    data = request.json or {}
+    path = data.get("path", "")
+    reveal = data.get("reveal", False)
     if path and os.path.exists(path):
-        subprocess.Popen(["open", path])
+        if reveal:
+            subprocess.Popen(["open", "-R", path])
+        else:
+            subprocess.Popen(["open", path])
     return jsonify({"ok": True})
 
 
