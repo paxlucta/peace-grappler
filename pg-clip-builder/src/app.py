@@ -206,31 +206,28 @@ header{position:sticky !important;top:0;z-index:50}
   /* Log page load */
   window.pgLog('Page loaded: ' + location.pathname);
 
-  /* Patch fetch to log SSE-style progress endpoints */
-  var _origEventSource = window.EventSource;
-  if (_origEventSource) {
+  /* Patch EventSource to log SSE messages to the footer */
+  var _OrigES = window.EventSource;
+  if (_OrigES) {
     window.EventSource = function(url) {
-      var es = new _origEventSource(url);
-      var _origOnMsg = null;
-      Object.defineProperty(es, 'onmessage', {
-        set: function(fn) {
-          _origOnMsg = fn;
-          es.addEventListener('message', function(e) {
-            try {
-              var data = JSON.parse(e.data);
-              if (data.message) {
-                var msg = data.message;
-                var cls = '';
-                if (msg.startsWith('DONE:')) cls = msg === 'DONE:ok' ? 'ok' : 'error';
-                window.pgLog(msg, cls);
-              }
-            } catch(ex) {}
-          });
-        },
-        get: function() { return _origOnMsg; }
+      var es = new _OrigES(url);
+      es.addEventListener('message', function(e) {
+        try {
+          var data = JSON.parse(e.data);
+          if (data.message) {
+            var msg = data.message;
+            var cls = '';
+            if (msg.startsWith('DONE:')) cls = msg === 'DONE:ok' ? 'ok' : 'error';
+            window.pgLog(msg, cls);
+          }
+        } catch(ex) {}
       });
       return es;
     };
+    window.EventSource.prototype = _OrigES.prototype;
+    window.EventSource.CONNECTING = _OrigES.CONNECTING;
+    window.EventSource.OPEN = _OrigES.OPEN;
+    window.EventSource.CLOSED = _OrigES.CLOSED;
   }
 })();
 </script>
