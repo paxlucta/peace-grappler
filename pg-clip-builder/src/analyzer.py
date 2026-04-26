@@ -704,34 +704,41 @@ async function analyzeAll() {
   analyzingAll = true;
   document.getElementById('progress-lines').innerHTML = '';
 
+  var prog = document.getElementById('progress');
+  prog.classList.add('active');
+
   // Refresh list first
   await scanVideos();
   var pending = getPendingVideos();
-  if (!pending.length) {
+  var total = pending.length;
+  if (!total) {
     addLine('No videos pending analysis.');
     analyzingAll = false;
     return;
   }
 
-  addLine('Analyzing all ' + pending.length + ' pending videos...', 'done');
+  addLine('Analyzing all ' + total + ' pending videos...', 'done');
+  var done = 0;
 
-  for (var i = 0; i < pending.length; i++) {
-    var v = pending[i];
-    var force = !v.needs_update && v.analyzed_at;
-    addLine('\n--- Video ' + (i + 1) + '/' + pending.length + ': ' + v.filename + ' ---');
-    var ok = await analyzeVideo(v.id, force);
-    // Refresh videos list after each to update statuses
-    await scanVideos();
-    // Re-get pending in case list changed
+  while (true) {
     pending = getPendingVideos();
+    if (!pending.length) break;
+
+    var v = pending[0];
+    done++;
+    var force = !v.needs_update && v.analyzed_at;
+    addLine('\n--- Video ' + done + '/' + total + ': ' + v.filename + ' ---');
+    var ok = await analyzeVideo(v.id, force);
+    // Refresh videos list to update statuses
+    await scanVideos();
     if (!ok) {
-      addLine('Skipping remaining due to failure', 'error');
+      addLine('Stopping due to failure', 'error');
       break;
     }
   }
 
   analyzingAll = false;
-  addLine('\nAll done! Analyzed videos.', 'done');
+  addLine('\nAll done! Analyzed ' + done + ' videos.', 'done');
   scanVideos();
 }
 
