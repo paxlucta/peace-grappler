@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS generated_videos (
     path TEXT NOT NULL,
     duration REAL DEFAULT 0,
     timeline_json TEXT NOT NULL,
+    caption TEXT DEFAULT '',
     generated_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -90,6 +91,12 @@ def get_db():
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    # Migrate: add caption column if missing
+    try:
+        conn.execute("SELECT caption FROM generated_videos LIMIT 0")
+    except sqlite3.OperationalError:
+        conn.execute("ALTER TABLE generated_videos ADD COLUMN caption TEXT DEFAULT ''")
+        conn.commit()
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(SCHEMA)
     conn.commit()
@@ -414,14 +421,28 @@ def get_scene_by_id(scene_id):
         conn.close()
 
 
-def save_generated_video(path, duration, timeline):
+def save_generated_video(path, duration, timeline, caption=""):
     """Save a generated video record with its timeline as JSON."""
     import json
     conn = get_db()
     try:
         conn.execute(
-            "INSERT INTO generated_videos (path, duration, timeline_json) VALUES (?,?,?)",
-            (str(path), duration, json.dumps(timeline)),
+            "INSERT INTO generated_videos (path, duration, timeline_json, caption) "
+            "VALUES (?,?,?,?)",
+            (str(path), duration, json.dumps(timeline), caption),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def update_video_caption(video_id, caption):
+    """Update the caption for a generated video."""
+    conn = get_db()
+    try:
+        conn.execute(
+            "UPDATE generated_videos SET caption=? WHERE id=?",
+            (caption, video_id),
         )
         conn.commit()
     finally:
@@ -443,6 +464,7 @@ def get_generated_video(path):
             "path": row["path"],
             "duration": row["duration"],
             "timeline": json.loads(row["timeline_json"]),
+            "caption": row["caption"] or "",
             "generated_at": row["generated_at"],
         }
     finally:
@@ -462,6 +484,7 @@ def get_all_generated_videos():
             "path": r["path"],
             "duration": r["duration"],
             "timeline": json.loads(r["timeline_json"]),
+            "caption": r["caption"] or "",
             "generated_at": r["generated_at"],
         } for r in rows]
     finally:

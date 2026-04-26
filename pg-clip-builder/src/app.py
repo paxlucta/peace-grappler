@@ -16,6 +16,7 @@ from analyzer import analyzer_bp
 from generator import generator_bp
 from library import library_bp
 from wizard import wizard_bp
+from rating import rating_bp
 
 app = Flask(__name__)
 app.register_blueprint(clip_builder_bp)
@@ -23,6 +24,7 @@ app.register_blueprint(analyzer_bp)
 app.register_blueprint(generator_bp)
 app.register_blueprint(library_bp)
 app.register_blueprint(wizard_bp)
+app.register_blueprint(rating_bp)
 
 ROOT_DIR = Path(__file__).parent.parent
 
@@ -55,6 +57,14 @@ _INJECTED_SCRIPT = """
 (function(){
   var nav = document.querySelector('header nav');
   if (!nav) return;
+  // Inject Rate link if missing
+  if (!nav.querySelector('a[href="/rate"]')) {
+    var rateLink = document.createElement('a');
+    rateLink.href = '/rate';
+    rateLink.textContent = 'Rate';
+    if (location.pathname === '/rate') rateLink.className = 'active';
+    nav.appendChild(rateLink);
+  }
   var btn = document.createElement('button');
   btn.className = 'update-btn';
   btn.textContent = 'Check for Updates';

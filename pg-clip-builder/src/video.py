@@ -649,3 +649,88 @@ def process_split_section(top_items, bottom_items, tmp_dir, prefix, out_path,
         top_path = ph_path
 
     return stack_split_videos(top_path, bottom_path, out_path)
+
+
+def detect_beats(music_path):
+    """Detect beat positions in a music file using FFmpeg + onset detection.
+
+    Returns {"bpm": int, "beats": [float, ...]} with beat timestamps in seconds.
+    Pure Python + FFmpeg, no extra dependencies.
+    """
+    import struct
+
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-i", str(music_path),
+             "-ac", "1", "-ar", "22050",
+             "-f", "f32le", "-acodec", "pcm_f32le",
+             "pipe:1"],
+            capture_output=True, timeout=30,
+        )
+        if result.returncode != 0 or len(result.stdout) < 100:
+            return {"bpm": 120, "beats": []}
+
+        raw = result.stdout
+        n_samples = len(raw) // 4
+        samples = struct.unpack(f"{n_samples}f", raw)
+
+        sr = 22050
+        hop = sr // 10  # 100ms windows
+
+        # Compute RMS energy per window
+        energy = []
+        for i in range(0, n_samples - hop, hop):
+            window = samples[i:i + hop]
+            rms = (sum(s * s for s in window) / hop) ** 0.5
+            energy.append(rms)
+
+        if len(energy) < 4:
+            return {"bpm": 120, "beats": []}
+
+        # Compute onset strength (difference in energy)
+        onset = [0.0]
+        for i in range(1, len(energy)):
+            diff = max(0, energy[i] - energy[i - 1])
+            onset.append(diff)
+
+        # Adaptive threshold: mean + 0.5 * std
+        mean_onset = sum(onset) / len(onset)
+        variance = sum((o - mean_onset) ** 2 for o in onset) / len(onset)
+        std_onset = variance ** 0.5
+        threshold = mean_onset + 0.5 * std_onset
+
+        # Find peaks above threshold with minimum spacing (150ms)
+        min_spacing = 2  # 2 windows = 200ms
+        beats = []
+        last_beat_idx = -min_spacing
+        for i in range(1, len(onset) - 1):
+            if (onset[i] > threshold
+                    and onset[i] >= onset[i - 1]
+                    and onset[i] >= onset[i + 1]
+                    and i - last_beat_idx >= min_spacing):
+                beats.append(round(i * hop / sr, 3))
+                last_beat_idx = i
+
+        # Estimate BPM from beat intervals
+        if len(beats) >= 3:
+            intervals = [beats[i + 1] - beats[i]
+                         for i in range(len(beats) - 1)]
+            # Filter outliers (keep intervals within 2x of median)
+            intervals.sort()
+            median = intervals[len(intervals) // 2]
+            filtered = [iv for iv in intervals
+                        if median * 0.5 <= iv <= median * 2.0]
+            if filtered:
+                avg_interval = sum(filtered) / len(filtered)
+                bpm = round(60.0 / avg_interval)
+                # Clamp to reasonable range
+                bpm = max(60, min(200, bpm))
+            else:
+                bpm = 120
+        else:
+            bpm = 120
+
+        return {"bpm": bpm, "beats": beats}
+
+    except Exception:
+        return {"bpm": 120, "beats": []}

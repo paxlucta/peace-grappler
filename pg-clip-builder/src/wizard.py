@@ -18,11 +18,14 @@ from pathlib import Path
 
 from flask import Blueprint, Response, jsonify, request, send_file
 
-from db import get_db, get_all_scenes, get_scene_grades, save_generated_video
+from db import (
+    get_db, get_all_scenes, get_scene_grades, save_generated_video,
+    update_video_caption,
+)
 from video import (
     ASSETS_DIR, AUDIO_EXTENSIONS, OUTPUT_DIR, TRANSITIONS, XFADE_DUR,
-    concatenate_clips, extract_subclip, find_asset, get_video_duration,
-    normalize_clip, overlay_music,
+    concatenate_clips, detect_beats, extract_subclip, find_asset,
+    get_video_duration, normalize_clip, overlay_music,
 )
 
 wizard_bp = Blueprint("wizard", __name__)
@@ -114,7 +117,8 @@ def _get_wizard_history(limit=20):
     conn = get_db()
     try:
         rows = conn.execute(
-            "SELECT gv.id, gv.path, gv.duration, gv.generated_at, gv.timeline_json "
+            "SELECT gv.id, gv.path, gv.duration, gv.generated_at, "
+            "gv.timeline_json, gv.caption "
             "FROM generated_videos gv ORDER BY gv.generated_at DESC LIMIT ?",
             (limit,),
         ).fetchall()
@@ -154,6 +158,7 @@ def _get_wizard_history(limit=20):
                 "duration": r["duration"],
                 "generated_at": r["generated_at"],
                 "exists": Path(r["path"]).exists(),
+                "caption": r["caption"] or "",
                 "feedback": [{"text": f["feedback"], "at": f["created_at"]}
                              for f in fb_rows],
                 "scenes": scenes_used,
@@ -339,8 +344,13 @@ ENGAGEMENT (views, likes, shares, saves).
 ## Available Transitions
 {transitions}
 
+## Music Beat Analysis
+{beat_info}
+
 ## User Feedback History (CRITICAL — read every entry)
 {feedback}
+
+{variation_info}
 
 ## Instructions
 Create a video plan optimized for maximum Instagram Reel engagement.
@@ -357,9 +367,11 @@ KEY PRINCIPLES:
 1. HOOK — First 1-2 seconds must grab attention (most explosive/dramatic moment)
 2. PACING — Tight cuts, no dead time. Target ~{cuts_per_min} cuts per minute
 3. ARC — Even a 20-second video needs rising action
-4. MUSIC — Choose music that amplifies energy
+4. MUSIC — Choose music that amplifies energy. SYNC cuts to beat positions when possible.
 5. ENDING — Strong close that makes viewers replay or share
 6. DURATION — Target {target_dur}s (within {dur_min}-{dur_max}s range)
+7. BEATS — If beat positions are provided, align clip start/end times to land on or \
+near beat positions. Viewers subconsciously feel beat-synced cuts as more professional.
 
 For each clip, specify a sub-range within the scene. Keep clips tight (1.5-5s each).
 Prefer scenes with high-energy tags (striking, takedown, submission, knockout, etc.)
@@ -393,8 +405,12 @@ RULES:
 
 
 def _plan_video(model, research, scenes, music_files, feedback,
-                used_scene_ids=None):
-    """Ask Claude to plan a single video."""
+                used_scene_ids=None, variation_ctx=None):
+    """Ask Claude to plan a single video.
+
+    variation_ctx: optional dict {"num": 2, "total": 3,
+                                  "prev_rationales": ["...", "..."]}
+    """
     if used_scene_ids is None:
         used_scene_ids = set()
 
@@ -447,6 +463,54 @@ def _plan_video(model, research, scenes, music_files, feedback,
     else:
         feedback_str = "No feedback yet — this is the first generation."
 
+    # Beat detection for music
+    beat_str = "No music selected — no beat data."
+    music_lookup = {m["name"]: m["path"] for m in music_files}
+    # Try to detect beats for all music (Claude will pick one)
+    beat_cache = {}
+    for m in music_files:
+        bd = detect_beats(m["path"])
+        if bd["beats"]:
+            beat_cache[m["name"]] = bd
+            # Show first 40 beats to keep prompt size reasonable
+            beat_positions = ", ".join(f"{b:.2f}" for b in bd["beats"][:40])
+            beat_str = (
+                f"Music '{m['name']}': BPM={bd['bpm']}, "
+                f"beats at: [{beat_positions}] "
+                f"({len(bd['beats'])} total beats detected)"
+            )
+            break  # Just show first music's beats; Claude picks
+
+    if len(music_files) > 1 and beat_cache:
+        lines = []
+        for name, bd in beat_cache.items():
+            bp = ", ".join(f"{b:.2f}" for b in bd["beats"][:30])
+            lines.append(f"  '{name}': BPM={bd['bpm']}, beats=[{bp}]")
+        beat_str = "\n".join(lines)
+    elif not beat_cache and music_files:
+        beat_str = "Beat detection found no clear beats. Use your judgment for cut timing."
+
+    # Variation context
+    if variation_ctx and variation_ctx["total"] > 1:
+        var_num = variation_ctx["num"]
+        var_total = variation_ctx["total"]
+        prev = variation_ctx.get("prev_rationales", [])
+        variation_str = (
+            f"## VARIATION MODE\n"
+            f"This is variation {var_num} of {var_total}. "
+            f"You MUST create a DIFFERENT creative approach than previous variations.\n"
+        )
+        if prev:
+            variation_str += "Previous variation strategies (DO NOT repeat these):\n"
+            for i, r in enumerate(prev):
+                variation_str += f"  Variation {i+1}: {r}\n"
+            variation_str += (
+                "Use a DIFFERENT hook, different scene selection, different pacing, "
+                "and/or different music. Be creative and distinct."
+            )
+    else:
+        variation_str = ""
+
     # Research values
     dur_range = research.get("ideal_duration_range", {"min": 15, "max": 30})
     optimal = research.get("optimal_duration", 22)
@@ -457,14 +521,19 @@ def _plan_video(model, research, scenes, music_files, feedback,
         scenes="\n".join(scene_lines),
         music=music_str,
         transitions=trans_str,
+        beat_info=beat_str,
         feedback=feedback_str,
+        variation_info=variation_str,
         cuts_per_min=cuts,
         target_dur=optimal,
         dur_min=dur_range.get("min", 15),
         dur_max=dur_range.get("max", 30),
     )
 
-    emit("Claude is planning the video (analyzing scenes, choosing strategy)...")
+    label = "Claude is planning the video"
+    if variation_ctx and variation_ctx["total"] > 1:
+        label += f" (variation {variation_ctx['num']}/{variation_ctx['total']})"
+    emit(f"{label}...")
     raw = _call_claude(prompt, model, timeout=300)
     if not raw:
         return None
@@ -667,9 +736,58 @@ def _assemble_video(plan, music_files, video_num, total):
     }
 
 
+# ── Caption generation ──────────────────────────────────────────────────────
+
+CAPTION_PROMPT = """\
+You are a social media expert for a combat sports / MMA Instagram channel \
+called PeaceGrappler (@peacegrappler).
+
+Generate an Instagram Reel caption + hashtags for a video with these details:
+- Duration: {duration}s
+- Creative strategy: {rationale}
+- Tags/content: {tags}
+- Music: {music}
+
+Requirements:
+- Caption should be 1-3 punchy lines that drive engagement (likes, comments, saves, shares)
+- Include a hook or question to encourage comments
+- Add 5-10 relevant hashtags (mix of broad MMA + niche + trending)
+- Format: caption text first, then hashtags on a new line
+- Keep it authentic to MMA/combat sports culture
+- Do NOT use emojis excessively (max 2-3)
+
+Return ONLY the caption text + hashtags, nothing else.
+"""
+
+
+def _generate_caption(model, plan, duration):
+    """Generate an Instagram caption for a video."""
+    tags_used = set()
+    scene_map = {s["id"]: s for s in get_all_scenes(include_ignored=True)}
+    for clip in plan.get("clips", []):
+        scene = scene_map.get(clip["scene_id"])
+        if scene:
+            tags_used.update(scene.get("tags", []))
+
+    music_name = (plan.get("music") or {}).get("name", "none")
+
+    prompt = CAPTION_PROMPT.format(
+        duration=duration,
+        rationale=plan.get("rationale", "MMA highlight reel"),
+        tags=", ".join(sorted(tags_used)),
+        music=music_name,
+    )
+
+    try:
+        raw = _call_claude(prompt, model, timeout=60)
+        return raw.strip() if raw else ""
+    except Exception:
+        return ""
+
+
 # ── Main generation flow ────────────────────────────────────────────────────
 
-def _generate(model, num_videos):
+def _generate(model, num_videos, num_variations=1):
     """Full wizard generation flow. Runs in a background thread."""
     try:
         # 1. Research
@@ -693,39 +811,76 @@ def _generate(model, num_videos):
         emit(f"Found {len(scenes)} scenes, {len(music_files)} music tracks, "
              f"{len(feedback)} feedback entries")
 
-        # 3. Generate each video
+        if num_variations > 1:
+            emit(f"Generating {num_variations} A/B variations per video")
+
+        # 3. Generate each video (with variations)
         used_scene_ids = set()
         results = []
 
         for vid_num in range(1, num_videos + 1):
-            emit(f"\nPhase 2: Planning video {vid_num}/{num_videos}...")
+            prev_rationales = []
 
-            plan = _plan_video(model, research, scenes, music_files,
-                               feedback, used_scene_ids)
-            if not plan or not plan.get("clips"):
-                emit(f"Video {vid_num}: Claude couldn't create a plan")
-                continue
+            for var_num in range(1, num_variations + 1):
+                var_label = (f"Video {vid_num}/{num_videos}"
+                             if num_variations == 1
+                             else f"Video {vid_num} variation {var_num}/{num_variations}")
 
-            n_clips = len(plan["clips"])
-            target = plan.get("target_duration", optimal)
-            music_name = (plan.get("music") or {}).get("name", "none")
-            rationale = plan.get("rationale", "")
+                emit(f"\nPhase 2: Planning {var_label}...")
 
-            emit(f"Plan: {n_clips} clips, ~{target}s, music: {music_name}")
-            if rationale:
-                emit(f"Strategy: {rationale}")
+                variation_ctx = None
+                if num_variations > 1:
+                    variation_ctx = {
+                        "num": var_num,
+                        "total": num_variations,
+                        "prev_rationales": prev_rationales[:],
+                    }
 
-            # Track used scenes to avoid duplicates across videos
-            for clip in plan["clips"]:
-                used_scene_ids.add(clip["scene_id"])
+                plan = _plan_video(model, research, scenes, music_files,
+                                   feedback, used_scene_ids,
+                                   variation_ctx=variation_ctx)
+                if not plan or not plan.get("clips"):
+                    emit(f"{var_label}: Claude couldn't create a plan")
+                    continue
 
-            emit(f"\nPhase 3: Assembling video {vid_num}/{num_videos}...")
-            result = _assemble_video(plan, music_files, vid_num, num_videos)
-            if result:
-                results.append(result)
-                emit(f"VIDEO:{result['filename']}:{result['duration']}")
-                emit(f"Video {vid_num} complete! {result['duration']}s -> "
-                     f"{result['filename']}")
+                n_clips = len(plan["clips"])
+                target = plan.get("target_duration", optimal)
+                music_name = (plan.get("music") or {}).get("name", "none")
+                rationale = plan.get("rationale", "")
+                prev_rationales.append(rationale)
+
+                emit(f"Plan: {n_clips} clips, ~{target}s, music: {music_name}")
+                if rationale:
+                    emit(f"Strategy: {rationale}")
+
+                # Track used scenes across variations
+                for clip in plan["clips"]:
+                    used_scene_ids.add(clip["scene_id"])
+
+                emit(f"\nPhase 3: Assembling {var_label}...")
+                result = _assemble_video(plan, music_files, vid_num, num_videos)
+                if result:
+                    # Generate caption
+                    emit("Generating Instagram caption...")
+                    caption = _generate_caption(model, plan, result["duration"])
+                    if caption:
+                        # Update the DB record with caption
+                        from db import get_all_generated_videos
+                        vids = get_all_generated_videos()
+                        match = next(
+                            (v for v in vids
+                             if Path(v["path"]).name == result["filename"]),
+                            None,
+                        )
+                        if match:
+                            update_video_caption(match["id"], caption)
+                        result["caption"] = caption
+                        emit("Caption generated!")
+
+                    results.append(result)
+                    emit(f"VIDEO:{result['filename']}:{result['duration']}")
+                    emit(f"{var_label} complete! {result['duration']}s -> "
+                         f"{result['filename']}")
 
         if results:
             emit(f"\nAll done! Generated {len(results)} video(s)")
@@ -737,6 +892,144 @@ def _generate(model, num_videos):
     except Exception as e:
         emit(f"Error: {e}")
         emit("DONE:error")
+
+
+# ── Auto-pipeline ───────────────────────────────────────────────────────────
+
+pipeline_progress = queue.Queue()
+_pipeline_stop = threading.Event()
+
+
+def _pipeline_emit(msg):
+    pipeline_progress.put(msg)
+
+
+def _run_pipeline(model):
+    """Full auto-pipeline: scan → analyze → generate."""
+    from analyzer import (
+        analyze_full, ALL_TAG_SET, emit_progress as analyzer_emit,
+    )
+    from db import register_video, get_all_videos, get_analyzed_tags
+    from video import VIDEO_DIR, VIDEO_EXTENSIONS
+
+    _pipeline_stop.clear()
+
+    try:
+        # Step 1: Scan for new videos
+        _pipeline_emit("Step 1: Scanning for new videos...")
+        VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+        registered = 0
+        for root, _, files in os.walk(VIDEO_DIR):
+            if _pipeline_stop.is_set():
+                _pipeline_emit("Pipeline stopped by user")
+                _pipeline_emit("DONE:stopped")
+                return
+            for name in sorted(files):
+                if Path(name).suffix.lower() in VIDEO_EXTENSIONS and not name.startswith("."):
+                    path = Path(root) / name
+                    register_video(path)
+                    registered += 1
+        _pipeline_emit(f"Registered {registered} video files")
+
+        # Step 2: Analyze unanalyzed videos
+        videos = get_all_videos()
+        pending = []
+        for v in videos:
+            analyzed_tags = get_analyzed_tags(v["id"])
+            if not analyzed_tags or (ALL_TAG_SET - analyzed_tags):
+                pending.append(v)
+
+        if pending:
+            _pipeline_emit(f"Step 2: Analyzing {len(pending)} videos...")
+            for i, v in enumerate(pending):
+                if _pipeline_stop.is_set():
+                    _pipeline_emit("Pipeline stopped by user")
+                    _pipeline_emit("DONE:stopped")
+                    return
+
+                _pipeline_emit(f"Analyzing {i+1}/{len(pending)}: {v['filename']}...")
+
+                if v["duration"] <= 0:
+                    _pipeline_emit(f"  Skipping {v['filename']} (no duration)")
+                    continue
+
+                analyzed_tags = get_analyzed_tags(v["id"])
+                force = not bool(analyzed_tags)
+
+                try:
+                    if force:
+                        result = analyze_full(v["path"], v["duration"])
+                        if result:
+                            from db import save_analysis
+                            save_analysis(v["id"], result["tags"],
+                                          result["moments"], list(ALL_TAG_SET))
+                            _pipeline_emit(f"  Got {len(result['tags'])} tags")
+                        else:
+                            _pipeline_emit(f"  Analysis failed for {v['filename']}")
+                    else:
+                        from analyzer import analyze_incremental
+                        new_tags = ALL_TAG_SET - analyzed_tags
+                        new_results = analyze_incremental(v["path"], v["duration"],
+                                                          new_tags)
+                        from db import save_analysis
+                        save_analysis(v["id"], new_results, [], list(new_tags))
+                        _pipeline_emit(f"  Got {len(new_results)} new tags")
+                except Exception as e:
+                    _pipeline_emit(f"  Error analyzing {v['filename']}: {e}")
+        else:
+            _pipeline_emit("Step 2: All videos already analyzed")
+
+        # Step 3: Generate video with wizard
+        if _pipeline_stop.is_set():
+            _pipeline_emit("Pipeline stopped by user")
+            _pipeline_emit("DONE:stopped")
+            return
+
+        _pipeline_emit("Step 3: Generating video with AI Wizard...")
+        scenes = get_all_scenes()
+        if not scenes:
+            _pipeline_emit("No scenes available after analysis")
+            _pipeline_emit("DONE:error")
+            return
+
+        research = _run_research(model)
+        music_files = _find_music_files()
+        feedback = _get_all_feedback()
+
+        plan = _plan_video(model, research, scenes, music_files, feedback)
+        if not plan or not plan.get("clips"):
+            _pipeline_emit("Claude couldn't create a plan")
+            _pipeline_emit("DONE:error")
+            return
+
+        rationale = plan.get("rationale", "")
+        if rationale:
+            _pipeline_emit(f"Strategy: {rationale}")
+
+        result = _assemble_video(plan, music_files, 1, 1)
+        if result:
+            # Generate caption
+            caption = _generate_caption(model, plan, result["duration"])
+            if caption:
+                from db import get_all_generated_videos
+                vids = get_all_generated_videos()
+                match = next(
+                    (v for v in vids
+                     if Path(v["path"]).name == result["filename"]),
+                    None,
+                )
+                if match:
+                    update_video_caption(match["id"], caption)
+
+            _pipeline_emit(f"Video complete: {result['filename']} ({result['duration']}s)")
+            _pipeline_emit("DONE:ok")
+        else:
+            _pipeline_emit("Video assembly failed")
+            _pipeline_emit("DONE:error")
+
+    except Exception as e:
+        _pipeline_emit(f"Pipeline error: {e}")
+        _pipeline_emit("DONE:error")
 
 
 # ── Routes ───────────────────────────────────────────────────────────────────
@@ -756,15 +1049,45 @@ def api_generate():
     data = request.json or {}
     model = data.get("model", "claude-sonnet-4-6")
     num_videos = max(1, min(10, data.get("num_videos", 1)))
+    num_variations = max(1, min(3, data.get("variations", 1)))
 
     # Validate model
     valid_ids = {m["id"] for m in MODELS}
     if model not in valid_ids:
         model = "claude-sonnet-4-6"
 
-    threading.Thread(target=_generate, args=(model, num_videos),
+    threading.Thread(target=_generate,
+                     args=(model, num_videos, num_variations),
                      daemon=True).start()
     return jsonify({"status": "started"})
+
+
+@wizard_bp.route("/wizard/api/caption/<int:video_id>", methods=["POST"])
+def api_regenerate_caption(video_id):
+    """Regenerate caption for an existing video."""
+    data = request.json or {}
+    model = data.get("model", "claude-sonnet-4-6")
+
+    from db import get_all_generated_videos
+    videos = get_all_generated_videos()
+    video = next((v for v in videos if v["id"] == video_id), None)
+    if not video:
+        return jsonify({"error": "Video not found"}), 404
+
+    # Build a minimal plan from timeline
+    timeline = video.get("timeline", [])
+    plan = {"clips": [], "music": {}, "rationale": "MMA highlight reel"}
+    for item in timeline:
+        if item.get("type") == "clip":
+            plan["clips"].append(item)
+        elif item.get("type") == "music":
+            plan["music"] = {"name": item.get("name")}
+
+    caption = _generate_caption(model, plan, video["duration"])
+    if caption:
+        update_video_caption(video_id, caption)
+        return jsonify({"status": "ok", "caption": caption})
+    return jsonify({"error": "Caption generation failed"}), 500
 
 
 @wizard_bp.route("/wizard/api/status")
@@ -948,6 +1271,34 @@ def api_excluded_scenes():
         conn.close()
 
 
+@wizard_bp.route("/wizard/api/pipeline/start", methods=["POST"])
+def api_pipeline_start():
+    data = request.json or {}
+    model = data.get("model", "claude-sonnet-4-6")
+    threading.Thread(target=_run_pipeline, args=(model,), daemon=True).start()
+    return jsonify({"status": "started"})
+
+
+@wizard_bp.route("/wizard/api/pipeline/stop", methods=["POST"])
+def api_pipeline_stop():
+    _pipeline_stop.set()
+    return jsonify({"status": "stopping"})
+
+
+@wizard_bp.route("/wizard/api/pipeline/status")
+def api_pipeline_status():
+    def generate():
+        while True:
+            try:
+                msg = pipeline_progress.get(timeout=30)
+                yield f"data: {json.dumps({'message': msg})}\n\n"
+                if msg.startswith("DONE:"):
+                    break
+            except queue.Empty:
+                yield f"data: {json.dumps({'message': 'waiting...'})}\n\n"
+    return Response(generate(), mimetype="text/event-stream")
+
+
 # ── HTML ─────────────────────────────────────────────────────────────────────
 
 WIZARD_HTML = r"""<!DOCTYPE html>
@@ -1067,6 +1418,21 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .progress .line.error{color:#ef5350}
 .progress .line.done{color:#4caf50;font-weight:700;font-size:14px;margin-top:8px}
 
+/* -- Caption -- */
+.caption-box{
+  margin-top:12px;background:#1a1a1a;border:1px solid #2a2a2a;
+  border-radius:8px;padding:12px;position:relative;
+}
+.caption-box .cap-label{font-size:11px;color:#e53935;font-weight:600;text-transform:uppercase;margin-bottom:6px}
+.caption-box .cap-text{font-size:13px;color:#ccc;white-space:pre-wrap;line-height:1.5}
+.caption-box .cap-actions{display:flex;gap:8px;margin-top:8px}
+.cap-btn{
+  background:#222;color:#aaa;border:1px solid #444;border-radius:4px;
+  padding:3px 10px;font-size:11px;cursor:pointer;
+}
+.cap-btn:hover{color:#fff;border-color:#666}
+.cap-btn.copied{color:#4caf50;border-color:#4caf50}
+
 /* -- Scenes used -- */
 .scenes-used{margin-top:12px}
 .scenes-used .su-label{font-size:11px;color:#888;font-weight:600;text-transform:uppercase;margin-bottom:6px}
@@ -1181,7 +1547,22 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .btn-email:hover{border-color:#666;color:#fff}
 .btn-email svg{width:14px;height:14px;fill:currentColor}
 
-/* (player overlay removed — inline players used instead) */
+/* -- Pipeline -- */
+.pipeline-section{
+  background:#141414;border:1px solid #2a2a2a;border-radius:10px;
+  padding:16px 20px;margin-bottom:20px;
+}
+.pipeline-section h3{font-size:14px;color:#fff;margin-bottom:8px}
+.pipeline-section p{font-size:12px;color:#888;margin-bottom:12px}
+.pipeline-btns{display:flex;gap:10px;align-items:center}
+.pipeline-progress{
+  margin-top:12px;padding:12px;background:#0d0d0d;border-radius:8px;
+  font-size:12px;max-height:250px;overflow-y:auto;display:none;
+}
+.pipeline-progress.active{display:block}
+.pipeline-progress .line{padding:2px 0;color:#aaa}
+.pipeline-progress .line.done{color:#4caf50;font-weight:600}
+.pipeline-progress .line.error{color:#ef5350}
 </style>
 </head>
 <body>
@@ -1211,6 +1592,10 @@ button:disabled{opacity:.5;cursor:not-allowed}
         <label>Videos</label>
         <input type="number" id="num-videos" value="1" min="1" max="10">
       </div>
+      <div class="field">
+        <label>A/B Variations</label>
+        <input type="number" id="num-variations" value="1" min="1" max="3">
+      </div>
       <div class="btn-row">
         <button class="btn-primary" id="gen-btn" onclick="startGeneration()">Generate</button>
       </div>
@@ -1229,6 +1614,18 @@ button:disabled{opacity:.5;cursor:not-allowed}
         <button class="btn-secondary" onclick="refreshResearch()">Re-generate with AI</button>
         <span class="save-status" id="research-save-status"></span>
       </div>
+    </div>
+  </div>
+
+  <div class="pipeline-section">
+    <h3>Auto-Pipeline</h3>
+    <p>Scan for new videos, analyze them with AI, and generate an optimized reel — all in one click.</p>
+    <div class="pipeline-btns">
+      <button class="btn-primary" id="pipeline-btn" onclick="startPipeline()">Run Pipeline</button>
+      <button class="btn-secondary" id="pipeline-stop-btn" onclick="stopPipeline()" style="display:none">Stop</button>
+    </div>
+    <div class="pipeline-progress" id="pipeline-progress">
+      <div id="pipeline-lines"></div>
     </div>
   </div>
 
@@ -1319,6 +1716,7 @@ async function loadHistory() {
       + '</div>'
       + '<div class="hist-body" id="hc-body-' + v.id + '">'
       + '<video controls preload="none" src="/wizard/api/video/' + v.id + '"></video>'
+      + buildCaptionBox(v.caption || '', v.id)
       + buildSceneChips(v.scenes || [])
       + fbBodyHtml
       + '<div class="feedback-form">'
@@ -1351,6 +1749,7 @@ function startGeneration() {
 
   var model = document.getElementById('model-select').value;
   var numVids = parseInt(document.getElementById('num-videos').value) || 1;
+  var numVars = parseInt(document.getElementById('num-variations').value) || 1;
 
   document.getElementById('gen-btn').disabled = true;
   generatedVideos = [];
@@ -1369,7 +1768,7 @@ function startGeneration() {
   fetch('/wizard/api/generate', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({model: model, num_videos: numVids}),
+    body: JSON.stringify({model: model, num_videos: numVids, variations: numVars}),
   }).then(function() {
     var es = new EventSource('/wizard/api/status');
     es.onmessage = function(e) {
@@ -1441,6 +1840,7 @@ function showResults() {
         + '<span class="dur">' + match.duration + 's</span>'
         + '</div>'
         + '<video controls src="/wizard/api/video/' + match.id + '"></video>'
+        + buildCaptionBox(match.caption, match.id)
         + buildSceneChips(match.scenes || [])
         + '<div class="hist-actions">'
         + '<button class="btn-email" onclick="emailVideo(' + match.id + ',\'' + escHtml(match.filename) + '\')">'
@@ -1477,6 +1877,72 @@ async function submitFeedback(videoId) {
   } else {
     status.textContent = 'Failed to save feedback';
     status.style.color = '#ef5350';
+  }
+}
+
+// ── Caption ──
+
+function buildCaptionBox(caption, videoId) {
+  if (!caption) {
+    return '<div class="caption-box"><div class="cap-label">Caption</div>'
+      + '<div class="cap-text" style="color:#555">No caption generated</div>'
+      + '<div class="cap-actions">'
+      + '<button class="cap-btn" onclick="regenCaption(' + videoId + ')">Generate Caption</button>'
+      + '</div></div>';
+  }
+  return '<div class="caption-box"><div class="cap-label">Instagram Caption</div>'
+    + '<div class="cap-text" id="cap-text-' + videoId + '">' + escHtml(caption) + '</div>'
+    + '<div class="cap-actions">'
+    + '<button class="cap-btn" id="cap-copy-' + videoId + '" onclick="copyCaption(' + videoId + ')">Copy</button>'
+    + '<button class="cap-btn" onclick="regenCaption(' + videoId + ')">Regenerate</button>'
+    + '</div></div>';
+}
+
+function copyCaption(videoId) {
+  var text = document.getElementById('cap-text-' + videoId).textContent;
+  navigator.clipboard.writeText(text).then(function() {
+    var btn = document.getElementById('cap-copy-' + videoId);
+    btn.classList.add('copied');
+    btn.textContent = 'Copied!';
+    setTimeout(function() { btn.classList.remove('copied'); btn.textContent = 'Copy'; }, 2000);
+  });
+}
+
+async function regenCaption(videoId) {
+  var model = document.getElementById('model-select').value;
+  var box = event.target.closest('.caption-box');
+  var textEl = box.querySelector('.cap-text');
+  textEl.textContent = 'Generating caption...';
+  textEl.style.color = '#888';
+
+  try {
+    var res = await fetch('/wizard/api/caption/' + videoId, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({model: model}),
+    });
+    var data = await res.json();
+    if (data.caption) {
+      textEl.textContent = data.caption;
+      textEl.style.color = '#ccc';
+      textEl.id = 'cap-text-' + videoId;
+      // Ensure copy button exists
+      var actions = box.querySelector('.cap-actions');
+      if (!actions.querySelector('#cap-copy-' + videoId)) {
+        var copyBtn = document.createElement('button');
+        copyBtn.className = 'cap-btn';
+        copyBtn.id = 'cap-copy-' + videoId;
+        copyBtn.textContent = 'Copy';
+        copyBtn.onclick = function() { copyCaption(videoId); };
+        actions.insertBefore(copyBtn, actions.firstChild);
+      }
+    } else {
+      textEl.textContent = 'Failed to generate caption';
+      textEl.style.color = '#ef5350';
+    }
+  } catch(e) {
+    textEl.textContent = 'Error: ' + e.message;
+    textEl.style.color = '#ef5350';
   }
 }
 
@@ -1796,6 +2262,74 @@ function formatDate(dateStr) {
     return d.toLocaleDateString(undefined, {year:'numeric',month:'short',day:'numeric'})
       + ' ' + d.toLocaleTimeString(undefined, {hour:'2-digit',minute:'2-digit'});
   } catch(e) { return dateStr; }
+}
+
+// ── Pipeline ──
+
+var pipelineRunning = false;
+
+function startPipeline() {
+  if (pipelineRunning) return;
+  pipelineRunning = true;
+  var model = document.getElementById('model-select').value;
+
+  document.getElementById('pipeline-btn').disabled = true;
+  document.getElementById('pipeline-stop-btn').style.display = '';
+
+  var prog = document.getElementById('pipeline-progress');
+  var lines = document.getElementById('pipeline-lines');
+  prog.classList.add('active');
+  lines.innerHTML = '';
+  addPipelineLine('Starting auto-pipeline...');
+
+  fetch('/wizard/api/pipeline/start', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({model: model}),
+  }).then(function() {
+    var es = new EventSource('/wizard/api/pipeline/status');
+    es.onmessage = function(e) {
+      var data = JSON.parse(e.data);
+      var msg = data.message;
+      if (msg.startsWith('DONE:')) {
+        es.close();
+        pipelineRunning = false;
+        document.getElementById('pipeline-btn').disabled = false;
+        document.getElementById('pipeline-stop-btn').style.display = 'none';
+        addPipelineLine(
+          msg === 'DONE:ok' ? 'Pipeline complete!' : (msg === 'DONE:stopped' ? 'Pipeline stopped.' : 'Pipeline failed'),
+          msg === 'DONE:ok' ? 'done' : 'error'
+        );
+        loadHistory();
+      } else if (msg.startsWith('Strategy:')) {
+        addPipelineLine(msg, 'strategy');
+      } else {
+        addPipelineLine(msg);
+      }
+    };
+    es.onerror = function() {
+      es.close();
+      pipelineRunning = false;
+      document.getElementById('pipeline-btn').disabled = false;
+      document.getElementById('pipeline-stop-btn').style.display = 'none';
+      addPipelineLine('Connection lost', 'error');
+    };
+  });
+}
+
+function stopPipeline() {
+  fetch('/wizard/api/pipeline/stop', {method: 'POST'});
+  addPipelineLine('Stopping pipeline...');
+}
+
+function addPipelineLine(text, cls) {
+  var lines = document.getElementById('pipeline-lines');
+  var div = document.createElement('div');
+  div.className = 'line' + (cls ? ' ' + cls : '');
+  div.textContent = text;
+  lines.appendChild(div);
+  var prog = document.getElementById('pipeline-progress');
+  prog.scrollTop = prog.scrollHeight;
 }
 
 init();
