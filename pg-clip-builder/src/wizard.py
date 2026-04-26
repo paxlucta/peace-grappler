@@ -125,6 +125,28 @@ def _get_wizard_history(limit=20):
                 "WHERE generated_video_id=? ORDER BY created_at DESC",
                 (r["id"],),
             ).fetchall()
+            # Extract scene IDs and info from timeline
+            scenes_used = []
+            try:
+                timeline = json.loads(r["timeline_json"])
+                for item in timeline:
+                    if item.get("type") == "clip" and item.get("id"):
+                        sid = item["id"]
+                        tags = conn.execute(
+                            "SELECT tag FROM scene_tags WHERE scene_id=? "
+                            "ORDER BY tag LIMIT 3", (sid,),
+                        ).fetchall()
+                        excluded = conn.execute(
+                            "SELECT excluded FROM scenes WHERE id=?", (sid,),
+                        ).fetchone()
+                        scenes_used.append({
+                            "scene_id": sid,
+                            "tags": [t["tag"] for t in tags],
+                            "excluded": bool(excluded["excluded"]) if excluded else False,
+                        })
+            except Exception:
+                pass
+
             result.append({
                 "id": r["id"],
                 "path": r["path"],
@@ -134,6 +156,7 @@ def _get_wizard_history(limit=20):
                 "exists": Path(r["path"]).exists(),
                 "feedback": [{"text": f["feedback"], "at": f["created_at"]}
                              for f in fb_rows],
+                "scenes": scenes_used,
             })
         return result
     except Exception:
@@ -878,6 +901,53 @@ def api_email(video_id):
         return jsonify({"error": "Email with attachment is only supported on macOS"}), 400
 
 
+@wizard_bp.route("/wizard/api/exclude", methods=["POST"])
+def api_exclude():
+    """Toggle the excluded flag on a scene."""
+    from db import set_scene_excluded
+    data = request.json or {}
+    scene_id = data.get("scene_id")
+    exclude = data.get("exclude", True)
+    if not scene_id:
+        return jsonify({"error": "scene_id required"}), 400
+    set_scene_excluded(scene_id, exclude)
+    return jsonify({"status": "ok"})
+
+
+@wizard_bp.route("/wizard/api/excluded-scenes")
+def api_excluded_scenes():
+    """Return all excluded scenes with tags and video info."""
+    from db import get_scene_by_id
+    conn = get_db()
+    try:
+        rows = conn.execute("""
+            SELECT s.id, s.video_id, s.start_time, s.end_time,
+                   v.filename, v.path
+            FROM scenes s
+            JOIN videos v ON v.id = s.video_id
+            WHERE s.excluded = 1
+            ORDER BY v.filename, s.start_time
+        """).fetchall()
+        result = []
+        for r in rows:
+            tags = conn.execute(
+                "SELECT tag FROM scene_tags WHERE scene_id=? ORDER BY tag",
+                (r["id"],),
+            ).fetchall()
+            dur = round(r["end_time"] - r["start_time"], 1)
+            result.append({
+                "id": r["id"],
+                "filename": r["filename"],
+                "start": r["start_time"],
+                "end": r["end_time"],
+                "duration": dur,
+                "tags": [t["tag"] for t in tags],
+            })
+        return jsonify(result)
+    finally:
+        conn.close()
+
+
 # ── HTML ─────────────────────────────────────────────────────────────────────
 
 WIZARD_HTML = r"""<!DOCTYPE html>
@@ -996,6 +1066,49 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .progress .line.video-ready{color:#4caf50;font-weight:600}
 .progress .line.error{color:#ef5350}
 .progress .line.done{color:#4caf50;font-weight:700;font-size:14px;margin-top:8px}
+
+/* -- Scenes used -- */
+.scenes-used{margin-top:12px}
+.scenes-used .su-label{font-size:11px;color:#888;font-weight:600;text-transform:uppercase;margin-bottom:6px}
+.scene-chips{display:flex;gap:8px;flex-wrap:wrap}
+.scene-chip{
+  display:flex;align-items:center;gap:8px;
+  background:#222;border:1px solid #333;border-radius:8px;
+  padding:4px 8px 4px 4px;font-size:11px;color:#aaa;
+  transition:opacity .2s;
+}
+.scene-chip img{
+  width:36px;height:64px;object-fit:cover;border-radius:4px;background:#111;
+}
+.scene-chip .sc-info{display:flex;flex-direction:column;gap:1px}
+.scene-chip .sc-name{color:#ccc;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px}
+.scene-chip .sc-tags{color:#666;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px}
+.scene-chip .sc-exclude{
+  background:none;border:1px solid #555;color:#888;border-radius:4px;
+  padding:2px 6px;font-size:10px;cursor:pointer;margin-left:auto;white-space:nowrap;
+}
+.scene-chip .sc-exclude:hover{border-color:#e53935;color:#e53935}
+.scene-chip.excluded{opacity:.4;text-decoration:line-through}
+.scene-chip.excluded .sc-exclude{border-color:#4caf50;color:#4caf50}
+
+/* -- Excluded scenes panel -- */
+.excluded-panel{
+  background:#141414;border:1px solid #2a2a2a;border-radius:10px;
+  margin-bottom:20px;overflow:hidden;
+}
+.excluded-toggle{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 20px;cursor:pointer;user-select:none;
+}
+.excluded-toggle:hover{background:#1a1a1a}
+.excluded-toggle h3{font-size:14px;color:#fff;font-weight:600}
+.excluded-toggle .exc-count{font-size:11px;color:#e53935;margin-left:8px;font-weight:400}
+.excluded-toggle .arrow{color:#888;font-size:12px;transition:transform .2s}
+.excluded-toggle .arrow.open{transform:rotate(90deg)}
+.excluded-body{display:none;padding:0 20px 16px;border-top:1px solid #2a2a2a}
+.excluded-body.open{display:block}
+.excluded-grid{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.excluded-empty{color:#555;font-size:13px;padding:14px 0}
 
 /* -- Results -- */
 .results{margin-top:24px;display:none}
@@ -1119,6 +1232,16 @@ button:disabled{opacity:.5;cursor:not-allowed}
     </div>
   </div>
 
+  <div class="excluded-panel" id="excluded-panel" style="display:none">
+    <div class="excluded-toggle" onclick="toggleExcluded()">
+      <h3>Excluded Scenes <span class="exc-count" id="exc-count"></span></h3>
+      <span class="arrow" id="exc-arrow">&#9654;</span>
+    </div>
+    <div class="excluded-body" id="exc-body">
+      <div class="excluded-grid" id="exc-grid"></div>
+    </div>
+  </div>
+
   <div class="progress" id="progress">
     <div id="progress-lines"></div>
   </div>
@@ -1154,6 +1277,7 @@ async function init() {
   }
 
   loadResearch();
+  loadExcluded();
   loadHistory();
 }
 
@@ -1195,6 +1319,7 @@ async function loadHistory() {
       + '</div>'
       + '<div class="hist-body" id="hc-body-' + v.id + '">'
       + '<video controls preload="none" src="/wizard/api/video/' + v.id + '"></video>'
+      + buildSceneChips(v.scenes || [])
       + fbBodyHtml
       + '<div class="feedback-form">'
       + '<textarea id="fb-' + v.id + '" placeholder="Add feedback for this video..."></textarea>'
@@ -1316,6 +1441,7 @@ function showResults() {
         + '<span class="dur">' + match.duration + 's</span>'
         + '</div>'
         + '<video controls src="/wizard/api/video/' + match.id + '"></video>'
+        + buildSceneChips(match.scenes || [])
         + '<div class="hist-actions">'
         + '<button class="btn-email" onclick="emailVideo(' + match.id + ',\'' + escHtml(match.filename) + '\')">'
         + '<svg viewBox="0 0 24 24"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/></svg>'
@@ -1352,6 +1478,102 @@ async function submitFeedback(videoId) {
     status.textContent = 'Failed to save feedback';
     status.style.color = '#ef5350';
   }
+}
+
+// ── Scene exclusion ──
+
+function buildSceneChips(scenes) {
+  if (!scenes || !scenes.length) return '';
+  var html = '<div class="scenes-used"><div class="su-label">Scenes Used</div><div class="scene-chips">';
+  for (var i = 0; i < scenes.length; i++) {
+    var s = scenes[i];
+    var cls = s.excluded ? 'scene-chip excluded' : 'scene-chip';
+    var btnLabel = s.excluded ? 'Unblock' : 'Exclude';
+    var tags = s.tags.length ? s.tags.join(', ') : 'no tags';
+    html += '<div class="' + cls + '" id="sc-' + s.scene_id + '">'
+      + '<img src="/api/thumbnail/' + s.scene_id + '" loading="lazy"/>'
+      + '<div class="sc-info">'
+      + '<span class="sc-name">#' + s.scene_id + '</span>'
+      + '<span class="sc-tags">' + escHtml(tags) + '</span>'
+      + '</div>'
+      + '<button class="sc-exclude" onclick="toggleExclude(' + s.scene_id + ',' + !s.excluded + ')">' + btnLabel + '</button>'
+      + '</div>';
+  }
+  html += '</div></div>';
+  return html;
+}
+
+async function toggleExclude(sceneId, exclude) {
+  await fetch('/wizard/api/exclude', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({scene_id: sceneId, exclude: exclude}),
+  });
+  // Update all chips for this scene across the page
+  var chips = document.querySelectorAll('#sc-' + sceneId);
+  for (var i = 0; i < chips.length; i++) {
+    var chip = chips[i];
+    var btn = chip.querySelector('.sc-exclude');
+    if (exclude) {
+      chip.classList.add('excluded');
+      btn.textContent = 'Unblock';
+      btn.setAttribute('onclick', 'toggleExclude(' + sceneId + ',false)');
+    } else {
+      chip.classList.remove('excluded');
+      btn.textContent = 'Exclude';
+      btn.setAttribute('onclick', 'toggleExclude(' + sceneId + ',true)');
+    }
+  }
+  loadExcluded();
+}
+
+function toggleExcluded() {
+  var body = document.getElementById('exc-body');
+  var arrow = document.getElementById('exc-arrow');
+  body.classList.toggle('open');
+  arrow.classList.toggle('open');
+}
+
+async function loadExcluded() {
+  var res = await fetch('/wizard/api/excluded-scenes');
+  var scenes = await res.json();
+  var panel = document.getElementById('excluded-panel');
+  var count = document.getElementById('exc-count');
+  var grid = document.getElementById('exc-grid');
+
+  if (!scenes.length) {
+    panel.style.display = 'none';
+    return;
+  }
+
+  panel.style.display = '';
+  count.textContent = '(' + scenes.length + ')';
+
+  var html = '';
+  for (var i = 0; i < scenes.length; i++) {
+    var s = scenes[i];
+    var tags = s.tags.length ? s.tags.join(', ') : 'no tags';
+    html += '<div class="scene-chip" id="exc-sc-' + s.id + '">'
+      + '<img src="/api/thumbnail/' + s.id + '" loading="lazy"/>'
+      + '<div class="sc-info">'
+      + '<span class="sc-name">' + escHtml(s.filename) + '</span>'
+      + '<span class="sc-tags">' + escHtml(tags) + ' &middot; ' + s.duration + 's</span>'
+      + '</div>'
+      + '<button class="sc-exclude" style="border-color:#4caf50;color:#4caf50" '
+      + 'onclick="unblockScene(' + s.id + ')">Unblock</button>'
+      + '</div>';
+  }
+  grid.innerHTML = html;
+}
+
+async function unblockScene(sceneId) {
+  await fetch('/wizard/api/exclude', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({scene_id: sceneId, exclude: false}),
+  });
+  loadExcluded();
+  loadHistory();
 }
 
 async function emailVideo(videoId, filename) {
