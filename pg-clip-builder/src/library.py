@@ -243,7 +243,6 @@ select:focus{outline:none;border-color:#e53935}
   <nav>
     <a href="/builder">Builder</a>
     <a href="/analyze">Analyze</a>
-    <a href="/generate">Generate</a>
     <a href="/library" class="active">Library</a>
     <a href="/wizard">AI Wizard</a>
   </nav>

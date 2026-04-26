@@ -1572,7 +1572,6 @@ button:disabled{opacity:.5;cursor:not-allowed}
   <nav>
     <a href="/builder">Builder</a>
     <a href="/analyze">Analyze</a>
-    <a href="/generate">Generate</a>
     <a href="/library">Library</a>
     <a href="/wizard" class="active">AI Wizard</a>
   </nav>

@@ -929,7 +929,6 @@ footer{
   <nav>
     <a href="/builder" class="active">Builder</a>
     <a href="/analyze">Analyze</a>
-    <a href="/generate">Generate</a>
     <a href="/library">Library</a>
     <a href="/wizard">AI Wizard</a>
   </nav>

@@ -552,7 +552,6 @@ td{font-size:13px}
   <nav>
     <a href="/builder">Builder</a>
     <a href="/analyze" class="active">Analyze</a>
-    <a href="/generate">Generate</a>
     <a href="/library">Library</a>
     <a href="/wizard">AI Wizard</a>
   </nav>

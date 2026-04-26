@@ -13,7 +13,7 @@ from flask import Flask, jsonify, redirect
 from db import get_db
 from clip_builder import clip_builder_bp
 from analyzer import analyzer_bp
-from generator import generator_bp
+
 from library import library_bp
 from wizard import wizard_bp
 from rating import rating_bp
@@ -21,7 +21,7 @@ from rating import rating_bp
 app = Flask(__name__)
 app.register_blueprint(clip_builder_bp)
 app.register_blueprint(analyzer_bp)
-app.register_blueprint(generator_bp)
+
 app.register_blueprint(library_bp)
 app.register_blueprint(wizard_bp)
 app.register_blueprint(rating_bp)
