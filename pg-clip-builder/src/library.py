@@ -565,19 +565,22 @@ function copyCaption() {
 function postToInstagram(videoId) {
   var v = allVideos.find(function(x) { return x.id === videoId; });
   if (!v) return;
-  // Copy caption to clipboard first so user can paste it
+  // Copy caption to clipboard
   if (v.caption) {
     navigator.clipboard.writeText(v.caption);
   }
-  // Open Instagram create page — user drags video from Finder
-  // Also open the video file in Finder for easy drag
+  // Reveal video in Finder for easy upload
   fetch('/api/open', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({path: v.path, reveal: true}),
   });
-  window.open('https://www.instagram.com/reels/create/', '_blank');
-  alert('Caption copied to clipboard!\\n\\n1. Instagram opened in a new tab\\n2. Video revealed in Finder\\n3. Drag the video into Instagram\\n4. Paste the caption (Cmd+V)');
+  // Open Meta Business Suite (works from desktop for Reels publishing)
+  window.open('https://business.facebook.com/latest/content_calendar', '_blank');
+  alert((v.caption ? 'Caption copied to clipboard!\\n\\n' : '')
+    + '1. Meta Business Suite opened (use Create Reel)\\n'
+    + '2. Video revealed in Finder\\n'
+    + '3. Upload the video and paste the caption (Cmd+V)');
 }
 
 async function emailFromLibrary(videoId, filename) {
