@@ -203,6 +203,16 @@ def _call_claude(prompt_text, model, timeout=300):
     )
 
     raw = result.stdout.strip()
+    stderr = result.stderr.strip() if result.stderr else ""
+
+    if result.returncode != 0 and not raw:
+        err_msg = stderr[:200] if stderr else "unknown error"
+        if "auth" in err_msg.lower() or "login" in err_msg.lower() or "api key" in err_msg.lower():
+            emit("Claude CLI not authenticated. Open Terminal and run 'claude' to sign in.")
+        else:
+            emit(f"Claude CLI error: {err_msg}")
+        return None
+
     text_content = ""
     for line in raw.splitlines():
         line = line.strip()

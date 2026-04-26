@@ -142,6 +142,21 @@ def call_claude(frames, prompt_text):
             )
 
             raw = result.stdout.strip()
+            stderr = result.stderr.strip() if result.stderr else ""
+
+            # Check for auth / CLI errors
+            if result.returncode != 0 and not raw:
+                err_msg = stderr[:200] if stderr else "unknown error"
+                if "auth" in err_msg.lower() or "login" in err_msg.lower() or "api key" in err_msg.lower():
+                    emit_progress("Claude CLI not authenticated. Run 'claude' in Terminal to sign in.")
+                    return None
+                emit_progress(f"Claude CLI error: {err_msg}")
+                if attempt < max_retries:
+                    emit_progress(f"Retrying ({attempt + 1}/{max_retries})...")
+                    time.sleep(5)
+                    continue
+                return None
+
             text_content = ""
             for line in raw.splitlines():
                 line = line.strip()
