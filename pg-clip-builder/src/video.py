@@ -183,12 +183,13 @@ def normalize_clip(in_path, out_path):
         return False
 
 
-def generate_placeholder(out_path, duration, color="black"):
-    """Generate a solid color video at 1080x608 resolution."""
+def generate_placeholder(out_path, duration, color="black", width=1080, height=1920):
+    """Generate a solid color video. Default 1080x1920 (portrait)."""
     try:
         r = subprocess.run(
             ["ffmpeg", "-y",
-             "-f", "lavfi", "-i", f"color=c={color}:s=1080x608:d={duration:.2f}:r=30",
+             "-f", "lavfi", "-i",
+             f"color=c={color}:s={width}x{height}:d={duration:.2f}:r=30",
              "-f", "lavfi", "-i", f"anullsrc=r=44100:cl=stereo",
              "-t", f"{duration:.2f}",
              "-c:v", "libx264", "-preset", "fast", "-crf", "23",
@@ -536,24 +537,61 @@ def stack_split_videos(top_path, bottom_path, out_path):
         return False
 
 
+def pad_clip_to_duration(clip_path, offset, target_duration, out_path):
+    """Pad a clip with black frames so it fills *target_duration* seconds.
+
+    *offset* seconds of black are prepended; black is appended so the total
+    reaches *target_duration*.  Audio is silence-padded to match.
+    """
+    clip_dur = get_video_duration(clip_path)
+    tail = max(0, target_duration - offset - clip_dur)
+
+    if offset < 0.05 and tail < 0.05:
+        shutil.copy2(clip_path, out_path)
+        return True
+
+    vf = []
+    af = []
+    if offset > 0.05:
+        vf.append(f"tpad=start_duration={offset:.3f}:start_mode=add:color=black")
+        af.append(f"adelay={int(offset * 1000)}|{int(offset * 1000)}")
+    if tail > 0.05:
+        vf.append(f"tpad=stop_duration={tail:.3f}:stop_mode=add:color=black")
+        af.append(f"apad=pad_dur={tail:.3f}")
+
+    vf_str = ",".join(vf) if vf else "null"
+    af_str = ",".join(af) if af else "anull"
+
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-y", "-i", clip_path,
+             "-vf", vf_str, "-af", af_str,
+             "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+             "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "128k",
+             "-pix_fmt", "yuv420p", "-movflags", "+faststart", out_path],
+            capture_output=True, timeout=120,
+        )
+        return r.returncode == 0 and os.path.exists(out_path)
+    except Exception:
+        return False
+
+
 def stack_wide_videos(paths, out_path):
     """Stack 1-3 wide (landscape) videos vertically in a 1080x1920 portrait frame.
 
-    Each video gets an equal share of the vertical space with the remaining
-    space distributed as equal padding above, between, and after each video.
+    Each video gets an equal share of the vertical space.
+    Clips should be pre-padded to the same duration (see pad_clip_to_duration).
+    If durations differ, shorter clips show black (not frozen frame).
     Audio is mixed from all inputs.
     """
     n = len(paths)
     if n < 1:
         return False
     if n == 1:
-        # Single wide video — scale to 1080 wide, center in 1080x1920
         return normalize_clip(paths[0], out_path)
 
     durations = [get_video_duration(p) for p in paths]
     max_dur = max(durations)
-
-    # Compute per-slot height: divide 1920 equally among n videos
     slot_h = 1920 // n
 
     vf_parts = []
@@ -561,8 +599,8 @@ def stack_wide_videos(paths, out_path):
     for i, p in enumerate(paths):
         pad_expr = ""
         if durations[i] < max_dur - 0.05:
-            pad_expr = (f",tpad=stop_mode=clone:"
-                        f"stop_duration={max_dur - durations[i]:.3f}")
+            pad_expr = (f",tpad=stop_duration={max_dur - durations[i]:.3f}"
+                        f":stop_mode=add:color=black")
         vf_parts.append(
             f"[{i}:v]scale=1080:{slot_h}:force_original_aspect_ratio=decrease,"
             f"pad=1080:{slot_h}:(ow-iw)/2:(oh-ih)/2:color=black,"

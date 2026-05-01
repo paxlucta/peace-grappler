@@ -23,8 +23,8 @@ from video import (
     add_multiple_text_overlays, build_music_track, concatenate_clips,
     extract_subclip, extract_wide_subclip, find_asset, generate_placeholder,
     get_video_duration, has_audio_stream, is_wide_video, normalize_clip,
-    overlay_music, overlay_music_track, process_split_section, process_track,
-    stack_wide_videos,
+    overlay_music, overlay_music_track, pad_clip_to_duration,
+    process_split_section, process_track, stack_wide_videos,
 )
 
 clip_builder_bp = Blueprint("clip_builder", __name__)
@@ -252,10 +252,16 @@ def api_load_video():
     all_gen = get_all_generated_videos()
     for g in all_gen:
         if Path(g["path"]).name == filename:
+            tl = g["timeline"]
+            if isinstance(tl, dict):
+                count = len([i for i in tl.get("video_track", [])
+                             if i.get("type") == "clip"])
+            else:
+                count = len([i for i in tl if i.get("type") == "clip"])
             return jsonify({
                 "video": filename,
-                "timeline": g["timeline"],
-                "count": len([i for i in g["timeline"] if i.get("type") == "clip"]),
+                "timeline": tl,
+                "count": count,
             })
 
     # 2. Fallback: check for companion .json sidecar next to a video in output/
@@ -730,9 +736,19 @@ def _generate_multitrack(data):
     include_outro = data.get("include_outro", True)
 
     with tempfile.TemporaryDirectory() as tmp:
-        # Build time segments: group overlapping wide clips together
-        # Each segment is a list of clips that play during that time
+        # Build time segments and fill gaps with black placeholders
         segments = _build_time_segments(clips)
+
+        # Insert black placeholders for gaps between segments
+        full_segments = []
+        cursor = 0.0
+        for seg in segments:
+            if seg["start"] > cursor + 0.05:
+                full_segments.append({
+                    "start": cursor, "end": seg["start"], "clips": [],
+                })
+            full_segments.append(seg)
+            cursor = seg["end"]
 
         clip_paths = []
         all_transitions = []
@@ -747,30 +763,51 @@ def _generate_multitrack(data):
                     all_transitions.append("fade")
                     intro_count = 1
 
-        for si, seg in enumerate(segments):
+        for si, seg in enumerate(full_segments):
             seg_clips = seg["clips"]
+
+            # Empty segment = gap → black placeholder
+            if not seg_clips:
+                gap_dur = seg["end"] - seg["start"]
+                gap_path = os.path.join(tmp, f"gap{si:03d}.mp4")
+                if generate_placeholder(gap_path, gap_dur, "black"):
+                    clip_paths.append(gap_path)
+                    if len(clip_paths) > 1:
+                        all_transitions.append(None)
+                continue
+
             wide_clips = [c for c in seg_clips if c["wide"]]
             non_wide_clips = [c for c in seg_clips if not c["wide"]]
 
             if len(wide_clips) >= 2:
-                # Stack wide videos vertically
+                # Stack wide videos vertically, padding each to segment duration
+                seg_start = seg["start"]
+                seg_dur = seg["end"] - seg_start
                 wide_clips.sort(key=lambda c: c["stack_order"])
                 wide_paths = []
                 for wi, wc in enumerate(wide_clips):
-                    wp = os.path.join(tmp, f"seg{si:03d}_wide{wi}.mp4")
-                    if extract_wide_subclip(wc["video_file"], wc["start"],
-                                            wc["duration"], wp):
-                        wide_paths.append(wp)
+                    raw = os.path.join(tmp, f"seg{si:03d}_wraw{wi}.mp4")
+                    if not extract_wide_subclip(wc["video_file"], wc["start"],
+                                                wc["duration"], raw):
+                        continue
+                    # Pad to align within the segment
+                    offset = wc["start_time"] - seg_start
+                    if offset > 0.05 or (wc["start_time"] + wc["duration"]) < seg["end"] - 0.05:
+                        padded = os.path.join(tmp, f"seg{si:03d}_wpad{wi}.mp4")
+                        if pad_clip_to_duration(raw, offset, seg_dur, padded):
+                            wide_paths.append(padded)
+                        else:
+                            wide_paths.append(raw)
+                    else:
+                        wide_paths.append(raw)
                 if wide_paths:
                     stacked = os.path.join(tmp, f"seg{si:03d}_stacked.mp4")
                     if stack_wide_videos(wide_paths, stacked):
                         clip_paths.append(stacked)
-                        # Transition from the first clip in this segment
                         trans = wide_clips[0].get("trans_in")
                         if len(clip_paths) > 1:
                             all_transitions.append(trans)
             elif len(wide_clips) == 1:
-                # Single wide clip — extract as portrait-padded
                 wc = wide_clips[0]
                 wp = os.path.join(tmp, f"seg{si:03d}_clip.mp4")
                 if extract_subclip(wc["video_file"], wc["start"],
@@ -779,7 +816,6 @@ def _generate_multitrack(data):
                     if len(clip_paths) > 1:
                         all_transitions.append(wc.get("trans_in"))
 
-            # Non-wide clips in this segment
             for ni, nc in enumerate(non_wide_clips):
                 np = os.path.join(tmp, f"seg{si:03d}_nw{ni}.mp4")
                 if extract_subclip(nc["video_file"], nc["start"],
@@ -1079,9 +1115,9 @@ footer{
   position:relative;border-bottom:1px solid #1a1a1a;
   background:#0d0d0d;min-height:40px;
 }
-#video-track{min-height:70px;border-bottom:none}
-#sound-track{background:#0c0e0c}
-#text-track{background:#0c0c0e}
+#video-track{min-height:70px;border-bottom:none;overflow:hidden}
+#sound-track{background:#0c0e0c;z-index:2}
+#text-track{background:#0c0c0e;z-index:2}
 .track-empty{
   position:absolute;left:60px;top:50%;transform:translateY(-50%);
   color:#333;font-size:10px;pointer-events:none;white-space:nowrap;
@@ -1574,6 +1610,22 @@ async function init() {
     musicColorMap[musicList[i].name] = MUSIC_COLORS[i % MUSIC_COLORS.length];
   }
   setupTracks();
+
+  /* Auto-load timeline from ?load=filename query param */
+  var params = new URLSearchParams(window.location.search);
+  var loadFile = params.get('load');
+  if (loadFile) {
+    fetch('/api/load-video', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({filename: loadFile}),
+    }).then(function(r){return r.json()}).then(function(data) {
+      if (data.error) return;
+      if (data.timeline && data.timeline.video_track) loadNewTimeline(data.timeline);
+      else if (data.timeline) loadOldTimeline(data.timeline);
+    });
+    /* Clean up the URL */
+    window.history.replaceState({}, '', '/builder');
+  }
 }
 
 function renderMusicLabels() {
@@ -1926,12 +1978,16 @@ function reorderWideStack(movedIdx, dy) {
 
 function resolveVideoOverlaps(droppedIdx) {
   var dropped = videoItems[droppedIdx];
-  if (dropped.clip.wide) return; /* wide videos can overlap freely */
+  if (dropped.clip.wide) {
+    /* Wide video dropped: just sweep non-wide videos to avoid overlapping it */
+    sweepNonWideOverlaps();
+    return;
+  }
 
   var dropStart = dropped.startTime;
   var dropEnd = dropStart + dropped.duration;
 
-  /* Find the leftmost video that overlaps with the dropped one */
+  /* Find the leftmost video that overlaps with the dropped non-wide */
   var overlapped = null;
   for (var i = 0; i < videoItems.length; i++) {
     if (i === droppedIdx) continue;
@@ -1943,33 +1999,56 @@ function resolveVideoOverlaps(droppedIdx) {
       }
     }
   }
-  if (!overlapped) return;
 
-  /* Collect: overlapped video + all videos to its left, excluding the dropped */
-  var toPush = [];
-  for (var i = 0; i < videoItems.length; i++) {
-    if (i === droppedIdx) continue;
-    if (videoItems[i].startTime <= overlapped.startTime) {
-      toPush.push(videoItems[i]);
+  if (overlapped) {
+    /* Collect: overlapped video + all non-wide videos to its left, excluding the dropped */
+    var toPush = [];
+    for (var i = 0; i < videoItems.length; i++) {
+      if (i === droppedIdx) continue;
+      if (!videoItems[i].clip.wide && videoItems[i].startTime <= overlapped.startTime) {
+        toPush.push(videoItems[i]);
+      }
+    }
+    /* Sort by startTime to maintain relative order */
+    toPush.sort(function(a, b) { return a.startTime - b.startTime; });
+
+    /* Place sequentially after dropped video */
+    var cursor = dropEnd;
+    for (var j = 0; j < toPush.length; j++) {
+      toPush[j].startTime = cursor;
+      cursor += toPush[j].duration;
     }
   }
-  /* Sort by startTime to maintain relative order */
-  toPush.sort(function(a, b) { return a.startTime - b.startTime; });
 
-  /* Place sequentially after dropped video */
-  var cursor = dropEnd;
-  for (var j = 0; j < toPush.length; j++) {
-    toPush[j].startTime = cursor;
-    cursor += toPush[j].duration;
-  }
+  /* Sweep: ensure no non-wide video overlaps with ANY other video */
+  sweepNonWideOverlaps();
+}
 
-  /* Sweep: resolve any remaining non-wide overlaps */
+function sweepNonWideOverlaps() {
+  /* Ensure no non-wide video overlaps with any other video (wide or not).
+     Wide videos can overlap with each other, but non-wide cannot overlap anything. */
   var nonWide = videoItems.filter(function(v) { return !v.clip.wide; });
   nonWide.sort(function(a, b) { return a.startTime - b.startTime; });
-  for (var i = 1; i < nonWide.length; i++) {
-    var prevEnd = nonWide[i-1].startTime + nonWide[i-1].duration;
-    if (nonWide[i].startTime < prevEnd) {
-      nonWide[i].startTime = prevEnd;
+
+  for (var i = 0; i < nonWide.length; i++) {
+    var nw = nonWide[i];
+    var nwStart = nw.startTime;
+    var nwEnd = nwStart + nw.duration;
+
+    /* Check against ALL other videos */
+    var maxEnd = nwStart; /* earliest safe start = current position */
+    for (var j = 0; j < videoItems.length; j++) {
+      if (videoItems[j] === nw) continue;
+      var vs = videoItems[j].startTime;
+      var ve = vs + videoItems[j].duration;
+      /* If this other video overlaps with our non-wide video, push right */
+      if (vs < nwEnd && ve > nwStart) {
+        maxEnd = Math.max(maxEnd, ve);
+      }
+    }
+    if (maxEnd > nwStart) {
+      nw.startTime = maxEnd;
+      nwEnd = maxEnd + nw.duration;
     }
   }
 }
@@ -2506,7 +2585,9 @@ function handleLoadFile(e) {
       method:'POST', headers:{'Content-Type':'application/json'},
       body:JSON.stringify({filename: file.name}),
     }).then(function(r){return r.json()}).then(function(data) {
-      if (data.timeline) loadOldTimeline(data.timeline);
+      if (!data.timeline) return;
+      if (data.timeline.video_track) loadNewTimeline(data.timeline);
+      else loadOldTimeline(data.timeline);
     });
     e.target.value = '';
     return;

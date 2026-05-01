@@ -1829,13 +1829,13 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .hist-actions{
   display:flex;gap:8px;margin-top:12px;align-items:center;flex-wrap:wrap;
 }
-.btn-email{
+.btn-edit,.btn-email{
   display:inline-flex;align-items:center;gap:6px;
   background:#222;color:#e0e0e0;border:1px solid #444;border-radius:6px;
   padding:6px 14px;font-size:12px;cursor:pointer;
 }
-.btn-email:hover{border-color:#666;color:#fff}
-.btn-email svg{width:14px;height:14px;fill:currentColor}
+.btn-edit:hover,.btn-email:hover{border-color:#666;color:#fff}
+.btn-edit svg,.btn-email svg{width:14px;height:14px;fill:currentColor}
 
 /* -- Pipeline -- */
 .pipeline-section{
@@ -2054,6 +2054,9 @@ async function loadHistory() {
       + '<span class="fb-status" id="fb-status-' + v.id + '"></span>'
       + '</div></div>'
       + '<div class="hist-actions">'
+      + '<button class="btn-edit" onclick="editInBuilder(\'' + escHtml(v.filename) + '\')">'
+      + '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>'
+      + 'Edit</button>'
       + '<button class="btn-email" onclick="emailVideo(' + v.id + ',\'' + escHtml(v.filename) + '\')">'
       + '<svg viewBox="0 0 24 24"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/></svg>'
       + 'Email Video</button>'
@@ -2255,6 +2258,9 @@ function showResults() {
         + buildCaptionBox(match.caption, match.id)
         + buildSceneChips(match.scenes || [])
         + '<div class="hist-actions">'
+        + '<button class="btn-edit" onclick="editInBuilder(\'' + escHtml(match.filename) + '\')">'
+        + '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>'
+        + 'Edit</button>'
         + '<button class="btn-email" onclick="emailVideo(' + match.id + ',\'' + escHtml(match.filename) + '\')">'
         + '<svg viewBox="0 0 24 24"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/></svg>'
         + 'Email Video</button>'
@@ -2464,6 +2470,10 @@ async function unblockScene(sceneId) {
   });
   loadExcluded();
   loadHistory();
+}
+
+function editInBuilder(filename) {
+  window.location.href = '/builder?load=' + encodeURIComponent(filename);
 }
 
 async function emailVideo(videoId, filename) {
