@@ -238,11 +238,11 @@ nav a.active{color:#e53935;border-color:#e53935}
 <header>
   <h1>Peace<span>Grappler</span></h1>
   <nav>
-    <a href="/builder">Builder</a>
-    <a href="/analyze">Analyze</a>
-    <a href="/library">Library</a>
     <a href="/wizard">AI Wizard</a>
+    <a href="/builder">Builder</a>
+    <a href="/library">Library</a>
     <a href="/rate" class="active">Scenes</a>
+    <a href="/analyze">Analyze</a>
   </nav>
 </header>
 

@@ -625,7 +625,12 @@ header{
 }
 header h1{font-size:18px;font-weight:600;color:#fff;white-space:nowrap}
 header h1 span{color:#e53935}
-.hctl{display:flex;align-items:center;gap:12px;flex:1}
+/* -- Secondary toolbar -- */
+.sub-toolbar{
+  display:flex;align-items:center;gap:12px;
+  padding:8px 24px;flex-shrink:0;
+  background:#111;border-bottom:1px solid #2a2a2a;
+}
 select,button{
   background:#222;color:#e0e0e0;border:1px solid #444;border-radius:6px;
   padding:6px 12px;font-size:13px;cursor:pointer;
@@ -924,20 +929,22 @@ footer{
 <body>
 
 <header>
-  <h1>Peace<span>Grappler</span> Clip Builder</h1>
-  <div class="hctl">
-    <select id="tag-filter" onchange="filterByTag()">
-      <option value="">All Tags</option>
-    </select>
-    <span id="clip-count"></span>
-  </div>
+  <h1>Peace<span>Grappler</span></h1>
   <nav>
-    <a href="/builder" class="active">Builder</a>
-    <a href="/analyze">Analyze</a>
-    <a href="/library">Library</a>
     <a href="/wizard">AI Wizard</a>
+    <a href="/builder" class="active">Builder</a>
+    <a href="/library">Library</a>
+    <a href="/rate">Scenes</a>
+    <a href="/analyze">Analyze</a>
   </nav>
 </header>
+
+<div class="sub-toolbar">
+  <select id="tag-filter" onchange="filterByTag()">
+    <option value="">All Tags</option>
+  </select>
+  <span id="clip-count"></span>
+</div>
 
 <main>
   <div id="clip-grid"></div>

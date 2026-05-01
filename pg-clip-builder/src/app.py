@@ -8,7 +8,7 @@ import time
 import webbrowser
 from pathlib import Path
 
-from flask import Flask, jsonify, redirect
+from flask import Flask, jsonify, redirect, send_file
 
 from db import get_db
 from clip_builder import clip_builder_bp
@@ -33,54 +33,174 @@ _SERVER_ID = str(time.time())
 
 _INJECTED_SCRIPT = """
 <style>
+/* -- Design System -- */
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root{
+  --font-display:'Bebas Neue','Impact',sans-serif;
+  --font-body:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,sans-serif;
+  --font-mono:'JetBrains Mono','SF Mono','Consolas',monospace;
+  --bg-base:#08080c;
+  --bg-surface:#111118;
+  --bg-elevated:#1a1a24;
+  --bg-hover:#22222e;
+  --accent:#e53935;
+  --accent-hover:#ff5252;
+  --accent-glow:rgba(229,57,53,0.25);
+  --accent-gold:#d4a017;
+  --text-1:#eeeef2;
+  --text-2:#8888a0;
+  --text-3:#55556a;
+  --border:#1e1e2a;
+  --border-hover:#2e2e3e;
+  --success:#22c55e;
+  --error:#ef4444;
+  --radius:10px;
+  --radius-sm:6px;
+  --radius-lg:16px;
+}
+
+body{
+  background:var(--bg-base) !important;
+  color:var(--text-1) !important;
+  font-family:var(--font-body) !important;
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+}
+
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border-hover);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:#3a3a4e}
+
 /* -- Sticky header -- */
-header{position:sticky !important;top:0;z-index:50}
+header{
+  position:sticky !important;top:0;z-index:50;
+  display:flex !important;align-items:center !important;
+  gap:16px !important;flex-wrap:nowrap !important;
+  background:linear-gradient(180deg,#0e0e16 0%,#0b0b12 100%) !important;
+  border-bottom:1px solid var(--border) !important;
+  padding:14px 24px !important;
+  backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+}
+header h1{
+  font-family:var(--font-display) !important;
+  font-size:26px !important;font-weight:400 !important;
+  letter-spacing:3px !important;text-transform:uppercase !important;
+  color:var(--text-1) !important;
+  white-space:nowrap !important;flex-shrink:0 !important;
+}
+header h1 span{color:var(--accent) !important}
+nav{
+  display:flex !important;gap:8px !important;
+  margin-left:auto !important;flex-shrink:0 !important;
+  align-items:center !important;
+}
+nav a{
+  font-family:var(--font-body) !important;font-weight:600 !important;
+  font-size:11px !important;letter-spacing:0.8px !important;
+  text-transform:uppercase !important;
+  padding:6px 14px !important;border-radius:var(--radius-sm) !important;
+  border:1px solid var(--border) !important;color:var(--text-2) !important;
+  text-decoration:none !important;transition:all 0.2s ease !important;
+}
+nav a:hover{
+  color:var(--text-1) !important;border-color:var(--border-hover) !important;
+  background:var(--bg-hover) !important;
+}
+nav a.active{
+  color:var(--accent) !important;border-color:var(--accent) !important;
+  background:rgba(229,57,53,0.08) !important;
+  box-shadow:0 0 12px rgba(229,57,53,0.1) !important;
+}
+
+/* -- Global overrides -- */
+button{
+  font-family:var(--font-body) !important;font-weight:600 !important;
+  letter-spacing:0.3px !important;transition:all 0.2s ease !important;
+  border-radius:var(--radius-sm) !important;
+}
+button.primary,.btn-primary{
+  background:linear-gradient(135deg,#e53935 0%,#c62828 100%) !important;
+  box-shadow:0 2px 12px rgba(229,57,53,0.25) !important;
+  border-color:#e53935 !important;
+}
+button.primary:hover,.btn-primary:hover{
+  background:linear-gradient(135deg,#ff5252 0%,#e53935 100%) !important;
+  box-shadow:0 4px 20px rgba(229,57,53,0.35) !important;
+  transform:translateY(-1px);
+}
+input,select,textarea{
+  font-family:var(--font-body) !important;
+  transition:border-color 0.2s ease,box-shadow 0.2s ease !important;
+}
+input:focus,select:focus,textarea:focus{
+  border-color:var(--accent) !important;
+  box-shadow:0 0 0 2px var(--accent-glow) !important;
+  outline:none !important;
+}
+th{
+  font-family:var(--font-body) !important;font-size:10px !important;
+  font-weight:700 !important;letter-spacing:1.2px !important;
+  text-transform:uppercase !important;color:var(--text-3) !important;
+}
+@keyframes pgFadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+main,.content,table{animation:pgFadeIn 0.35s ease-out}
+
+/* -- Header logo -- */
+.header-logo{
+  height:28px;width:auto;flex-shrink:0;
+  filter:invert(1);
+  margin-right:4px;
+}
 
 /* -- Update button -- */
 .update-btn{
-  background:none;color:#666;border:1px solid #333;border-radius:6px;
-  padding:3px 8px;font-size:11px;cursor:pointer;margin-left:8px;
-  transition:all .15s;
+  background:none;color:var(--text-3);border:1px solid var(--border);border-radius:var(--radius-sm);
+  padding:4px 10px;font-size:10px;cursor:pointer;margin-left:8px;
+  transition:all .2s;letter-spacing:0.5px;text-transform:uppercase;
 }
-.update-btn:hover{color:#e53935;border-color:#e53935}
-.update-btn.checking{color:#888;border-color:#555;cursor:wait}
-.update-btn.updated{color:#4caf50;border-color:#4caf50}
-.update-btn.error{color:#ef5350;border-color:#ef5350}
+.update-btn:hover{color:var(--accent);border-color:var(--accent)}
+.update-btn.checking{color:var(--text-3);border-color:var(--border);cursor:wait}
+.update-btn.updated{color:var(--success);border-color:var(--success)}
+.update-btn.error{color:var(--error);border-color:var(--error)}
 
 /* -- Global footer log -- */
 #pg-footer{
   position:fixed;bottom:0;left:0;right:0;z-index:90;
-  background:#111;border-top:1px solid #2a2a2a;
-  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  background:linear-gradient(180deg,#0c0c14 0%,#08080e 100%);
+  border-top:1px solid var(--border);
+  font-family:var(--font-body);
+  backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
 }
 #pg-footer-bar{
-  display:flex;align-items:center;padding:4px 16px;cursor:pointer;
+  display:flex;align-items:center;padding:5px 20px;cursor:pointer;
   user-select:none;gap:10px;
 }
-#pg-footer-bar:hover{background:#1a1a1a}
-#pg-footer-bar .ft-label{font-size:11px;color:#888;font-weight:600}
+#pg-footer-bar:hover{background:rgba(255,255,255,0.02)}
+#pg-footer-bar .ft-label{font-size:10px;color:var(--text-3);font-weight:700;letter-spacing:1.5px;text-transform:uppercase}
 #pg-footer-bar .ft-count{
-  font-size:10px;color:#555;background:#222;border-radius:8px;padding:1px 6px;
+  font-size:10px;color:var(--text-3);background:var(--bg-elevated);border-radius:8px;padding:1px 7px;font-weight:600;
 }
 #pg-footer-bar .ft-last{
-  font-size:11px;color:#666;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  font-size:11px;color:var(--text-3);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
-#pg-footer-bar .ft-arrow{color:#555;font-size:10px;transition:transform .2s}
+#pg-footer-bar .ft-arrow{color:var(--text-3);font-size:10px;transition:transform .2s}
 #pg-footer-bar .ft-arrow.open{transform:rotate(180deg)}
 #pg-footer-bar .ft-clear{
-  background:none;border:1px solid #333;color:#555;border-radius:4px;
-  padding:1px 6px;font-size:10px;cursor:pointer;
+  background:none;border:1px solid var(--border);color:var(--text-3);border-radius:4px;
+  padding:1px 7px;font-size:10px;cursor:pointer;
 }
-#pg-footer-bar .ft-clear:hover{color:#e53935;border-color:#e53935}
+#pg-footer-bar .ft-clear:hover{color:var(--accent);border-color:var(--accent)}
 #pg-log-panel{
-  display:none;max-height:200px;overflow-y:auto;padding:6px 16px 8px;
-  border-top:1px solid #1a1a1a;
+  display:none;max-height:200px;overflow-y:auto;padding:6px 20px 8px;
+  border-top:1px solid var(--border);
 }
 #pg-log-panel.open{display:block}
-#pg-log-panel .lg{font-size:11px;padding:1px 0;color:#777;font-family:monospace}
-#pg-log-panel .lg .lg-time{color:#444;margin-right:6px}
-#pg-log-panel .lg.lg-error{color:#ef5350}
-#pg-log-panel .lg.lg-ok{color:#4caf50}
+#pg-log-panel .lg{font-size:11px;padding:2px 0;color:var(--text-2);font-family:var(--font-mono)}
+#pg-log-panel .lg .lg-time{color:var(--text-3);margin-right:8px}
+#pg-log-panel .lg.lg-error{color:var(--error)}
+#pg-log-panel .lg.lg-ok{color:var(--success)}
 </style>
 
 <div id="pg-footer">
@@ -104,21 +224,27 @@ header{position:sticky !important;top:0;z-index:50}
     }).catch(function(){});
   },1500);
 
-  /* ── Header: inject Rate link + Update button ── */
+  /* ── Header: inject logo ── */
+  var h1 = document.querySelector('header h1');
+  if (h1 && !document.querySelector('.header-logo')) {
+    var logo = document.createElement('img');
+    logo.src = '/api/logo';
+    logo.alt = 'PeaceGrappler';
+    logo.className = 'header-logo';
+    h1.parentNode.insertBefore(logo, h1);
+  }
+
+  /* ── Header: inject Rate badge + Update button ── */
   var nav = document.querySelector('header nav');
   if (nav) {
-    if (!nav.querySelector('a[href="/rate"]')) {
-      var scenesLink = document.createElement('a');
-      scenesLink.href = '/rate';
-      scenesLink.textContent = 'Scenes';
+    var scenesLink = nav.querySelector('a[href="/rate"]');
+    if (scenesLink) {
       scenesLink.style.position = 'relative';
-      if (location.pathname === '/rate') scenesLink.className = 'active';
-      nav.appendChild(scenesLink);
       fetch('/rate/api/scenes').then(function(r){return r.json()}).then(function(data){
         var unrated = data.filter(function(s){return !s.excluded && s.status==='unrated'}).length;
         if (unrated > 0) {
           var badge = document.createElement('span');
-          badge.style.cssText = 'position:absolute;top:-6px;right:-6px;background:#e53935;color:#fff;font-size:9px;font-weight:700;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 4px;';
+          badge.style.cssText = 'position:absolute;top:-6px;right:-6px;background:var(--accent,#e53935);color:#fff;font-size:8px;font-weight:800;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 4px;';
           badge.textContent = unrated;
           scenesLink.appendChild(badge);
         }
@@ -253,6 +379,15 @@ def index():
 def server_id():
     """Returns a token that changes when the server restarts."""
     return jsonify({"id": _SERVER_ID})
+
+
+@app.route("/api/logo")
+def logo():
+    """Serve the logo image."""
+    logo_path = ROOT_DIR / "assets" / "logo.jpeg"
+    if logo_path.exists():
+        return send_file(str(logo_path), mimetype="image/jpeg")
+    return "", 404
 
 
 @app.route("/api/update", methods=["POST"])

@@ -291,10 +291,11 @@ select:focus{outline:none;border-color:#e53935}
 <header>
   <h1>Peace<span>Grappler</span></h1>
   <nav>
-    <a href="/builder">Builder</a>
-    <a href="/analyze">Analyze</a>
-    <a href="/library" class="active">Library</a>
     <a href="/wizard">AI Wizard</a>
+    <a href="/builder">Builder</a>
+    <a href="/library" class="active">Library</a>
+    <a href="/rate">Scenes</a>
+    <a href="/analyze">Analyze</a>
   </nav>
 </header>
 
