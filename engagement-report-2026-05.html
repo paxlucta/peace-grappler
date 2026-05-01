@@ -1,0 +1,1281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Peace Grappler - Instagram Analytics Report — May 2026</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  :root {
+    --bg: #0f1117;
+    --card: #1a1d27;
+    --border: #2a2d3a;
+    --text: #e1e4ed;
+    --muted: #8b8fa3;
+    --accent: #6366f1;
+    --accent2: #818cf8;
+    --green: #34d399;
+    --orange: #fb923c;
+    --red: #f87171;
+    --pink: #f472b6;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg); color: var(--text);
+    line-height: 1.6; padding: 0; margin: 0;
+  }
+  .page-header {
+    padding: 24px 24px 0;
+    max-width: 1400px; margin: 0 auto;
+  }
+  .page-content {
+    padding: 0 24px 24px;
+    max-width: 1400px; margin: 0 auto;
+  }
+  h1 { font-size: 28px; margin-bottom: 4px; }
+  h2 { font-size: 20px; margin: 32px 0 16px; color: var(--accent2); }
+  h2:first-child { margin-top: 8px; }
+  h3 { font-size: 16px; margin: 24px 0 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+  .subtitle { color: var(--muted); font-size: 14px; margin-bottom: 16px; }
+
+  /* Top navigation tabs */
+  .nav-tabs {
+    display: flex; gap: 0;
+    border-bottom: 2px solid var(--border);
+    margin-bottom: 24px;
+  }
+  .nav-tab {
+    padding: 12px 24px; cursor: pointer;
+    color: var(--muted); font-size: 15px; font-weight: 600;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px; transition: all 0.2s;
+    user-select: none;
+  }
+  .nav-tab:hover { color: var(--text); }
+  .nav-tab.active { color: var(--accent2); border-bottom-color: var(--accent2); }
+  .page-panel { display: none; }
+  .page-panel.active { display: block; }
+
+  .site-nav { display: flex; align-items: center; gap: 16px; padding: 12px 0; margin-bottom: 12px; border-bottom: 1px solid var(--border); }
+  .site-nav a { color: var(--accent2); text-decoration: none; font-size: 13px; font-weight: 600; }
+  .site-nav a:hover { opacity: 0.8; }
+  .site-nav-label { color: var(--muted); font-size: 13px; }
+
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .stat-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 20px; text-align: center;
+  }
+  .stat-card .value { font-size: 32px; font-weight: 700; color: var(--accent2); }
+  .stat-card .label { font-size: 13px; color: var(--muted); margin-top: 4px; }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 24px; margin-bottom: 24px;
+  }
+  .chart-container { position: relative; height: 300px; margin: 16px 0; }
+  .chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px; }
+  .chart-row .card { margin-bottom: 0; }
+  @media (max-width: 768px) { .chart-row { grid-template-columns: 1fr; } }
+
+  /* Sortable tables */
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+  th {
+    color: var(--muted); font-weight: 600; font-size: 12px;
+    text-transform: uppercase; letter-spacing: 0.5px;
+    cursor: pointer; user-select: none; white-space: nowrap;
+  }
+  th:hover { color: var(--text); }
+  th .sort-arrow { margin-left: 4px; font-size: 10px; opacity: 0.4; }
+  th.sorted .sort-arrow { opacity: 1; color: var(--accent2); }
+  th.no-sort { cursor: default; }
+  th.no-sort:hover { color: var(--muted); }
+  tr:hover { background: rgba(99,102,241,0.05); }
+
+  .rank { font-weight: 700; color: var(--accent2); min-width: 36px; display: inline-block; }
+  .rank-1 { color: #fbbf24; }
+  .rank-2 { color: #d1d5db; }
+  .rank-3 { color: #cd7f32; }
+  .score { font-weight: 700; color: var(--green); }
+  .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 6px;
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+  }
+  .badge-feed { background: #6366f133; color: var(--accent2); }
+  .badge-reels { background: #f472b633; color: var(--pink); }
+  .badge-carousel { background: #fb923c33; color: var(--orange); }
+  .caption { color: var(--muted); font-size: 13px; max-width: 300px; }
+  a { color: var(--accent2); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .breakdown { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 8px; }
+  .breakdown-item { font-size: 13px; }
+  .breakdown-item .bval { font-weight: 600; color: var(--text); }
+  .breakdown-item .blabel { color: var(--muted); }
+
+  /* Sub-tabs (for ranking periods) */
+  .sub-tabs { display: flex; gap: 0; margin-bottom: 0; }
+  .sub-tab {
+    padding: 10px 20px; cursor: pointer; border: 1px solid var(--border);
+    background: var(--bg); color: var(--muted); font-size: 14px; font-weight: 600;
+    border-bottom: none; border-radius: 8px 8px 0 0; margin-right: -1px;
+    user-select: none;
+  }
+  .sub-tab.active { background: var(--card); color: var(--accent2); }
+  .sub-content { display: none; }
+  .sub-content.active { display: block; }
+
+  .scoring-legend { font-size: 13px; color: var(--muted); margin-bottom: 16px; }
+  .scoring-legend span { color: var(--text); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <div class="site-nav">
+    <a href="index.html">&#8592; All Reports</a>
+    <span class="site-nav-label">PeaceGrappler</span>
+  </div>
+  <h1>@peacegrappler</h1>
+  <div class="subtitle">Peace Grappler | MMA Stories &mdash; Report generated May 1, 2026, 7:01 AM</div>
+  <div class="nav-tabs">
+    <div class="nav-tab active" onclick="switchPage('overview')">Overview</div>
+    <div class="nav-tab" onclick="switchPage('posts')">Post Performance</div>
+    <div class="nav-tab" onclick="switchPage('shares')">Shares &amp; Reposts</div>
+    <div class="nav-tab" onclick="switchPage('commenters')">Top Commenters</div>
+    <div class="nav-tab" onclick="switchPage('rankings')">Community Rankings</div>
+  </div>
+</div>
+
+<div class="page-content">
+
+<!-- ==================== TAB 1: OVERVIEW ==================== -->
+<div id="page-overview" class="page-panel active">
+
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="value">1,044</div>
+      <div class="label">Followers</div>
+    </div>
+    <div class="stat-card">
+      <div class="value">104</div>
+      <div class="label">Following</div>
+    </div>
+    <div class="stat-card">
+      <div class="value">194</div>
+      <div class="label">Posts</div>
+    </div>
+    <div class="stat-card">
+      <div class="value">0</div>
+      <div class="label">Total Reach</div>
+    </div>
+    <div class="stat-card">
+      <div class="value">0</div>
+      <div class="label">Total Views</div>
+    </div>
+    <div class="stat-card">
+      <div class="value">0</div>
+      <div class="label">Total Interactions</div>
+    </div>
+    <div class="stat-card">
+      <div class="value">0</div>
+      <div class="label">Avg Reach / Post</div>
+    </div>
+    <div class="stat-card">
+      <div class="value">6,532</div>
+      <div class="label">Total Comments</div>
+    </div>
+  </div>
+
+  <h2>Follower Growth</h2>
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="value" style="color: var(--green)">+5</div>
+      <div class="label">Yesterday</div>
+    </div>
+    <div class="stat-card">
+      <div class="value" style="color: var(--muted)">0</div>
+      <div class="label">Last 7 Days</div>
+    </div>
+    <div class="stat-card">
+      <div class="value" style="color: var(--green)">+5</div>
+      <div class="label">Month Total</div>
+    </div>
+  </div>
+
+  <h2>Content Published</h2>
+  <div class="card" style="overflow-x: auto;">
+    <table>
+      <thead><tr><th>Period</th><th>Total</th><th>Reels</th><th>Feed</th></tr></thead>
+      <tbody>
+        <tr><td>Yesterday</td><td>0</td><td>-</td><td>-</td></tr>
+        <tr><td>Last 7 Days</td><td>0</td><td>-</td><td>-</td></tr>
+        <tr><td>Month Total</td><td>0</td><td>-</td><td>-</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  
+  <h2>Account Growth</h2>
+  <div class="card">
+    <div class="chart-container"><canvas id="growthChart"></canvas></div>
+  </div>
+  
+
+  <h2>Content Overview</h2>
+  <div class="chart-row">
+    <div class="card">
+      <h3>Content Mix</h3>
+      <div class="chart-container"><canvas id="contentMixChart"></canvas></div>
+    </div>
+    <div class="card">
+      <h3>Reach by Post</h3>
+      <div class="chart-container"><canvas id="reachChart"></canvas></div>
+    </div>
+  </div>
+
+  
+  <h2>Account Insights (May 2026)</h2>
+  <div class="stats-grid">
+    
+      <div class="stat-card">
+        <div class="value">54</div>
+        <div class="label">accounts engaged</div>
+        
+      </div>
+    
+      <div class="stat-card">
+        <div class="value">2</div>
+        <div class="label">comments</div>
+        
+          <div class="breakdown">
+            
+              <div class="breakdown-item"><span class="bval">2</span> <span class="blabel">REEL</span></div>
+            
+          </div>
+        
+      </div>
+    
+      <div class="stat-card">
+        <div class="value">56</div>
+        <div class="label">likes</div>
+        
+          <div class="breakdown">
+            
+              <div class="breakdown-item"><span class="bval">56</span> <span class="blabel">REEL</span></div>
+            
+          </div>
+        
+      </div>
+    
+      <div class="stat-card">
+        <div class="value">0</div>
+        <div class="label">profile links taps</div>
+        
+      </div>
+    
+      <div class="stat-card">
+        <div class="value">979</div>
+        <div class="label">reach</div>
+        
+          <div class="breakdown">
+            
+              <div class="breakdown-item"><span class="bval">13</span> <span class="blabel">FOLLOWER</span></div>
+            
+              <div class="breakdown-item"><span class="bval">475</span> <span class="blabel">NON_FOLLOWER</span></div>
+            
+              <div class="breakdown-item"><span class="bval">1</span> <span class="blabel">CAROUSEL_CONTAINER</span></div>
+            
+              <div class="breakdown-item"><span class="bval">2</span> <span class="blabel">POST</span></div>
+            
+              <div class="breakdown-item"><span class="bval">485</span> <span class="blabel">REEL</span></div>
+            
+              <div class="breakdown-item"><span class="bval">3</span> <span class="blabel">STORY</span></div>
+            
+          </div>
+        
+      </div>
+    
+      <div class="stat-card">
+        <div class="value">0</div>
+        <div class="label">replies</div>
+        
+      </div>
+    
+      <div class="stat-card">
+        <div class="value">1</div>
+        <div class="label">reposts</div>
+        
+      </div>
+    
+      <div class="stat-card">
+        <div class="value">1</div>
+        <div class="label">saves</div>
+        
+          <div class="breakdown">
+            
+              <div class="breakdown-item"><span class="bval">1</span> <span class="blabel">REEL</span></div>
+            
+          </div>
+        
+      </div>
+    
+      <div class="stat-card">
+        <div class="value">5</div>
+        <div class="label">shares</div>
+        
+          <div class="breakdown">
+            
+              <div class="breakdown-item"><span class="bval">5</span> <span class="blabel">REEL</span></div>
+            
+          </div>
+        
+      </div>
+    
+      <div class="stat-card">
+        <div class="value">70</div>
+        <div class="label">total interactions</div>
+        
+          <div class="breakdown">
+            
+              <div class="breakdown-item"><span class="bval">70</span> <span class="blabel">REEL</span></div>
+            
+          </div>
+        
+      </div>
+    
+      <div class="stat-card">
+        <div class="value">1,483</div>
+        <div class="label">views</div>
+        
+          <div class="breakdown">
+            
+              <div class="breakdown-item"><span class="bval">1</span> <span class="blabel">CAROUSEL_CONTAINER</span></div>
+            
+              <div class="breakdown-item"><span class="bval">5</span> <span class="blabel">POST</span></div>
+            
+              <div class="breakdown-item"><span class="bval">1,471</span> <span class="blabel">REEL</span></div>
+            
+              <div class="breakdown-item"><span class="bval">6</span> <span class="blabel">STORY</span></div>
+            
+          </div>
+        
+      </div>
+    
+  </div>
+  
+
+  
+  <h2>Audience Demographics</h2>
+  <div class="chart-row">
+    <div class="card">
+      <h3>Age Distribution</h3>
+      <div class="chart-container"><canvas id="ageChart"></canvas></div>
+    </div>
+    <div class="card">
+      <h3>Gender Distribution</h3>
+      <div class="chart-container"><canvas id="genderChart"></canvas></div>
+    </div>
+  </div>
+  <div class="chart-row">
+    <div class="card">
+      <h3>Top Countries</h3>
+      <div class="chart-container"><canvas id="countryChart"></canvas></div>
+    </div>
+    <div class="card">
+      <h3>Top Cities</h3>
+      <div class="chart-container"><canvas id="cityChart"></canvas></div>
+    </div>
+  </div>
+  
+
+</div>
+
+<!-- ==================== TAB 2: POST PERFORMANCE ==================== -->
+<div id="page-posts" class="page-panel">
+
+  <h2>Post Performance</h2>
+  <div class="card" style="overflow-x: auto;">
+    <table class="sortable" id="posts-table">
+      <thead>
+        <tr>
+          <th data-type="date">Date <span class="sort-arrow">&#9650;</span></th>
+          <th data-type="string">Type <span class="sort-arrow">&#9650;</span></th>
+          <th data-type="string">Caption <span class="sort-arrow">&#9650;</span></th>
+          <th data-type="number">Reach <span class="sort-arrow">&#9650;</span></th>
+          <th data-type="number">Views <span class="sort-arrow">&#9650;</span></th>
+          <th data-type="number">Likes <span class="sort-arrow">&#9650;</span></th>
+          <th data-type="number">Comments <span class="sort-arrow">&#9650;</span></th>
+          <th data-type="number">Shares <span class="sort-arrow">&#9650;</span></th>
+          <th data-type="number">Saves <span class="sort-arrow">&#9650;</span></th>
+          <th class="no-sort">Link</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+<!-- ==================== TAB 3: SHARES & REPOSTS ==================== -->
+<div id="page-shares" class="page-panel">
+  <h2>Top Shared &amp; Reposted Content (May 2026)</h2>
+  <div class="card"><p style="color:var(--muted)">No shares data available yet.</p></div>
+</div>
+
+<!-- ==================== TAB 4: TOP COMMENTERS ==================== -->
+<div id="page-commenters" class="page-panel">
+  <h2>Top Active Commenters (May 2026)</h2>
+  
+    <div class="card" style="overflow-x: auto;">
+      <table class="sortable" id="commenters-table">
+        <thead>
+          <tr>
+            <th data-type="number"># <span class="sort-arrow">&#9650;</span></th>
+            <th data-type="string">Username <span class="sort-arrow">&#9650;</span></th>
+            <th data-type="number">Comments <span class="sort-arrow">&#9650;</span></th>
+            <th data-type="number">Replies <span class="sort-arrow">&#9650;</span></th>
+            <th data-type="number">Total <span class="sort-arrow">&#9650;</span></th>
+            <th class="no-sort">Top Posts Commented On</th>
+          </tr>
+        </thead>
+        <tbody>
+          
+        </tbody>
+      </table>
+    </div>
+  
+</div>
+
+<!-- ==================== TAB 5: COMMUNITY ENGAGEMENT ==================== -->
+<div id="page-rankings" class="page-panel">
+
+  <h2>Community Engagement Rankings</h2>
+  <div class="scoring-legend">
+    Scoring: <span>Text comment = 5 pts</span> &bull;
+    <span>Text reply = 7 pts</span> &bull;
+    <span>Emoji comment = 1 pt</span> &bull;
+    <span>Emoji reply = 2 pts</span><br>
+    <span style="color: var(--orange);">2x bonus</span> for interactions within 30 minutes of post/comment creation
+  </div>
+
+  <div class="sub-tabs">
+    <div class="sub-tab active" onclick="switchSubTab(this, 'ranking-alltime')">All Time</div>
+    <div class="sub-tab" onclick="switchSubTab(this, 'ranking-last30')">May 2026</div>
+  </div>
+
+  <div class="card" style="border-top-left-radius: 0; overflow-x: auto;">
+    <div id="ranking-alltime" class="sub-content active">
+      
+    <table class="sortable" id="ranking-alltime-table">
+      <thead>
+        <tr>
+          <th data-type="number"># <span class="sort-arrow">&#9650;</span></th>
+          <th data-type="string">Username <span class="sort-arrow">&#9650;</span></th>
+          <th data-type="number">Score <span class="sort-arrow">&#9650;</span></th>
+          <th data-type="number">Early <span class="sort-arrow">&#9650;</span></th>
+          <th data-type="number">Text Comments <span class="sort-arrow">&#9650;</span></th>
+          <th data-type="number">Emoji Comments <span class="sort-arrow">&#9650;</span></th>
+          <th data-type="number">Text Replies <span class="sort-arrow">&#9650;</span></th>
+          <th data-type="number">Emoji Replies <span class="sort-arrow">&#9650;</span></th>
+          <th data-type="number">Total <span class="sort-arrow">&#9650;</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        
+          <tr>
+            <td data-sort="1"><span class="rank rank-1">1</span></td>
+            <td data-sort="peacegrappler_mma"><strong>@peacegrappler_mma</strong></td>
+            <td data-sort="18500" class="score">18,500</td>
+            <td data-sort="1218" style="color: var(--orange);">1,218</td>
+            <td data-sort="100">100</td>
+            <td data-sort="0">0</td>
+            <td data-sort="1375">1,375</td>
+            <td data-sort="3">3</td>
+            <td data-sort="1478">1,478</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="2"><span class="rank rank-2">2</span></td>
+            <td data-sort="peacegrappler"><strong>@peacegrappler</strong></td>
+            <td data-sort="10253" class="score">10,253</td>
+            <td data-sort="689" style="color: var(--orange);">689</td>
+            <td data-sort="113">113</td>
+            <td data-sort="0">0</td>
+            <td data-sort="713">713</td>
+            <td data-sort="0">0</td>
+            <td data-sort="826">826</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="3"><span class="rank rank-3">3</span></td>
+            <td data-sort="quemuel_ottoni"><strong>@quemuel_ottoni</strong></td>
+            <td data-sort="4479" class="score">4,479</td>
+            <td data-sort="323" style="color: var(--orange);">323</td>
+            <td data-sort="127">127</td>
+            <td data-sort="7">7</td>
+            <td data-sort="260">260</td>
+            <td data-sort="4">4</td>
+            <td data-sort="398">398</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="4"><span class="rank ">4</span></td>
+            <td data-sort="luis_pequeno_mma"><strong>@luis_pequeno_mma</strong></td>
+            <td data-sort="2757" class="score">2,757</td>
+            <td data-sort="53" style="color: var(--orange);">53</td>
+            <td data-sort="73">73</td>
+            <td data-sort="26">26</td>
+            <td data-sort="295">295</td>
+            <td data-sort="0">0</td>
+            <td data-sort="394">394</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="5"><span class="rank ">5</span></td>
+            <td data-sort="pablofiorindi"><strong>@pablofiorindi</strong></td>
+            <td data-sort="2457" class="score">2,457</td>
+            <td data-sort="120" style="color: var(--orange);">120</td>
+            <td data-sort="270">270</td>
+            <td data-sort="13">13</td>
+            <td data-sort="68">68</td>
+            <td data-sort="0">0</td>
+            <td data-sort="351">351</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="6"><span class="rank ">6</span></td>
+            <td data-sort="enzocardoso.bjj"><strong>@enzocardoso.bjj</strong></td>
+            <td data-sort="2354" class="score">2,354</td>
+            <td data-sort="107" style="color: var(--orange);">107</td>
+            <td data-sort="258">258</td>
+            <td data-sort="10">10</td>
+            <td data-sort="69">69</td>
+            <td data-sort="0">0</td>
+            <td data-sort="337">337</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="7"><span class="rank ">7</span></td>
+            <td data-sort="pedr00jj"><strong>@pedr00jj</strong></td>
+            <td data-sort="1794" class="score">1,794</td>
+            <td data-sort="96" style="color: var(--orange);">96</td>
+            <td data-sort="190">190</td>
+            <td data-sort="3">3</td>
+            <td data-sort="45">45</td>
+            <td data-sort="1">1</td>
+            <td data-sort="239">239</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="8"><span class="rank ">8</span></td>
+            <td data-sort="rpsantos_mma"><strong>@rpsantos_mma</strong></td>
+            <td data-sort="1755" class="score">1,755</td>
+            <td data-sort="73" style="color: var(--orange);">73</td>
+            <td data-sort="255">255</td>
+            <td data-sort="5">5</td>
+            <td data-sort="16">16</td>
+            <td data-sort="0">0</td>
+            <td data-sort="276">276</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="9"><span class="rank ">9</span></td>
+            <td data-sort="hugo7jj"><strong>@hugo7jj</strong></td>
+            <td data-sort="1630" class="score">1,630</td>
+            <td data-sort="107" style="color: var(--orange);">107</td>
+            <td data-sort="219">219</td>
+            <td data-sort="0">0</td>
+            <td data-sort="0">0</td>
+            <td data-sort="0">0</td>
+            <td data-sort="219">219</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="10"><span class="rank ">10</span></td>
+            <td data-sort="rm.nicki"><strong>@rm.nicki</strong></td>
+            <td data-sort="1203" class="score">1,203</td>
+            <td data-sort="112" style="color: var(--orange);">112</td>
+            <td data-sort="128">128</td>
+            <td data-sort="2">2</td>
+            <td data-sort="1">1</td>
+            <td data-sort="0">0</td>
+            <td data-sort="131">131</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="11"><span class="rank ">11</span></td>
+            <td data-sort="pg_grappling"><strong>@pg_grappling</strong></td>
+            <td data-sort="846" class="score">846</td>
+            <td data-sort="46" style="color: var(--orange);">46</td>
+            <td data-sort="75">75</td>
+            <td data-sort="0">0</td>
+            <td data-sort="31">31</td>
+            <td data-sort="0">0</td>
+            <td data-sort="106">106</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="12"><span class="rank ">12</span></td>
+            <td data-sort="anaaj_camargo"><strong>@anaaj_camargo</strong></td>
+            <td data-sort="590" class="score">590</td>
+            <td data-sort="50" style="color: var(--orange);">50</td>
+            <td data-sort="68">68</td>
+            <td data-sort="0">0</td>
+            <td data-sort="0">0</td>
+            <td data-sort="0">0</td>
+            <td data-sort="68">68</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="13"><span class="rank ">13</span></td>
+            <td data-sort="ryangandraufc"><strong>@ryangandraufc</strong></td>
+            <td data-sort="493" class="score">493</td>
+            <td data-sort="50" style="color: var(--orange);">50</td>
+            <td data-sort="28">28</td>
+            <td data-sort="46">46</td>
+            <td data-sort="21">21</td>
+            <td data-sort="0">0</td>
+            <td data-sort="95">95</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="14"><span class="rank ">14</span></td>
+            <td data-sort="combintel"><strong>@combintel</strong></td>
+            <td data-sort="474" class="score">474</td>
+            <td data-sort="31" style="color: var(--orange);">31</td>
+            <td data-sort="48">48</td>
+            <td data-sort="1">1</td>
+            <td data-sort="10">10</td>
+            <td data-sort="0">0</td>
+            <td data-sort="59">59</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="15"><span class="rank ">15</span></td>
+            <td data-sort="irmandadefightteam"><strong>@irmandadefightteam</strong></td>
+            <td data-sort="425" class="score">425</td>
+            <td data-sort="5" style="color: var(--orange);">5</td>
+            <td data-sort="1">1</td>
+            <td data-sort="0">0</td>
+            <td data-sort="55">55</td>
+            <td data-sort="0">0</td>
+            <td data-sort="56">56</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="16"><span class="rank ">16</span></td>
+            <td data-sort="mmmarc20"><strong>@mmmarc20</strong></td>
+            <td data-sort="397" class="score">397</td>
+            <td data-sort="27" style="color: var(--orange);">27</td>
+            <td data-sort="33">33</td>
+            <td data-sort="0">0</td>
+            <td data-sort="11">11</td>
+            <td data-sort="0">0</td>
+            <td data-sort="44">44</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="17"><span class="rank ">17</span></td>
+            <td data-sort="ronemayanmorais"><strong>@ronemayanmorais</strong></td>
+            <td data-sort="346" class="score">346</td>
+            <td data-sort="11" style="color: var(--orange);">11</td>
+            <td data-sort="39">39</td>
+            <td data-sort="4">4</td>
+            <td data-sort="12">12</td>
+            <td data-sort="0">0</td>
+            <td data-sort="55">55</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="18"><span class="rank ">18</span></td>
+            <td data-sort="bellsouza816"><strong>@bellsouza816</strong></td>
+            <td data-sort="322" class="score">322</td>
+            <td data-sort="2" style="color: var(--orange);">2</td>
+            <td data-sort="0">0</td>
+            <td data-sort="0">0</td>
+            <td data-sort="44">44</td>
+            <td data-sort="0">0</td>
+            <td data-sort="44">44</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="19"><span class="rank ">19</span></td>
+            <td data-sort="erik_.mma"><strong>@erik_.mma</strong></td>
+            <td data-sort="315" class="score">315</td>
+            <td data-sort="0" style="color: var(--orange);">0</td>
+            <td data-sort="0">0</td>
+            <td data-sort="0">0</td>
+            <td data-sort="45">45</td>
+            <td data-sort="0">0</td>
+            <td data-sort="45">45</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="20"><span class="rank ">20</span></td>
+            <td data-sort="kaua_limamma"><strong>@kaua_limamma</strong></td>
+            <td data-sort="306" class="score">306</td>
+            <td data-sort="0" style="color: var(--orange);">0</td>
+            <td data-sort="1">1</td>
+            <td data-sort="0">0</td>
+            <td data-sort="43">43</td>
+            <td data-sort="0">0</td>
+            <td data-sort="44">44</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="21"><span class="rank ">21</span></td>
+            <td data-sort="aline.r15"><strong>@aline.r15</strong></td>
+            <td data-sort="266" class="score">266</td>
+            <td data-sort="11" style="color: var(--orange);">11</td>
+            <td data-sort="1">1</td>
+            <td data-sort="9">9</td>
+            <td data-sort="27">27</td>
+            <td data-sort="0">0</td>
+            <td data-sort="37">37</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="22"><span class="rank ">22</span></td>
+            <td data-sort="god.motivacao"><strong>@god.motivacao</strong></td>
+            <td data-sort="255" class="score">255</td>
+            <td data-sort="44" style="color: var(--orange);">44</td>
+            <td data-sort="8">8</td>
+            <td data-sort="139">139</td>
+            <td data-sort="2">2</td>
+            <td data-sort="0">0</td>
+            <td data-sort="149">149</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="23"><span class="rank ">23</span></td>
+            <td data-sort="cleyton_jesuss"><strong>@cleyton_jesuss</strong></td>
+            <td data-sort="215" class="score">215</td>
+            <td data-sort="18" style="color: var(--orange);">18</td>
+            <td data-sort="19">19</td>
+            <td data-sort="4">4</td>
+            <td data-sort="4">4</td>
+            <td data-sort="0">0</td>
+            <td data-sort="27">27</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="24"><span class="rank ">24</span></td>
+            <td data-sort="gra_jpereira"><strong>@gra_jpereira</strong></td>
+            <td data-sort="184" class="score">184</td>
+            <td data-sort="15" style="color: var(--orange);">15</td>
+            <td data-sort="18">18</td>
+            <td data-sort="2">2</td>
+            <td data-sort="3">3</td>
+            <td data-sort="0">0</td>
+            <td data-sort="23">23</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="25"><span class="rank ">25</span></td>
+            <td data-sort="lucasluiz911_mma"><strong>@lucasluiz911_mma</strong></td>
+            <td data-sort="144" class="score">144</td>
+            <td data-sort="10" style="color: var(--orange);">10</td>
+            <td data-sort="20">20</td>
+            <td data-sort="6">6</td>
+            <td data-sort="0">0</td>
+            <td data-sort="0">0</td>
+            <td data-sort="26">26</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="26"><span class="rank ">26</span></td>
+            <td data-sort="leandro._bjj"><strong>@leandro._bjj</strong></td>
+            <td data-sort="143" class="score">143</td>
+            <td data-sort="8" style="color: var(--orange);">8</td>
+            <td data-sort="16">16</td>
+            <td data-sort="16">16</td>
+            <td data-sort="3">3</td>
+            <td data-sort="0">0</td>
+            <td data-sort="35">35</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="27"><span class="rank ">27</span></td>
+            <td data-sort="alvesmidih"><strong>@alvesmidih</strong></td>
+            <td data-sort="142" class="score">142</td>
+            <td data-sort="4" style="color: var(--orange);">4</td>
+            <td data-sort="3">3</td>
+            <td data-sort="0">0</td>
+            <td data-sort="15">15</td>
+            <td data-sort="0">0</td>
+            <td data-sort="18">18</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="28"><span class="rank ">28</span></td>
+            <td data-sort="maxgandra"><strong>@maxgandra</strong></td>
+            <td data-sort="122" class="score">122</td>
+            <td data-sort="6" style="color: var(--orange);">6</td>
+            <td data-sort="19">19</td>
+            <td data-sort="5">5</td>
+            <td data-sort="0">0</td>
+            <td data-sort="0">0</td>
+            <td data-sort="24">24</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="29"><span class="rank ">29</span></td>
+            <td data-sort="eliassilverio"><strong>@eliassilverio</strong></td>
+            <td data-sort="115" class="score">115</td>
+            <td data-sort="9" style="color: var(--orange);">9</td>
+            <td data-sort="13">13</td>
+            <td data-sort="8">8</td>
+            <td data-sort="1">1</td>
+            <td data-sort="0">0</td>
+            <td data-sort="22">22</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="30"><span class="rank ">30</span></td>
+            <td data-sort="tabajaraharu"><strong>@tabajaraharu</strong></td>
+            <td data-sort="111" class="score">111</td>
+            <td data-sort="12" style="color: var(--orange);">12</td>
+            <td data-sort="6">6</td>
+            <td data-sort="11">11</td>
+            <td data-sort="4">4</td>
+            <td data-sort="1">1</td>
+            <td data-sort="22">22</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="31"><span class="rank ">31</span></td>
+            <td data-sort="tiwimma"><strong>@tiwimma</strong></td>
+            <td data-sort="110" class="score">110</td>
+            <td data-sort="5" style="color: var(--orange);">5</td>
+            <td data-sort="11">11</td>
+            <td data-sort="2">2</td>
+            <td data-sort="4">4</td>
+            <td data-sort="0">0</td>
+            <td data-sort="17">17</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="32"><span class="rank ">32</span></td>
+            <td data-sort="pedromadeira.s"><strong>@pedromadeira.s</strong></td>
+            <td data-sort="102" class="score">102</td>
+            <td data-sort="6" style="color: var(--orange);">6</td>
+            <td data-sort="13">13</td>
+            <td data-sort="0">0</td>
+            <td data-sort="1">1</td>
+            <td data-sort="0">0</td>
+            <td data-sort="14">14</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="33"><span class="rank ">33</span></td>
+            <td data-sort="marc0s.azv"><strong>@marc0s.azv</strong></td>
+            <td data-sort="96" class="score">96</td>
+            <td data-sort="5" style="color: var(--orange);">5</td>
+            <td data-sort="13">13</td>
+            <td data-sort="1">1</td>
+            <td data-sort="1">1</td>
+            <td data-sort="0">0</td>
+            <td data-sort="15">15</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="34"><span class="rank ">34</span></td>
+            <td data-sort="cjrnavalha"><strong>@cjrnavalha</strong></td>
+            <td data-sort="85" class="score">85</td>
+            <td data-sort="6" style="color: var(--orange);">6</td>
+            <td data-sort="11">11</td>
+            <td data-sort="0">0</td>
+            <td data-sort="0">0</td>
+            <td data-sort="0">0</td>
+            <td data-sort="11">11</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="35"><span class="rank ">35</span></td>
+            <td data-sort="kauepraciano"><strong>@kauepraciano</strong></td>
+            <td data-sort="76" class="score">76</td>
+            <td data-sort="2" style="color: var(--orange);">2</td>
+            <td data-sort="13">13</td>
+            <td data-sort="1">1</td>
+            <td data-sort="0">0</td>
+            <td data-sort="0">0</td>
+            <td data-sort="14">14</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="36"><span class="rank ">36</span></td>
+            <td data-sort="_beegomes_"><strong>@_beegomes_</strong></td>
+            <td data-sort="67" class="score">67</td>
+            <td data-sort="6" style="color: var(--orange);">6</td>
+            <td data-sort="8">8</td>
+            <td data-sort="1">1</td>
+            <td data-sort="0">0</td>
+            <td data-sort="0">0</td>
+            <td data-sort="9">9</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="37"><span class="rank ">37</span></td>
+            <td data-sort="vndcardoso"><strong>@vndcardoso</strong></td>
+            <td data-sort="61" class="score">61</td>
+            <td data-sort="4" style="color: var(--orange);">4</td>
+            <td data-sort="5">5</td>
+            <td data-sort="0">0</td>
+            <td data-sort="2">2</td>
+            <td data-sort="0">0</td>
+            <td data-sort="7">7</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="38"><span class="rank ">38</span></td>
+            <td data-sort="tawanregismma"><strong>@tawanregismma</strong></td>
+            <td data-sort="58" class="score">58</td>
+            <td data-sort="4" style="color: var(--orange);">4</td>
+            <td data-sort="6">6</td>
+            <td data-sort="1">1</td>
+            <td data-sort="1">1</td>
+            <td data-sort="0">0</td>
+            <td data-sort="8">8</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="39"><span class="rank ">39</span></td>
+            <td data-sort="karen.ottoni"><strong>@karen.ottoni</strong></td>
+            <td data-sort="53" class="score">53</td>
+            <td data-sort="4" style="color: var(--orange);">4</td>
+            <td data-sort="3">3</td>
+            <td data-sort="0">0</td>
+            <td data-sort="2">2</td>
+            <td data-sort="0">0</td>
+            <td data-sort="5">5</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="40"><span class="rank ">40</span></td>
+            <td data-sort="excelentfightcompetition"><strong>@excelentfightcompetition</strong></td>
+            <td data-sort="53" class="score">53</td>
+            <td data-sort="2" style="color: var(--orange);">2</td>
+            <td data-sort="2">2</td>
+            <td data-sort="1">1</td>
+            <td data-sort="4">4</td>
+            <td data-sort="0">0</td>
+            <td data-sort="7">7</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="41"><span class="rank ">41</span></td>
+            <td data-sort="ninjatheorist"><strong>@ninjatheorist</strong></td>
+            <td data-sort="47" class="score">47</td>
+            <td data-sort="3" style="color: var(--orange);">3</td>
+            <td data-sort="5">5</td>
+            <td data-sort="0">0</td>
+            <td data-sort="1">1</td>
+            <td data-sort="0">0</td>
+            <td data-sort="6">6</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="42"><span class="rank ">42</span></td>
+            <td data-sort="adriano.trator"><strong>@adriano.trator</strong></td>
+            <td data-sort="46" class="score">46</td>
+            <td data-sort="4" style="color: var(--orange);">4</td>
+            <td data-sort="2">2</td>
+            <td data-sort="8">8</td>
+            <td data-sort="2">2</td>
+            <td data-sort="0">0</td>
+            <td data-sort="12">12</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="43"><span class="rank ">43</span></td>
+            <td data-sort="rrafaelins"><strong>@rrafaelins</strong></td>
+            <td data-sort="45" class="score">45</td>
+            <td data-sort="5" style="color: var(--orange);">5</td>
+            <td data-sort="4">4</td>
+            <td data-sort="4">4</td>
+            <td data-sort="0">0</td>
+            <td data-sort="0">0</td>
+            <td data-sort="8">8</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="44"><span class="rank ">44</span></td>
+            <td data-sort="juniordiasmma"><strong>@juniordiasmma</strong></td>
+            <td data-sort="45" class="score">45</td>
+            <td data-sort="0" style="color: var(--orange);">0</td>
+            <td data-sort="9">9</td>
+            <td data-sort="0">0</td>
+            <td data-sort="0">0</td>
+            <td data-sort="0">0</td>
+            <td data-sort="9">9</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="45"><span class="rank ">45</span></td>
+            <td data-sort="psi_pedro.madeira"><strong>@psi_pedro.madeira</strong></td>
+            <td data-sort="45" class="score">45</td>
+            <td data-sort="2" style="color: var(--orange);">2</td>
+            <td data-sort="7">7</td>
+            <td data-sort="0">0</td>
+            <td data-sort="0">0</td>
+            <td data-sort="0">0</td>
+            <td data-sort="7">7</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="46"><span class="rank ">46</span></td>
+            <td data-sort="enzoferrari680"><strong>@enzoferrari680</strong></td>
+            <td data-sort="44" class="score">44</td>
+            <td data-sort="2" style="color: var(--orange);">2</td>
+            <td data-sort="7">7</td>
+            <td data-sort="3">3</td>
+            <td data-sort="0">0</td>
+            <td data-sort="0">0</td>
+            <td data-sort="10">10</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="47"><span class="rank ">47</span></td>
+            <td data-sort="gdazuera"><strong>@gdazuera</strong></td>
+            <td data-sort="43" class="score">43</td>
+            <td data-sort="11" style="color: var(--orange);">11</td>
+            <td data-sort="3">3</td>
+            <td data-sort="17">17</td>
+            <td data-sort="0">0</td>
+            <td data-sort="0">0</td>
+            <td data-sort="20">20</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="48"><span class="rank ">48</span></td>
+            <td data-sort="italothearcher"><strong>@italothearcher</strong></td>
+            <td data-sort="42" class="score">42</td>
+            <td data-sort="6" style="color: var(--orange);">6</td>
+            <td data-sort="3">3</td>
+            <td data-sort="14">14</td>
+            <td data-sort="1">1</td>
+            <td data-sort="0">0</td>
+            <td data-sort="18">18</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="49"><span class="rank ">49</span></td>
+            <td data-sort="badboykillermma"><strong>@badboykillermma</strong></td>
+            <td data-sort="40" class="score">40</td>
+            <td data-sort="4" style="color: var(--orange);">4</td>
+            <td data-sort="4">4</td>
+            <td data-sort="0">0</td>
+            <td data-sort="0">0</td>
+            <td data-sort="0">0</td>
+            <td data-sort="4">4</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="50"><span class="rank ">50</span></td>
+            <td data-sort="dogodoyfoto"><strong>@dogodoyfoto</strong></td>
+            <td data-sort="39" class="score">39</td>
+            <td data-sort="4" style="color: var(--orange);">4</td>
+            <td data-sort="4">4</td>
+            <td data-sort="3">3</td>
+            <td data-sort="0">0</td>
+            <td data-sort="0">0</td>
+            <td data-sort="7">7</td>
+          </tr>
+        
+      </tbody>
+    </table>
+  
+    </div>
+    <div id="ranking-last30" class="sub-content">
+      <p style='color:var(--muted)'>No data available.</p>
+    </div>
+  </div>
+
+</div>
+
+</div><!-- .page-content -->
+
+<script>
+Chart.defaults.color = '#8b8fa3';
+Chart.defaults.borderColor = '#2a2d3a';
+const COLORS = ['#6366f1','#818cf8','#34d399','#fb923c','#f472b6','#fbbf24','#f87171','#a78bfa','#38bdf8','#4ade80'];
+let chartsInitialized = false;
+
+// ---- Page navigation ----
+function switchPage(id) {
+  document.querySelectorAll('.page-panel').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(el => el.classList.remove('active'));
+  document.getElementById('page-' + id).classList.add('active');
+  event.target.classList.add('active');
+  if (id === 'overview' && !chartsInitialized) initCharts();
+}
+
+// ---- Ranking sub-tabs ----
+function switchSubTab(btn, id) {
+  const container = btn.closest('.page-panel');
+  container.querySelectorAll('.sub-content').forEach(el => el.classList.remove('active'));
+  container.querySelectorAll('.sub-tab').forEach(el => el.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  btn.classList.add('active');
+}
+
+// ---- Sortable tables ----
+function makeSortable(table) {
+  const headers = table.querySelectorAll('th:not(.no-sort)');
+  headers.forEach((th, colIdx) => {
+    th.addEventListener('click', () => {
+      const tbody = table.querySelector('tbody');
+      const rows = Array.from(tbody.querySelectorAll('tr'));
+      const type = th.dataset.type || 'string';
+      const currentDir = th.dataset.dir === 'asc' ? 'desc' : 'asc';
+
+      // Reset all headers in this table
+      headers.forEach(h => { h.dataset.dir = ''; h.classList.remove('sorted'); h.querySelector('.sort-arrow').innerHTML = '&#9650;'; });
+      th.dataset.dir = currentDir;
+      th.classList.add('sorted');
+      th.querySelector('.sort-arrow').innerHTML = currentDir === 'asc' ? '&#9650;' : '&#9660;';
+
+      rows.sort((a, b) => {
+        const aVal = a.cells[colIdx].dataset.sort ?? a.cells[colIdx].textContent.trim();
+        const bVal = b.cells[colIdx].dataset.sort ?? b.cells[colIdx].textContent.trim();
+
+        let cmp = 0;
+        if (type === 'number') {
+          const aNum = parseFloat(aVal.replace(/,/g, '')) || 0;
+          const bNum = parseFloat(bVal.replace(/,/g, '')) || 0;
+          cmp = aNum - bNum;
+        } else {
+          cmp = aVal.localeCompare(bVal, undefined, { numeric: true });
+        }
+        return currentDir === 'asc' ? cmp : -cmp;
+      });
+
+      // Re-number rank column if present
+      const hasRank = rows[0]?.cells[0]?.querySelector('.rank');
+      rows.forEach((row, i) => {
+        tbody.appendChild(row);
+        if (hasRank) {
+          const rankEl = row.cells[0].querySelector('.rank');
+          if (rankEl) {
+            rankEl.textContent = i + 1;
+            rankEl.className = 'rank' + (i < 3 ? ' rank-' + (i + 1) : '');
+          }
+        }
+      });
+    });
+  });
+}
+
+// Init sortable on all tables
+document.querySelectorAll('table.sortable').forEach(makeSortable);
+
+// ---- Charts (lazy init on overview tab) ----
+function initCharts() {
+  chartsInitialized = true;
+
+  
+  new Chart(document.getElementById('growthChart'), {
+    type: 'line',
+    data: {
+      labels: ["2026-03-22","2026-03-23","2026-03-24","2026-03-25","2026-03-26","2026-03-27","2026-03-28","2026-03-29","2026-03-30","2026-03-31","2026-04-01","2026-04-02","2026-04-03","2026-04-04","2026-04-05","2026-04-06","2026-04-07","2026-04-08","2026-04-09","2026-04-10","2026-04-11","2026-04-12","2026-04-13","2026-04-14","2026-04-15","2026-04-16","2026-04-17","2026-04-18","2026-04-19","2026-04-20","2026-04-21","2026-04-22","2026-04-23","2026-04-24","2026-04-25","2026-04-26","2026-04-27","2026-04-28","2026-04-29","2026-04-30","2026-05-01"],
+      datasets: [{
+        label: 'Followers',
+        data: [591,608,634,651,663,670,676,682,696,707,720,739,756,768,775,782,790,810,827,837,856,867,871,882,909,915,925,931,943,945,955,970,976,979,990,1019,1026,1030,1032,1039,1044],
+        borderColor: '#6366f1', backgroundColor: '#6366f133',
+        fill: true, tension: 0.3, pointRadius: 2,
+      }]
+    },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: false } }
+    }
+  });
+  
+
+  new Chart(document.getElementById('contentMixChart'), {
+    type: 'doughnut',
+    data: {
+      labels: [],
+      datasets: [{ data: [], backgroundColor: COLORS }]
+    },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom' } }
+    }
+  });
+
+  const reachMedia = [];
+  new Chart(document.getElementById('reachChart'), {
+    type: 'bar',
+    data: {
+      labels: reachMedia.map(m => m.date),
+      datasets: [{
+        label: 'Reach',
+        data: reachMedia.map(m => m.reach),
+        backgroundColor: reachMedia.map(m =>
+          m.type === 'REELS' ? '#f472b6' : m.type === 'FEED' ? '#6366f1' : '#fb923c'
+        ),
+        borderRadius: 4,
+      }]
+    },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { x: { display: false } }
+    }
+  });
+
+  
+  new Chart(document.getElementById('ageChart'), {
+    type: 'bar',
+    data: {
+      labels: ["25-34","35-44","18-24","45-54","55-64","13-17","65+"],
+      datasets: [{ data: [407,274,140,138,39,24,9], backgroundColor: '#6366f1', borderRadius: 4 }]
+    },
+    options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+      plugins: { legend: { display: false } }
+    }
+  });
+
+  new Chart(document.getElementById('genderChart'), {
+    type: 'doughnut',
+    data: {
+      labels: ["Male","Female","U"],
+      datasets: [{ data: [727,191,113], backgroundColor: ['#6366f1','#f472b6','#fb923c'] }]
+    },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom' } }
+    }
+  });
+
+  new Chart(document.getElementById('countryChart'), {
+    type: 'bar',
+    data: {
+      labels: ["BR","US","MX","AR","RU","PT","IT","ES","GB","CL"],
+      datasets: [{ data: [888,88,10,6,3,3,3,3,2,2], backgroundColor: '#34d399', borderRadius: 4 }]
+    },
+    options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+      plugins: { legend: { display: false } }
+    }
+  });
+
+  new Chart(document.getElementById('cityChart'), {
+    type: 'bar',
+    data: {
+      labels: ["São Paulo, São Paulo (state)","Guarulhos, São Paulo (state)","Betim, Minas Gerais","Santo André, São Paulo (state)","São Bernardo do Campo, São Paulo (state)","São Caetano do Sul, São Paulo (state)","Santana de Parnaíba, São Paulo (state)","Natal, Rio Grande do Norte","Rio de Janeiro, Rio de Janeiro (state)","Orlando, Florida"],
+      datasets: [{ data: [164,65,65,54,40,36,32,32,21,20], backgroundColor: '#fb923c', borderRadius: 4 }]
+    },
+    options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+      plugins: { legend: { display: false } }
+    }
+  });
+  
+}
+
+// Init charts immediately since overview is the default tab
+initCharts();
+</script>
+
+</body>
+</html>

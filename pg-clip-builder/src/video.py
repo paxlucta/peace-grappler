@@ -699,24 +699,34 @@ def extract_wide_split(video_path, start, duration, out_path):
         return False
 
 
-def add_text_overlay(video_path, text, out_path, position="bottom",
-                     fontsize=42, fontcolor="white", box_opacity=0.5):
-    """Add a text overlay to a video using FFmpeg drawtext."""
-    # Escape text for FFmpeg
-    safe_text = text.replace("'", "'\\''").replace(":", "\\:")
+def _drawtext_y(position):
+    """Return FFmpeg y expression for a text position."""
     if position == "top":
-        y_expr = "h*0.08"
+        return "h*0.08"
     elif position == "center":
-        y_expr = "(h-text_h)/2"
-    else:
-        y_expr = "h*0.85"
+        return "(h-text_h)/2"
+    return "h*0.85"
+
+
+def _escape_drawtext(text):
+    """Escape text for FFmpeg drawtext filter."""
+    return text.replace("'", "'\\''").replace(":", "\\:")
+
+
+def add_text_overlay(video_path, text, out_path, position="bottom",
+                     fontsize=42, fontcolor="white", box_opacity=0.5,
+                     start_time=0.3, end_time=None):
+    """Add a text overlay to a video using FFmpeg drawtext."""
+    safe_text = _escape_drawtext(text)
+    y_expr = _drawtext_y(position)
+    end_t = end_time if end_time is not None else 9999
 
     vf = (
         f"drawtext=text='{safe_text}':"
         f"fontsize={fontsize}:fontcolor={fontcolor}:"
         f"x=(w-text_w)/2:y={y_expr}:"
         f"box=1:boxcolor=black@{box_opacity}:boxborderw=8:"
-        f"enable='between(t,0.3,99)'"
+        f"enable='between(t,{start_time},{end_t})'"
     )
 
     try:
@@ -729,6 +739,64 @@ def add_text_overlay(video_path, text, out_path, position="bottom",
         )
         return r.returncode == 0 and os.path.exists(out_path)
     except Exception:
+        return False
+
+
+def add_multiple_text_overlays(video_path, overlays, out_path):
+    """Apply multiple text overlays in a single FFmpeg pass.
+
+    overlays: list of dicts with keys:
+        text, start_time, end_time, position ("top"/"center"/"bottom"),
+        fontsize (default 42), fontcolor (default "white"), box_opacity (default 0.5)
+    """
+    if not overlays:
+        shutil.copy2(str(video_path), out_path)
+        return True
+
+    filters = []
+    for ov in overlays:
+        safe_text = _escape_drawtext(ov["text"])
+        fs = ov.get("fontsize", 42)
+        fc = ov.get("fontcolor", "white")
+        # Convert #RRGGBB to 0xRRGGBB — '#' is a comment char in FFmpeg filters
+        if fc.startswith("#"):
+            fc = "0x" + fc[1:]
+        bo = ov.get("box_opacity", 0.5)
+        s = ov["start_time"]
+        e = ov["end_time"]
+
+        # Support precise x/y positioning (as fraction of video dimensions)
+        if "x_frac" in ov and "y_frac" in ov:
+            x_expr = f"w*{ov['x_frac']}-text_w/2"
+            y_expr = f"h*{ov['y_frac']}-text_h/2"
+        else:
+            x_expr = "(w-text_w)/2"
+            y_expr = _drawtext_y(ov.get("position", "bottom"))
+
+        box_part = f":box=1:boxcolor=black@{bo}:boxborderw=8" if bo > 0 else ""
+
+        filters.append(
+            f"drawtext=text='{safe_text}':"
+            f"fontsize={fs}:fontcolor={fc}:"
+            f"x={x_expr}:y={y_expr}"
+            f"{box_part}:"
+            f"enable='between(t,{s},{e})'"
+        )
+
+    vf = ",".join(filters)
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-y", "-i", str(video_path),
+             "-vf", vf,
+             "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+             "-c:a", "copy", "-movflags", "+faststart", out_path],
+            capture_output=True, timeout=120,
+        )
+        if r.returncode != 0:
+            print(f"[text-overlay] FFmpeg failed: {r.stderr.decode('utf-8', errors='replace')[-500:]}")
+        return r.returncode == 0 and os.path.exists(out_path)
+    except Exception as exc:
+        print(f"[text-overlay] Exception: {exc}")
         return False
 
 

@@ -20,9 +20,9 @@ from db import (
 from video import (
     ASSETS_DIR, AUDIO_EXTENSIONS, OUTPUT_DIR, THUMB_DIR, TRANSITIONS,
     VIDEO_EXTENSIONS, XFADE_DUR,
-    build_music_track, concatenate_clips, extract_subclip,
-    find_asset, generate_placeholder, get_video_duration, has_audio_stream,
-    normalize_clip, overlay_music, overlay_music_track,
+    add_multiple_text_overlays, build_music_track, concatenate_clips,
+    extract_subclip, find_asset, generate_placeholder, get_video_duration,
+    has_audio_stream, normalize_clip, overlay_music, overlay_music_track,
     process_split_section, process_track,
 )
 
@@ -325,6 +325,12 @@ def api_hide():
 @clip_builder_bp.route("/api/generate", methods=["POST"])
 def api_generate():
     data = request.json
+
+    # New multi-track format
+    if "video_track" in data:
+        return _generate_multitrack(data)
+
+    # Legacy flat timeline format
     timeline = data.get("timeline", [])
 
     clips = []
@@ -601,6 +607,181 @@ def api_generate():
     })
 
 
+def _generate_multitrack(data):
+    """Handle new multi-track timeline format."""
+    video_track = data.get("video_track", [])
+    sound_track = data.get("sound_track", [])
+    text_overlays = data.get("text_overlays", [])
+
+    # Parse video track into clips + transitions
+    clips = []
+    transitions = []
+    for item in video_track:
+        itype = item.get("type", "")
+        if itype == "transition":
+            transitions.append(item.get("name", "fade"))
+        elif itype == "clip":
+            clip_data = _resolve_clip(item)
+            if clip_data:
+                clips.append(clip_data)
+
+    if not clips:
+        return jsonify({"error": "No valid clips in video track"}), 400
+
+    music_list = _load_music_files()
+    music_lookup = {m["name"]: m["path"] for m in music_list}
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    date_dir = OUTPUT_DIR / today
+    date_dir.mkdir(parents=True, exist_ok=True)
+
+    counter = 1
+    if date_dir.exists():
+        for f in date_dir.iterdir():
+            if f.suffix == ".mp4":
+                parts = f.stem.split("-")
+                if len(parts) >= 3:
+                    try:
+                        c = int(parts[-1])
+                        if c >= counter:
+                            counter = c + 1
+                    except ValueError:
+                        pass
+
+    total_dur = int(sum(c.get("duration", 0) for c in clips))
+    out_file = date_dir / f"hl-{total_dur}-{counter}.mp4"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        clip_paths = []
+        intro_count = 0
+
+        intro = find_asset("intro")
+        if intro:
+            intro_norm = os.path.join(tmp, "intro_norm.mp4")
+            if normalize_clip(str(intro), intro_norm):
+                clip_paths.append(intro_norm)
+                intro_count = 1
+
+        for i, clip in enumerate(clips):
+            clip_out = os.path.join(tmp, f"clip_{i:03d}.mp4")
+            if extract_subclip(clip["video_file"], clip["start"],
+                               clip["duration"], clip_out):
+                clip_paths.append(clip_out)
+
+        outro_added = False
+        outro = find_asset("outro")
+        if outro:
+            outro_norm = os.path.join(tmp, "outro_norm.mp4")
+            if normalize_clip(str(outro), outro_norm):
+                clip_paths.append(outro_norm)
+                outro_added = True
+
+        if len(clip_paths) < 1:
+            return jsonify({"error": "No clips could be extracted"}), 500
+
+        # Build per-gap transition list
+        n_paths = len(clip_paths)
+        all_transitions = [None] * max(0, n_paths - 1)
+        if intro_count and n_paths > 1:
+            all_transitions[0] = "fade"
+        for j, trans_name in enumerate(transitions):
+            path_idx = j + intro_count
+            if path_idx < len(all_transitions):
+                all_transitions[path_idx] = trans_name
+        if outro_added and n_paths > 1:
+            all_transitions[-1] = "fade"
+
+        if len(clip_paths) == 1:
+            assembled = clip_paths[0]
+        else:
+            assembled = os.path.join(tmp, "assembled.mp4")
+            if not concatenate_clips(clip_paths, assembled, all_transitions):
+                return jsonify({"error": "Video assembly failed"}), 500
+
+        video_dur = get_video_duration(assembled)
+
+        # Music overlay from sound_track
+        if sound_track:
+            segments = []
+            for s in sound_track:
+                mpath = music_lookup.get(s.get("name"))
+                if mpath:
+                    segments.append({
+                        "start": s.get("start_time", 0),
+                        "duration": s.get("duration", 10),
+                        "music": mpath,
+                        "volume": s.get("volume", 3),
+                    })
+            if segments:
+                # Fill gaps with silence
+                segments.sort(key=lambda x: x["start"])
+                full_segments = []
+                cursor = 0.0
+                for seg in segments:
+                    if seg["start"] > cursor + 0.05:
+                        full_segments.append({
+                            "start": cursor, "duration": seg["start"] - cursor,
+                            "music": None, "volume": 0,
+                        })
+                    full_segments.append(seg)
+                    cursor = seg["start"] + seg["duration"]
+                if cursor < video_dur:
+                    full_segments.append({
+                        "start": cursor, "duration": video_dur - cursor,
+                        "music": None, "volume": 0,
+                    })
+
+                music_track_path = os.path.join(tmp, "music_track.m4a")
+                if build_music_track(full_segments, video_dur, music_track_path):
+                    with_music = os.path.join(tmp, "with_music.mp4")
+                    if overlay_music_track(assembled, music_track_path,
+                                           with_music, full_segments):
+                        assembled = with_music
+
+        # Text overlays
+        if text_overlays:
+            overlays = []
+            for t in text_overlays:
+                if t.get("text", "").strip():
+                    ov = {
+                        "text": t["text"],
+                        "start_time": t.get("start_time", 0),
+                        "end_time": t.get("end_time", 3),
+                        "position": t.get("position", "bottom"),
+                        "fontsize": t.get("fontsize", 42),
+                        "fontcolor": t.get("fontcolor", "white"),
+                        "box_opacity": t.get("box_opacity", 0.5),
+                    }
+                    if "x_frac" in t and "y_frac" in t:
+                        ov["x_frac"] = t["x_frac"]
+                        ov["y_frac"] = t["y_frac"]
+                    if t.get("bold"):
+                        ov["bold"] = True
+                    overlays.append(ov)
+            if overlays:
+                with_text = os.path.join(tmp, "with_text.mp4")
+                if add_multiple_text_overlays(assembled, overlays, with_text):
+                    assembled = with_text
+
+        # Copy final to output
+        shutil.copy2(assembled, str(out_file))
+
+    final_dur = get_video_duration(str(out_file))
+
+    # Save to DB
+    save_timeline = {
+        "video_track": video_track,
+        "sound_track": sound_track,
+        "text_overlays": text_overlays,
+    }
+    save_generated_video(str(out_file), round(final_dur, 1), save_timeline)
+
+    return jsonify({
+        "path": str(out_file),
+        "duration": round(final_dur, 1),
+    })
+
+
 # ── HTML page ────────────────────────────────────────────────────────────────
 
 HTML_PAGE = r"""<!DOCTYPE html>
@@ -665,6 +846,26 @@ main{flex:1;overflow-y:auto;padding:12px}
   background:rgba(0,0,0,.75);color:#fff;font-size:11px;font-weight:600;
   padding:2px 6px;border-radius:4px;
 }
+.clip-card .play-overlay{
+  position:absolute;top:0;left:0;right:0;bottom:36px;
+  display:flex;align-items:center;justify-content:center;
+  background:rgba(0,0,0,.35);opacity:0;transition:opacity .2s;
+  cursor:pointer;z-index:2;
+}
+.clip-card:hover .play-overlay{opacity:1}
+.clip-card.in-tl .play-overlay{display:none}
+.clip-card.ignored .play-overlay{display:none}
+.clip-card .play-overlay .play-circle{
+  width:36px;height:36px;background:rgba(229,57,53,.9);border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  transition:transform .15s,background .15s;
+}
+.clip-card .play-overlay .play-circle:hover{transform:scale(1.15);background:#e53935}
+.clip-card .play-overlay .play-circle svg{width:16px;height:16px;fill:#fff;margin-left:2px}
+.clip-card .scene-video{
+  position:absolute;top:0;left:0;width:100%;height:calc(100% - 36px);
+  object-fit:cover;z-index:3;background:#000;border-radius:8px 8px 0 0;
+}
 .clip-card .info{padding:6px 8px}
 .clip-card .fn{
   font-size:10px;color:#777;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
@@ -696,154 +897,146 @@ footer{
 }
 .tl-hdr .lbl{color:#e53935;font-weight:600}
 .tl-hdr .tot{color:#888}
-#timeline{
-  min-height:110px;background:#0d0d0d;border:2px dashed #333;border-radius:8px;
-  display:flex;align-items:center;gap:6px;padding:8px;overflow-x:auto;
-  transition:border-color .2s;
-}
-#timeline.drag-over{border-color:#e53935}
-.tl-empty{color:#555;font-size:13px;margin:auto;pointer-events:none}
-.tl-item{
-  flex-shrink:0;width:64px;background:#1e1e1e;border-radius:6px;
-  overflow:hidden;position:relative;cursor:grab;
-}
-.tl-item:active{cursor:grabbing}
-.tl-item .thumb{width:100%;aspect-ratio:9/16;object-fit:cover;display:block}
-.tl-item .dur{
-  text-align:center;font-size:10px;padding:2px 0;background:#111;color:#ccc;
-}
-.tl-item .rm{
-  position:absolute;top:2px;right:2px;
-  background:rgba(229,57,53,.85);color:#fff;border:none;border-radius:50%;
-  width:18px;height:18px;font-size:12px;line-height:16px;text-align:center;
-  cursor:pointer;padding:0;display:none;
-}
-.tl-item:hover .rm{display:block}
 
-/* -- Music labels -- */
-.music-row{
-  display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap;
+/* -- Multi-track timeline -- */
+#multi-timeline{
+  background:#0a0a0a;border:1px solid #2a2a2a;border-radius:8px;
+  overflow-x:auto;overflow-y:hidden;position:relative;
 }
-.music-row .row-label{font-size:13px;color:#888;flex-shrink:0}
-#music-labels{display:flex;gap:6px;flex-wrap:wrap}
+#tl-grid{
+  display:grid;
+  grid-template-columns:50px 1fr;
+  grid-template-rows:20px 50px 40px 70px;
+  min-width:100%;
+}
+/* Time ruler */
+#time-ruler{
+  grid-column:1/-1;height:20px;position:sticky;top:0;
+  background:#111;border-bottom:1px solid #2a2a2a;z-index:5;
+  display:flex;align-items:flex-end;
+}
+.ruler-tick{
+  position:absolute;bottom:0;width:1px;height:8px;background:#333;
+}
+.ruler-tick.major{height:14px;background:#555}
+.ruler-label{
+  position:absolute;bottom:4px;font-size:8px;color:#666;
+  transform:translateX(-50%);font-weight:600;
+}
+/* Track labels */
+.track-label{
+  font-size:9px;color:#666;font-weight:700;text-transform:uppercase;
+  letter-spacing:1px;background:#111;border-right:1px solid #2a2a2a;
+  display:flex;align-items:center;justify-content:center;
+  padding:0 4px;user-select:none;
+}
+/* Tracks */
+.track{
+  position:relative;border-bottom:1px solid #1a1a1a;
+  background:#0d0d0d;min-height:40px;
+}
+#video-track{min-height:70px;border-bottom:none}
+#sound-track{background:#0c0e0c}
+#text-track{background:#0c0c0e}
+.track-empty{
+  position:absolute;left:60px;top:50%;transform:translateY(-50%);
+  color:#333;font-size:10px;pointer-events:none;white-space:nowrap;
+}
+
+/* -- Track blocks -- */
+.track-block{
+  position:absolute;top:2px;height:calc(100% - 4px);
+  border-radius:4px;cursor:grab;overflow:hidden;
+  display:flex;align-items:center;padding:0 6px;
+  font-size:10px;font-weight:600;white-space:nowrap;
+  transition:box-shadow .15s;user-select:none;
+  min-width:20px;
+}
+.track-block:hover{box-shadow:0 0 8px rgba(255,255,255,.08)}
+.track-block:active{cursor:grabbing}
+.track-block .blk-label{flex:1;overflow:hidden;text-overflow:ellipsis}
+.track-block .blk-rm{
+  position:absolute;top:1px;right:2px;
+  background:none;border:none;color:inherit;opacity:.4;
+  font-size:12px;cursor:pointer;padding:0;line-height:1;
+}
+.track-block .blk-rm:hover{opacity:1}
+.track-block .resize-handle{
+  position:absolute;right:0;top:0;width:6px;height:100%;
+  cursor:ew-resize;background:transparent;
+}
+.track-block .resize-handle:hover{background:rgba(255,255,255,.15)}
+
+/* Video blocks */
+.vblock{background:#1e1e1e;border:1px solid #333;color:#ccc;z-index:1}
+.vblock.sortable-ghost{
+  opacity:0 !important;width:4px !important;min-width:4px !important;
+  background:#fff !important;border:none !important;border-radius:2px !important;
+  padding:0 !important;overflow:hidden !important;z-index:10;
+}
+.vblock.sortable-ghost *{display:none !important}
+/* Also show bar for cards being dragged into the track */
+#video-track .clip-card.sortable-ghost{
+  opacity:0 !important;width:4px !important;min-width:4px !important;max-width:4px !important;
+  height:calc(100% - 4px) !important;background:#fff !important;
+  border:none !important;border-radius:2px !important;padding:0 !important;
+  overflow:hidden !important;position:absolute;top:2px;z-index:10;
+}
+#video-track .clip-card.sortable-ghost *{display:none !important}
+.vblock .vblock-thumb{
+  position:absolute;left:0;top:0;width:100%;height:100%;
+  object-fit:cover;opacity:.5;border-radius:4px;
+}
+.vblock .blk-label{position:relative;z-index:1;text-shadow:0 1px 3px #000}
+
+/* Sound blocks */
+.sblock{border:1px solid rgba(255,255,255,.15);color:#fff}
+.sblock .blk-vol{
+  display:flex;gap:1px;align-items:flex-end;height:12px;
+  margin-left:auto;flex-shrink:0;
+}
+.sblock .blk-vol .vb{
+  width:4px;border-radius:1px;cursor:pointer;opacity:.35;
+}
+.sblock .blk-vol .vb.active{opacity:1}
+
+/* Text overlay blocks */
+.tblock{background:#1a1a2e;border:1px solid #4040a0;color:#aac}
+
+/* Transition markers */
+.trans-marker{
+  position:absolute;top:50%;transform:translate(-50%,-50%);
+  background:#333;border:1px solid #555;border-radius:4px;
+  padding:1px 4px;font-size:8px;color:#aaa;z-index:2;
+  cursor:pointer;white-space:nowrap;font-weight:600;
+}
+.trans-marker:hover{background:#444;color:#fff}
+
+/* -- Source rows -- */
+.source-row{
+  display:flex;gap:16px;margin-top:8px;flex-wrap:wrap;align-items:flex-start;
+}
+.source-group{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.source-group .row-label{font-size:11px;color:#666;flex-shrink:0;font-weight:600;text-transform:uppercase;letter-spacing:0.5px}
 .music-pill{
   display:inline-flex;align-items:center;gap:4px;
-  padding:5px 12px;border-radius:16px;font-size:12px;font-weight:600;
+  padding:4px 10px;border-radius:12px;font-size:11px;font-weight:600;
   cursor:grab;user-select:none;white-space:nowrap;
   transition:transform .15s,box-shadow .15s;
 }
 .music-pill:hover{transform:translateY(-1px);box-shadow:0 2px 8px rgba(0,0,0,.4)}
 .music-pill:active{cursor:grabbing}
 .music-pill.sortable-ghost{opacity:.4}
-.music-pill .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
-
-/* Music pills in timeline */
-.tl-music{
-  flex-shrink:0;display:flex;flex-direction:column;align-items:center;
-  padding:6px 10px 4px;border-radius:12px;font-size:11px;font-weight:600;
-  cursor:grab;position:relative;white-space:nowrap;
-  align-self:center;gap:3px;
-}
-.tl-music:active{cursor:grabbing}
-.tl-music-name{display:flex;align-items:center;gap:4px}
-.tl-music-name .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
-.tl-music-name .rm{
-  margin-left:4px;background:none;color:inherit;border:none;
-  font-size:14px;cursor:pointer;padding:0;line-height:1;opacity:.6;
-}
-.tl-music-name .rm:hover{opacity:1}
-.tl-vol{display:flex;gap:2px;align-items:flex-end;height:14px}
-.vol-bar{
-  width:5px;border-radius:1px;cursor:pointer;
-  transition:background .12s;opacity:.35;
-}
-.vol-bar.active{opacity:1}
-
-/* -- Transition labels & timeline -- */
-.trans-row{
-  display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;
-}
-.trans-row .row-label{font-size:13px;color:#888;flex-shrink:0}
-#trans-labels{display:flex;gap:5px;flex-wrap:wrap}
+.music-pill .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
 .trans-pill{
   display:inline-flex;align-items:center;
-  padding:4px 10px;border-radius:12px;font-size:11px;font-weight:600;
-  cursor:grab;user-select:none;white-space:nowrap;
-  background:#2a2a2a;color:#aaa;border:1px solid #444;
-  transition:transform .15s,box-shadow .15s;
+  padding:3px 8px;border-radius:10px;font-size:10px;font-weight:600;
+  cursor:pointer;user-select:none;white-space:nowrap;
+  background:#222;color:#888;border:1px solid #333;
+  transition:all .15s;
 }
-.trans-pill:hover{transform:translateY(-1px);box-shadow:0 2px 8px rgba(0,0,0,.4);color:#fff;border-color:#888}
-.trans-pill:active{cursor:grabbing}
-.trans-pill.sortable-ghost{opacity:.4}
-.tl-trans{
-  flex-shrink:0;display:flex;align-items:center;gap:4px;
-  padding:4px 8px;border-radius:8px;font-size:10px;font-weight:600;
-  cursor:grab;white-space:nowrap;align-self:center;
-  background:#2a2a2a;color:#aaa;border:1px dashed #555;
-}
-.tl-trans:active{cursor:grabbing}
-.tl-trans .rm{
-  background:none;color:inherit;border:none;
-  font-size:14px;cursor:pointer;padding:0;line-height:1;opacity:.6;
-}
-.tl-trans .rm:hover{opacity:1}
-
-/* -- Split sections -- */
-.tl-split .tl-item .thumb{aspect-ratio:16/9}
-.tl-split{
-  flex-shrink:0;display:flex;flex-direction:column;
-  border:2px solid #2196f3;border-radius:8px;background:#111;
-}
-.tl-split-track{
-  display:flex;align-items:center;gap:6px;padding:6px;min-height:94px;
-}
-.tl-split-top{border-bottom:1px dashed rgba(33,150,243,.4)}
-.tl-split-empty{color:#444;font-size:10px;pointer-events:none;white-space:nowrap}
-
-/* -- Mute/Unmute pills -- */
-.tl-mute{
-  flex-shrink:0;display:flex;align-items:center;
-  padding:3px 8px;border-radius:6px;font-size:10px;font-weight:600;
-  cursor:grab;white-space:nowrap;align-self:center;
-  background:#2a2a2a;border:1px solid #555;
-}
-.tl-mute .rm{
-  margin-left:4px;background:none;color:inherit;border:none;
-  font-size:14px;cursor:pointer;padding:0;line-height:1;opacity:.6;
-}
-.tl-mute .rm:hover{opacity:1}
-
-/* -- Placeholder -- */
-.tl-placeholder{
-  flex-shrink:0;width:48px;background:#222;border-radius:6px;
-  overflow:hidden;position:relative;cursor:grab;border:1px dashed #555;
-}
-.tl-placeholder .ph-color{width:100%;height:40px;display:block}
-.tl-placeholder .dur{text-align:center;font-size:10px;padding:2px 0;background:#111;color:#ccc}
-.tl-placeholder .rm{
-  position:absolute;top:2px;right:2px;
-  background:rgba(229,57,53,.85);color:#fff;border:none;border-radius:50%;
-  width:18px;height:18px;font-size:12px;line-height:16px;text-align:center;
-  cursor:pointer;padding:0;display:none;
-}
-.tl-placeholder:hover .rm{display:block}
-
-/* -- Effects row -- */
-.effects-row{
-  display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;
-}
-.effects-row .row-label{font-size:13px;color:#888;flex-shrink:0}
-#effects-labels{display:flex;gap:5px;flex-wrap:wrap}
-.effects-pill{
-  display:inline-flex;align-items:center;
-  padding:4px 10px;border-radius:12px;font-size:11px;font-weight:600;
-  cursor:grab;user-select:none;white-space:nowrap;
-  background:#2a2a2a;color:#aaa;border:1px solid #444;
-  transition:transform .15s,box-shadow .15s;
-}
-.effects-pill:hover{transform:translateY(-1px);box-shadow:0 2px 8px rgba(0,0,0,.4);color:#fff;border-color:#888}
-.effects-pill:active{cursor:grabbing}
-.effects-pill.sortable-ghost{opacity:.4}
+.trans-pill:hover{color:#fff;border-color:#666}
+.trans-pill.active{background:#e53935;color:#fff;border-color:#e53935}
 
 /* -- Context menu -- */
 .ctx-menu{
@@ -854,6 +1047,20 @@ footer{
   padding:6px 14px;font-size:13px;cursor:pointer;color:#e0e0e0;
 }
 .ctx-menu div:hover{background:#333}
+
+/* -- Hide button -- */
+.clip-card .hide-btn{
+  position:absolute;bottom:38px;right:4px;z-index:4;
+  width:22px;height:22px;border-radius:50%;
+  background:rgba(0,0,0,.6);border:1px solid rgba(255,255,255,.15);
+  color:#888;font-size:14px;line-height:20px;text-align:center;
+  cursor:pointer;display:none;transition:all .15s;padding:0;
+}
+.clip-card:hover .hide-btn{display:block}
+.clip-card.ignored .hide-btn{display:block;color:#4caf50;border-color:rgba(76,175,80,.4)}
+.clip-card.ignored .hide-btn:hover{background:rgba(76,175,80,.85);color:#fff;border-color:rgba(76,175,80,.85)}
+.clip-card.in-tl .hide-btn{display:none !important}
+.clip-card .hide-btn:hover{background:rgba(229,57,53,.85);color:#fff;border-color:rgba(229,57,53,.85)}
 
 /* -- Ignored clip styling -- */
 .clip-card.ignored{opacity:.5}
@@ -924,6 +1131,87 @@ footer{
 .modal h2{margin-bottom:12px;color:#4caf50}
 .modal p{color:#aaa;margin-bottom:16px;font-size:14px;word-break:break-all}
 .modal button{margin:0 4px}
+
+/* -- Transition Picker -- */
+#trans-picker-grid{
+  display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:12px;
+}
+#trans-picker-grid .tp-item{
+  padding:5px 10px;border-radius:6px;font-size:11px;font-weight:600;
+  cursor:pointer;background:#222;color:#aaa;border:1px solid #333;
+  transition:all .15s;
+}
+#trans-picker-grid .tp-item:hover{color:#fff;border-color:#666;background:#333}
+#trans-picker-grid .tp-item.current{background:#e53935;color:#fff;border-color:#e53935}
+
+/* -- Text Editor Modal -- */
+#text-editor-modal .te-container{
+  display:flex;flex-direction:column;
+  background:#1a1a1a;border-radius:12px;overflow:hidden;
+  width:auto;max-width:95vw;
+}
+.te-toolbar{
+  display:flex;align-items:center;gap:8px;
+  padding:10px 16px;background:#222;border-bottom:1px solid #333;
+  flex-wrap:wrap;
+}
+.te-toolbar input[type="text"]{
+  flex:1;min-width:180px;background:#111;color:#fff;border:1px solid #444;
+  border-radius:6px;padding:6px 10px;font-size:14px;
+}
+.te-toolbar input[type="text"]:focus{outline:none;border-color:#e53935}
+.te-toolbar input[type="color"]{
+  width:32px;height:28px;border:1px solid #444;border-radius:4px;
+  background:none;cursor:pointer;padding:0;
+}
+.te-label{font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.5px}
+.te-sep{width:1px;height:20px;background:#333;flex-shrink:0}
+.te-btn{
+  width:32px;height:28px;border-radius:4px;font-size:14px;
+  display:flex;align-items:center;justify-content:center;
+}
+.te-btn.active{background:#e53935;color:#fff;border-color:#e53935}
+.te-add-btn{font-size:18px;font-weight:700;width:32px}
+.te-canvas-wrap{
+  display:flex;align-items:center;justify-content:center;
+  padding:20px;background:#0a0a0a;
+}
+#te-canvas{
+  width:360px;height:640px;
+  background:#000;border:1px solid #333;border-radius:4px;
+  position:relative;overflow:hidden;cursor:default;
+}
+.te-box{
+  position:absolute;
+  color:#fff;font-size:14px;font-weight:400;
+  text-align:center;cursor:grab;user-select:none;
+  padding:4px 8px;border-radius:4px;
+  white-space:pre-wrap;word-break:break-word;max-width:90%;
+  text-shadow:0 2px 6px rgba(0,0,0,.8);
+  pointer-events:auto;
+}
+.te-box:hover{outline:1px dashed rgba(255,255,255,.3)}
+.te-box.te-selected{outline:2px solid #e53935}
+.te-box:active{cursor:grabbing}
+.te-box .te-bg{
+  position:absolute;inset:-4px -8px;border-radius:4px;
+  background:rgba(0,0,0,0.5);z-index:-1;
+}
+.te-box .te-box-rm{
+  position:absolute;top:-8px;right:-8px;width:16px;height:16px;
+  background:#e53935;border:none;border-radius:50%;color:#fff;
+  font-size:10px;line-height:16px;text-align:center;cursor:pointer;
+  display:none;padding:0;z-index:2;
+}
+.te-box:hover .te-box-rm{display:block}
+.te-footer{
+  display:flex;justify-content:flex-end;gap:10px;
+  padding:12px 16px;background:#222;border-top:1px solid #333;
+}
+.te-cancel{background:#333;color:#ccc;border:1px solid #555;border-radius:6px;padding:8px 20px;font-size:13px;cursor:pointer}
+.te-cancel:hover{background:#444}
+.te-apply{background:#e53935;color:#fff;border:none;border-radius:6px;padding:8px 24px;font-size:13px;font-weight:600;cursor:pointer}
+.te-apply:hover{background:#c62828}
 </style>
 </head>
 <body>
@@ -958,18 +1246,26 @@ footer{
     <button id="clear-btn" onclick="clearTimeline()">Clear</button>
     <span class="tot" id="tl-total">0 clips &mdash; 0.0s</span>
   </div>
-  <div id="timeline"><span class="tl-empty">Drag clips here to build your sequence</span></div>
-  <div class="music-row">
-    <span class="row-label">Music:</span>
-    <div id="music-labels"></div>
+  <div id="multi-timeline">
+    <div id="tl-grid">
+      <div id="time-ruler"></div>
+      <div class="track-label">SND</div>
+      <div id="sound-track" class="track"><span class="track-empty">drag music here</span></div>
+      <div class="track-label">TXT</div>
+      <div id="text-track" class="track"><span class="track-empty">click to add text overlay</span></div>
+      <div class="track-label">VID</div>
+      <div id="video-track" class="track"><span class="track-empty">drag clips here</span></div>
+    </div>
   </div>
-  <div class="trans-row">
-    <span class="row-label">Transitions:</span>
-    <div id="trans-labels"></div>
-  </div>
-  <div class="effects-row">
-    <span class="row-label">Effects:</span>
-    <div id="effects-labels"></div>
+  <div class="source-row">
+    <div class="source-group">
+      <span class="row-label">Music:</span>
+      <div id="music-labels"></div>
+    </div>
+    <div class="source-group">
+      <span class="row-label">Transition:</span>
+      <div id="trans-labels"></div>
+    </div>
   </div>
   <div class="controls">
     <button id="gen-btn" onclick="generateVideo()">Generate Video</button>
@@ -1013,6 +1309,57 @@ footer{
   </div>
 </div>
 
+<div class="overlay" id="trans-picker-modal">
+  <div class="modal" style="max-width:480px">
+    <h2 style="color:#e53935">Change Transition</h2>
+    <div id="trans-picker-grid"></div>
+    <div style="margin-top:16px">
+      <button onclick="removeTransition()">No Transition</button>
+      <button onclick="closeTransPicker()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="text-editor-modal">
+  <div class="te-container">
+    <div class="te-toolbar">
+      <input type="text" id="te-text-input" placeholder="Enter text..." spellcheck="false"/>
+      <button class="te-btn te-add-btn" onclick="teAddBox()" title="Add text box">+</button>
+      <div class="te-sep"></div>
+      <label class="te-label">Size</label>
+      <select id="te-fontsize">
+        <option value="24">24</option>
+        <option value="32">32</option>
+        <option value="42" selected>42</option>
+        <option value="56">56</option>
+        <option value="72">72</option>
+        <option value="96">96</option>
+      </select>
+      <div class="te-sep"></div>
+      <label class="te-label">Color</label>
+      <input type="color" id="te-fontcolor" value="#ffffff"/>
+      <div class="te-sep"></div>
+      <button id="te-bold-btn" class="te-btn" onclick="teToggleBold()"><b>B</b></button>
+      <div class="te-sep"></div>
+      <label class="te-label">BG</label>
+      <select id="te-bg-opacity">
+        <option value="0">None</option>
+        <option value="0.3">Light</option>
+        <option value="0.5" selected>Medium</option>
+        <option value="0.7">Dark</option>
+        <option value="1">Solid</option>
+      </select>
+    </div>
+    <div class="te-canvas-wrap">
+      <div id="te-canvas"></div>
+    </div>
+    <div class="te-footer">
+      <button class="te-cancel" onclick="closeTextEditor()">Cancel</button>
+      <button class="te-apply" onclick="applyTextEditor()">Apply</button>
+    </div>
+  </div>
+</div>
+
 <script>
 var MUSIC_COLORS = [
   {bg:'#1b5e20',fg:'#a5d6a7',dot:'#4caf50'},
@@ -1023,13 +1370,19 @@ var MUSIC_COLORS = [
 ];
 var NO_MUSIC_COLOR = {bg:'#333',fg:'#999',dot:'#666'};
 
+var CELL_W = 60; /* px per second */
 var allClips = [];
 var musicList = [];
 var musicColorMap = {};
 var gridSort = null;
-var tlSort = null;
 var resultPath = '';
-var tlUid = 0;
+
+/* Track data */
+var videoItems = [];    /* [{clip, transition (optional before)}] */
+var soundItems = [];    /* [{id, name, volume, startTime, duration, el}] */
+var textItems = [];     /* [{id, text, startTime, endTime, position, fontsize, el}] */
+var selectedTransition = 'fade';
+var nextBlkId = 0;
 
 async function init() {
   var tags = await fetch('/api/tags').then(function(r){return r.json()});
@@ -1050,31 +1403,25 @@ async function init() {
   }
   renderMusicLabels();
   renderTransitionLabels();
-  renderEffectsLabels();
-  setupTimeline();
+  setupTracks();
 }
 
 function renderMusicLabels() {
   var container = document.getElementById('music-labels');
-  var items = [{name:'No Music'}].concat(musicList);
   container.innerHTML = '';
-  for (var i = 0; i < items.length; i++) {
-    var m = items[i];
+  for (var i = 0; i < musicList.length; i++) {
+    var m = musicList[i];
     var col = musicColorMap[m.name] || NO_MUSIC_COLOR;
     var pill = document.createElement('div');
     pill.className = 'music-pill';
-    pill.dataset.music = m.name;
     pill.style.background = col.bg;
     pill.style.color = col.fg;
     pill.innerHTML = '<span class="dot" style="background:' + col.dot + '"></span>' + m.name;
+    pill.addEventListener('click', function(name) {
+      return function() { addSoundBlock(name, 3, getVideoDuration(), Math.max(5, getVideoDuration())); };
+    }(m.name));
     container.appendChild(pill);
   }
-
-  new Sortable(container, {
-    group: {name:'timeline',pull:'clone',put:false},
-    sort: false,
-    animation: 150,
-  });
 }
 
 var TRANSITION_LIST = [
@@ -1099,93 +1446,351 @@ function renderTransitionLabels() {
   for (var i = 0; i < TRANSITION_LIST.length; i++) {
     var name = TRANSITION_LIST[i];
     var pill = document.createElement('div');
-    pill.className = 'trans-pill';
-    pill.dataset.transition = name;
+    pill.className = 'trans-pill' + (name === selectedTransition ? ' active' : '');
     pill.textContent = name;
+    pill.addEventListener('click', function(n, el) {
+      return function() {
+        selectedTransition = n;
+        container.querySelectorAll('.trans-pill').forEach(function(p){p.classList.remove('active')});
+        el.classList.add('active');
+      };
+    }(name, pill));
     container.appendChild(pill);
   }
-  new Sortable(container, {
-    group: {name:'timeline', pull:'clone', put:false},
-    sort: false,
-    animation: 150,
-  });
 }
 
-function renderEffectsLabels() {
-  var container = document.getElementById('effects-labels');
-  container.innerHTML = '';
-  var effects = [
-    {label:'Mute', key:'sound', val:'mute'},
-    {label:'Unmute', key:'sound', val:'unmute'},
-    {label:'Placeholder', key:'placeholder', val:'1'},
-  ];
-  for (var i = 0; i < effects.length; i++) {
-    var eff = effects[i];
-    var pill = document.createElement('div');
-    pill.className = 'effects-pill';
-    pill.dataset[eff.key] = eff.val;
-    pill.textContent = eff.label;
-    container.appendChild(pill);
+/* ─── Multi-track timeline ─── */
+
+function getVideoDuration() {
+  var total = 0;
+  for (var i = 0; i < videoItems.length; i++) {
+    total += videoItems[i].duration;
   }
-  new Sortable(container, {
-    group: {name:'timeline', pull:'clone', put:false},
-    sort: false,
-    animation: 150,
-  });
+  return total;
 }
 
-function makeTlTransition(name) {
-  var el = document.createElement('div');
-  el.className = 'tl-trans';
-  el.dataset.transition = name;
-  el.dataset.tltype = 'transition';
-  var uid = ++tlUid;
-  el.dataset.uid = uid;
-  el.innerHTML = name
-    + '<button class="rm" onclick="event.stopPropagation();rmTlEl(this.parentNode)">&times;</button>';
-  return el;
+function renderRuler() {
+  var ruler = document.getElementById('time-ruler');
+  var dur = Math.max(getVideoDuration(), 10);
+  var w = Math.ceil(dur) * CELL_W;
+  ruler.innerHTML = '';
+  ruler.style.width = (50 + w) + 'px';
+  for (var s = 0; s <= Math.ceil(dur); s++) {
+    var tick = document.createElement('div');
+    tick.className = 'ruler-tick' + (s % 5 === 0 ? ' major' : '');
+    tick.style.left = (50 + s * CELL_W) + 'px';
+    ruler.appendChild(tick);
+    if (s % 5 === 0) {
+      var lbl = document.createElement('span');
+      lbl.className = 'ruler-label';
+      lbl.style.left = (50 + s * CELL_W) + 'px';
+      lbl.textContent = s + 's';
+      ruler.appendChild(lbl);
+    }
+  }
 }
 
-function makeTlMute(isMute) {
-  var el = document.createElement('div');
-  el.className = 'tl-mute';
-  el.dataset.tltype = isMute ? 'mute' : 'unmute';
-  var uid = ++tlUid;
-  el.dataset.uid = uid;
-  el.style.color = isMute ? '#ef5350' : '#66bb6a';
-  el.innerHTML = (isMute ? 'MUTE' : 'UNMUTE')
-    + '<button class="rm" onclick="event.stopPropagation();rmTlEl(this.parentNode)">&times;</button>';
-  return el;
+function renderVideoTrack() {
+  var track = document.getElementById('video-track');
+  track.querySelectorAll('.vblock,.trans-marker').forEach(function(e){e.remove()});
+  var dur = Math.max(getVideoDuration(), 10);
+  track.style.width = (dur * CELL_W) + 'px';
+  var x = 0;
+  for (var i = 0; i < videoItems.length; i++) {
+    var vi = videoItems[i];
+    /* transition marker */
+    if (i > 0 && vi.transition) {
+      var tm = document.createElement('div');
+      tm.className = 'trans-marker';
+      tm.style.left = (x * CELL_W) + 'px';
+      tm.textContent = vi.transition;
+      tm.title = 'Click to change';
+      tm.addEventListener('click', function(idx) {
+        return function(e) { e.stopPropagation(); openTransPicker(idx); };
+      }(i));
+      track.appendChild(tm);
+    }
+    /* clip block */
+    var blk = document.createElement('div');
+    blk.className = 'track-block vblock';
+    blk.style.left = (x * CELL_W) + 'px';
+    blk.style.width = (vi.duration * CELL_W) + 'px';
+    var thumbUrl = vi.clip.id !== undefined ? '/api/thumbnail/' + vi.clip.id : '';
+    blk.innerHTML = (thumbUrl ? '<img class="vblock-thumb" src="' + thumbUrl + '"/>' : '')
+      + '<span class="blk-label">' + vi.duration.toFixed(1) + 's</span>'
+      + '<button class="blk-rm" onclick="event.stopPropagation();removeVideoItem(' + i + ')">&times;</button>';
+    blk.dataset.idx = i;
+    track.appendChild(blk);
+    x += vi.duration;
+  }
+  /* update empty label */
+  var emp = track.querySelector('.track-empty');
+  if (videoItems.length && emp) emp.style.display = 'none';
+  else if (!videoItems.length && emp) emp.style.display = '';
 }
 
-function makeTlPlaceholder(duration, color) {
-  duration = duration || 5;
-  color = color || 'black';
-  var el = document.createElement('div');
-  el.className = 'tl-placeholder';
-  el.dataset.tltype = 'placeholder';
-  el.dataset.phDuration = duration;
-  el.dataset.phColor = color;
-  var uid = ++tlUid;
-  el.dataset.uid = uid;
-  el.innerHTML = '<span class="ph-color" style="background:' + color + '"></span>'
-    + '<div class="dur">' + duration + 's</div>'
-    + '<button class="rm" onclick="event.stopPropagation();rmTlEl(this.parentNode)">&times;</button>';
-  el.addEventListener('click', function(e) {
-    if (e.target.classList.contains('rm')) return;
-    var newDur = prompt('Duration (seconds):', el.dataset.phDuration);
-    if (newDur !== null && !isNaN(parseFloat(newDur)) && parseFloat(newDur) > 0) {
-      el.dataset.phDuration = parseFloat(newDur);
-      el.querySelector('.dur').textContent = parseFloat(newDur) + 's';
+function renderSoundTrack() {
+  var track = document.getElementById('sound-track');
+  track.querySelectorAll('.sblock').forEach(function(e){e.remove()});
+  var dur = Math.max(getVideoDuration(), 10);
+  track.style.width = (dur * CELL_W) + 'px';
+  /* stack overlapping blocks */
+  soundItems.sort(function(a,b){return a.startTime - b.startTime});
+  var rows = [];
+  for (var i = 0; i < soundItems.length; i++) {
+    var si = soundItems[i];
+    var placed = false;
+    for (var r = 0; r < rows.length; r++) {
+      if (rows[r] <= si.startTime) { rows[r] = si.startTime + si.duration; si._row = r; placed = true; break; }
+    }
+    if (!placed) { si._row = rows.length; rows.push(si.startTime + si.duration); }
+    var col = musicColorMap[si.name] || NO_MUSIC_COLOR;
+    var blk = document.createElement('div');
+    blk.className = 'track-block sblock';
+    blk.style.left = (si.startTime * CELL_W) + 'px';
+    blk.style.width = (si.duration * CELL_W) + 'px';
+    blk.style.background = col.bg;
+    blk.style.color = col.fg;
+    blk.style.borderColor = col.dot;
+    var rowH = rows.length > 1 ? (100 / rows.length) : 100;
+    blk.style.top = (si._row * rowH) + '%';
+    blk.style.height = rowH + '%';
+    var volBars = '';
+    var heights = [3,5,7,9,12];
+    for (var v = 0; v < 5; v++) {
+      volBars += '<div class="vb' + (v < si.volume ? ' active' : '') + '" data-lv="' + (v+1) + '"'
+        + ' style="height:' + heights[v] + 'px;background:' + col.dot + '"'
+        + ' onclick="event.stopPropagation();setSoundVol(this)"></div>';
+    }
+    blk.innerHTML = '<span class="blk-label">' + si.name + '</span>'
+      + '<div class="blk-vol">' + volBars + '</div>'
+      + '<button class="blk-rm" onclick="event.stopPropagation();removeSoundItem(' + si.id + ')">&times;</button>'
+      + '<div class="resize-handle"></div>';
+    blk.dataset.blkId = si.id;
+    si.el = blk;
+    makeDraggable(blk, si, 'sound');
+    track.appendChild(blk);
+  }
+  var emp = track.querySelector('.track-empty');
+  if (soundItems.length && emp) emp.style.display = 'none';
+  else if (!soundItems.length && emp) emp.style.display = '';
+}
+
+function renderTextTrack() {
+  var track = document.getElementById('text-track');
+  track.querySelectorAll('.tblock').forEach(function(e){e.remove()});
+  var dur = Math.max(getVideoDuration(), 10);
+  track.style.width = (dur * CELL_W) + 'px';
+  textItems.sort(function(a,b){return a.startTime - b.startTime});
+  var rows = [];
+  for (var i = 0; i < textItems.length; i++) {
+    var ti = textItems[i];
+    var placed = false;
+    for (var r = 0; r < rows.length; r++) {
+      if (rows[r] <= ti.startTime) { rows[r] = ti.endTime; ti._row = r; placed = true; break; }
+    }
+    if (!placed) { ti._row = rows.length; rows.push(ti.endTime); }
+    var blk = document.createElement('div');
+    blk.className = 'track-block tblock';
+    blk.style.left = (ti.startTime * CELL_W) + 'px';
+    blk.style.width = ((ti.endTime - ti.startTime) * CELL_W) + 'px';
+    var rowH = rows.length > 1 ? (100 / rows.length) : 100;
+    blk.style.top = (ti._row * rowH) + '%';
+    blk.style.height = rowH + '%';
+    blk.innerHTML = '<span class="blk-label">' + ti.text + '</span>'
+      + '<button class="blk-rm" onclick="event.stopPropagation();removeTextItem(' + ti.id + ')">&times;</button>'
+      + '<div class="resize-handle"></div>';
+    blk.dataset.blkId = ti.id;
+    blk.addEventListener('dblclick', function(item) {
+      return function(e) {
+        e.stopPropagation();
+        openTextEditor(item, item.startTime, item.endTime);
+      };
+    }(ti));
+    ti.el = blk;
+    makeDraggable(blk, ti, 'text');
+    track.appendChild(blk);
+  }
+  var emp = track.querySelector('.track-empty');
+  if (textItems.length && emp) emp.style.display = 'none';
+  else if (!textItems.length && emp) emp.style.display = '';
+}
+
+/* Drag and resize for sound/text blocks */
+function makeDraggable(el, data, trackType) {
+  var startX, startLeft, startW, resizing = false;
+  var handle = el.querySelector('.resize-handle');
+  handle.addEventListener('mousedown', function(e) {
+    e.stopPropagation();
+    resizing = true;
+    startX = e.clientX;
+    startW = parseFloat(el.style.width);
+    function onMove(e2) {
+      var dx = e2.clientX - startX;
+      var newW = Math.max(CELL_W, Math.round((startW + dx) / CELL_W) * CELL_W);
+      el.style.width = newW + 'px';
+    }
+    function onUp() {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      resizing = false;
+      var newDur = Math.max(1, Math.round(parseFloat(el.style.width) / CELL_W));
+      if (trackType === 'sound') { data.duration = newDur; }
+      else { data.endTime = data.startTime + newDur; }
       syncTl();
     }
-    var newColor = prompt('Color (CSS name or hex):', el.dataset.phColor);
-    if (newColor !== null && newColor.trim()) {
-      el.dataset.phColor = newColor.trim();
-      el.querySelector('.ph-color').style.background = newColor.trim();
-    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
   });
-  return el;
+  el.addEventListener('mousedown', function(e) {
+    if (resizing || e.target.classList.contains('blk-rm') || e.target.classList.contains('vb')) return;
+    startX = e.clientX;
+    startLeft = parseFloat(el.style.left);
+    function onMove(e2) {
+      var dx = e2.clientX - startX;
+      var newLeft = Math.max(0, Math.round((startLeft + dx) / CELL_W) * CELL_W);
+      el.style.left = newLeft + 'px';
+    }
+    function onUp() {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      var newStart = Math.max(0, Math.round(parseFloat(el.style.left) / CELL_W));
+      if (trackType === 'sound') { data.startTime = newStart; }
+      else {
+        var dur = data.endTime - data.startTime;
+        data.startTime = newStart;
+        data.endTime = newStart + dur;
+      }
+      syncTl();
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+}
+
+function setSoundVol(barEl) {
+  var lv = parseInt(barEl.dataset.lv);
+  var blk = barEl.closest('.sblock');
+  var id = parseInt(blk.dataset.blkId);
+  var item = soundItems.find(function(s){return s.id===id});
+  if (item) item.volume = lv;
+  blk.querySelectorAll('.vb').forEach(function(b) {
+    b.classList.toggle('active', parseInt(b.dataset.lv) <= lv);
+  });
+}
+
+function addVideoItem(clip) {
+  var dur = clip.duration;
+  var trans = videoItems.length > 0 ? selectedTransition : null;
+  videoItems.push({
+    clip: {id: clip.id, video_file: clip.video_file, start: clip.start, end: clip.end, filename: clip.filename},
+    duration: dur,
+    transition: trans,
+  });
+  syncTl();
+}
+
+function removeVideoItem(idx) {
+  videoItems.splice(idx, 1);
+  if (videoItems.length > 0 && videoItems[0].transition) videoItems[0].transition = null;
+  syncTl();
+}
+
+function addSoundBlock(name, volume, startTime, duration) {
+  soundItems.push({
+    id: ++nextBlkId, name: name, volume: volume,
+    startTime: startTime || 0, duration: duration || 10, el: null,
+  });
+  syncTl();
+}
+
+function removeSoundItem(id) {
+  soundItems = soundItems.filter(function(s){return s.id !== id});
+  syncTl();
+}
+
+function addTextBlock(opts) {
+  textItems.push({
+    id: ++nextBlkId, text: opts.text,
+    startTime: opts.startTime, endTime: opts.endTime,
+    position: opts.position || 'bottom',
+    fontsize: opts.fontsize || 42,
+    fontcolor: opts.fontcolor || 'white',
+    bold: opts.bold || false,
+    box_opacity: opts.box_opacity !== undefined ? opts.box_opacity : 0.5,
+    x_frac: opts.x_frac,
+    y_frac: opts.y_frac,
+    el: null,
+  });
+  syncTl();
+}
+
+function updateTextItem(id, opts) {
+  var item = textItems.find(function(t){return t.id===id});
+  if (!item) return;
+  item.text = opts.text;
+  item.fontsize = opts.fontsize || 42;
+  item.fontcolor = opts.fontcolor || 'white';
+  item.bold = opts.bold || false;
+  item.box_opacity = opts.box_opacity !== undefined ? opts.box_opacity : 0.5;
+  item.x_frac = opts.x_frac;
+  item.y_frac = opts.y_frac;
+  item.position = opts.position || 'bottom';
+  syncTl();
+}
+
+function removeTextItem(id) {
+  textItems = textItems.filter(function(t){return t.id !== id});
+  syncTl();
+}
+
+function setupTracks() {
+  /* Video track: accept clips from grid via SortableJS */
+  var vt = document.getElementById('video-track');
+  new Sortable(vt, {
+    group: {name:'timeline', pull:false, put:function(to, from, el) {
+      return el.classList.contains('clip-card') && !el.classList.contains('in-tl') && !el.classList.contains('ignored');
+    }},
+    sort: true,
+    draggable: '.vblock',
+    animation: 150,
+    onAdd: function(evt) {
+      var el = evt.item;
+      var id = parseInt(el.dataset.id);
+      var clip = allClips.find(function(c){return c.id===id});
+      el.remove();
+      if (clip) addVideoItem(clip);
+    },
+    onSort: function(evt) {
+      if (evt.from !== evt.to) return;
+      var oldIdx = parseInt(evt.item.dataset.idx);
+      var newIdx = evt.newIndex;
+      /* Count only vblock elements to determine real position */
+      var blocks = vt.querySelectorAll('.vblock');
+      var positions = [];
+      blocks.forEach(function(b) { positions.push(parseInt(b.dataset.idx)); });
+      /* Rebuild videoItems from the new DOM order */
+      var reordered = positions.map(function(i) { return videoItems[i]; });
+      /* Fix transitions: first item never has a transition */
+      for (var i = 0; i < reordered.length; i++) {
+        if (i === 0) reordered[i].transition = null;
+        else if (!reordered[i].transition) reordered[i].transition = selectedTransition;
+      }
+      videoItems = reordered;
+      syncTl();
+    },
+  });
+
+  /* Text track: click to add */
+  document.getElementById('text-track').addEventListener('click', function(e) {
+    if (e.target.closest('.tblock')) return;
+    var rect = this.getBoundingClientRect();
+    var x = e.clientX - rect.left + this.parentElement.parentElement.scrollLeft;
+    var startSec = Math.max(0, Math.round((x - 50) / CELL_W));
+    openTextEditor(null, startSec, startSec + 3);
+  });
+
+  syncTl();
 }
 
 function cardHTML(c) {
@@ -1207,7 +1812,9 @@ function cardHTML(c) {
   }
   return '<div class="' + cls + '" data-id="' + c.id + '" data-tc="' + (c.thumb_count||1) + '" oncontextmenu="showCtx(event,' + c.id + ')">'
     + '<img class="thumb" src="/api/thumbnail/' + c.id + '" loading="lazy"/>'
+    + '<div class="play-overlay" onclick="event.stopPropagation();playScene(this,' + c.id + ')"><div class="play-circle"><svg viewBox="0 0 24 24"><polygon points="8,5 19,12 8,19"/></svg></div></div>'
     + '<span class="dur">' + c.duration + 's</span>'
+    + '<button class="hide-btn" title="' + (c.ignored ? 'Unhide' : 'Hide') + '" onclick="event.stopPropagation();toggleIgnore(' + c.id + ',' + !c.ignored + ')">' + (c.ignored ? '&#9711;' : '&#10005;') + '</button>'
     + '<span class="ignore-badge">HIDDEN</span>'
     + '<span class="wide-badge"></span>'
     + dots
@@ -1240,265 +1847,14 @@ function renderGrid() {
   });
 }
 
-function handleTlAdd(evt, isSplitTrack) {
-  var el = evt.item;
-  if (el.dataset.music !== undefined) {
-    var name = el.dataset.music;
-    var newEl = makeTlMusic(name);
-    el.replaceWith(newEl);
-    syncTl();
-    return;
-  }
-  if (el.dataset.transition !== undefined) {
-    var name = el.dataset.transition;
-    var newEl = makeTlTransition(name);
-    el.replaceWith(newEl);
-    syncTl();
-    return;
-  }
-  if (el.dataset.sound !== undefined) {
-    var isMute = el.dataset.sound === 'mute';
-    var newEl = makeTlMute(isMute);
-    el.replaceWith(newEl);
-    syncTl();
-    return;
-  }
-  if (el.dataset.placeholder !== undefined) {
-    var newEl = makeTlPlaceholder();
-    el.replaceWith(newEl);
-    syncTl();
-    return;
-  }
-  if (el.classList.contains('tl-item')) {
-    syncTl();
-    return;
-  }
-  var id = parseInt(el.dataset.id);
-  if (isNaN(id) || getTlClipIds().indexOf(id) >= 0) { el.remove(); syncTl(); return; }
-  var clip = allClips.find(function(c){return c.id===id});
-  if (!clip) { el.remove(); syncTl(); return; }
-  var tlEl = makeTlItem(clip);
-  el.replaceWith(tlEl);
-  syncTl();
-}
-
-function setupTimeline() {
-  var tl = document.getElementById('timeline');
-  tlSort = new Sortable(tl, {
-    group: {name:'timeline',pull:true,put:function(to, from, el){
-      return true;
-    }},
-    sort: true,
-    animation: 150,
-    onAdd: function(evt) {
-      handleTlAdd(evt, false);
-    },
-    onSort: function() { syncTl(); },
-    onRemove: function() { syncTl(); },
-  });
-}
-
-function makeTlItem(c) {
-  var el = document.createElement('div');
-  el.className = 'tl-item';
-  el.dataset.id = c.id;
-  el.dataset.tltype = 'clip';
-  if (c.wide) el.dataset.wide = '1';
-  var uid = ++tlUid;
-  el.dataset.uid = uid;
-  el.innerHTML = '<img class="thumb" src="/api/thumbnail/' + c.id + '"/>'
-    + '<div class="dur">' + c.duration + 's</div>'
-    + '<span class="wide-badge"></span>'
-    + '<button class="rm" onclick="event.stopPropagation();rmTlEl(this.parentNode)">&times;</button>';
-  el.addEventListener('contextmenu', function(e) { showTlCtx(e, el); });
-  return el;
-}
-
-function makeTlMusic(name) {
-  var col = musicColorMap[name] || NO_MUSIC_COLOR;
-  var el = document.createElement('div');
-  el.className = 'tl-music';
-  el.dataset.music = name;
-  el.dataset.tltype = 'music';
-  el.dataset.volume = (name === 'No Music') ? '0' : '3';
-  var uid = ++tlUid;
-  el.dataset.uid = uid;
-  el.style.background = col.bg;
-  el.style.color = col.fg;
-
-  var nameRow = '<div class="tl-music-name">'
-    + '<span class="dot" style="background:' + col.dot + '"></span>'
-    + name
-    + '<button class="rm" onclick="event.stopPropagation();rmTlEl(this.closest(\'.tl-music\'))">&times;</button>'
-    + '</div>';
-
-  var volRow = '';
-  if (name !== 'No Music') {
-    var bars = '';
-    var heights = [4,6,8,11,14];
-    for (var i = 0; i < 5; i++) {
-      var active = i < 3 ? ' active' : '';
-      bars += '<div class="vol-bar' + active + '" data-level="' + (i+1) + '"'
-        + ' style="height:' + heights[i] + 'px;background:' + col.dot + '"'
-        + ' onclick="event.stopPropagation();setVol(this)"></div>';
-    }
-    volRow = '<div class="tl-vol">' + bars + '</div>';
-  }
-
-  el.innerHTML = nameRow + volRow;
-  return el;
-}
-
-function setVol(barEl) {
-  var level = parseInt(barEl.dataset.level);
-  var pill = barEl.closest('.tl-music');
-  pill.dataset.volume = level;
-  var bars = pill.querySelectorAll('.vol-bar');
-  bars.forEach(function(b) {
-    var bl = parseInt(b.dataset.level);
-    b.classList.toggle('active', bl <= level);
-  });
-}
-
-function rmTlEl(el) {
-  var splitEl = el.closest('.tl-split');
-  el.remove();
-  if (splitEl) checkSplitEmpty(splitEl);
-  syncTl();
-}
-
-function showTlCtx(e, el) {
-  e.preventDefault();
-  e.stopPropagation();
-  hideCtx();
-  if (!el.dataset.wide || el.closest('.tl-split')) return;
-  var m = document.createElement('div');
-  m.className = 'ctx-menu';
-  m.style.left = e.clientX + 'px';
-  m.style.top = e.clientY + 'px';
-  var d = document.createElement('div');
-  d.textContent = 'Split Timeline';
-  d.onclick = function() {
-    hideCtx();
-    makeSplitSection(el);
-  };
-  m.appendChild(d);
-  document.body.appendChild(m);
-  ctxEl = m;
-  var r = m.getBoundingClientRect();
-  if (r.right > window.innerWidth) m.style.left = (window.innerWidth - r.width - 4) + 'px';
-  if (r.bottom > window.innerHeight) m.style.top = (window.innerHeight - r.height - 4) + 'px';
-}
-
-function makeSplitSection(clipEl) {
-  var tl = document.getElementById('timeline');
-  var splitEl = document.createElement('div');
-  splitEl.className = 'tl-split';
-  splitEl.dataset.tltype = 'split';
-  var uid = ++tlUid;
-  splitEl.dataset.uid = uid;
-
-  var topTrack = document.createElement('div');
-  topTrack.className = 'tl-split-track tl-split-top';
-  var bottomTrack = document.createElement('div');
-  bottomTrack.className = 'tl-split-track tl-split-bottom';
-
-  clipEl.parentNode.insertBefore(splitEl, clipEl);
-  topTrack.appendChild(clipEl);
-
-  var emptyLabel = document.createElement('span');
-  emptyLabel.className = 'tl-split-empty';
-  emptyLabel.textContent = 'drag wide clips here';
-  bottomTrack.appendChild(emptyLabel);
-
-  splitEl.appendChild(topTrack);
-  splitEl.appendChild(bottomTrack);
-
-  setupSplitTrack(topTrack, splitEl);
-  setupSplitTrack(bottomTrack, splitEl);
-
-  syncTl();
-}
-
-function setupSplitTrack(trackEl, splitEl) {
-  new Sortable(trackEl, {
-    group: {
-      name: 'timeline',
-      pull: true,
-      put: function(to, from, el) {
-        if (el.classList.contains('clip-card')) {
-          if (!el.classList.contains('wide')) return false;
-        }
-        if (el.classList.contains('tl-item')) {
-          if (!el.dataset.wide) return false;
-        }
-        if (el.classList.contains('tl-split')) return false;
-        return true;
-      }
-    },
-    sort: true,
-    animation: 150,
-    onAdd: function(evt) {
-      var empty = trackEl.querySelector('.tl-split-empty');
-      if (empty) empty.remove();
-      handleTlAdd(evt, true);
-    },
-    onRemove: function() {
-      checkSplitEmpty(splitEl);
-      syncTl();
-    },
-    onSort: function() { syncTl(); },
-  });
-}
-
-function checkSplitEmpty(splitEl) {
-  var topTrack = splitEl.querySelector('.tl-split-top');
-  var bottomTrack = splitEl.querySelector('.tl-split-bottom');
-  if (!topTrack || !bottomTrack) return;
-
-  var topItems = topTrack.querySelectorAll('[data-tltype]');
-  var bottomItems = bottomTrack.querySelectorAll('[data-tltype]');
-
-  if (!topItems.length && !topTrack.querySelector('.tl-split-empty')) {
-    var sp = document.createElement('span');
-    sp.className = 'tl-split-empty';
-    sp.textContent = 'drag wide clips here';
-    topTrack.appendChild(sp);
-  }
-  if (!bottomItems.length && !bottomTrack.querySelector('.tl-split-empty')) {
-    var sp = document.createElement('span');
-    sp.className = 'tl-split-empty';
-    sp.textContent = 'drag wide clips here';
-    bottomTrack.appendChild(sp);
-  }
-
-  if (!topItems.length && !bottomItems.length) {
-    splitEl.remove();
-  }
-}
-
-function getTrackDuration(trackEl) {
-  var total = 0;
-  trackEl.querySelectorAll('[data-tltype]').forEach(function(el) {
-    if (el.dataset.tltype === 'clip') {
-      if (el.dataset.id !== undefined) {
-        var c = allClips.find(function(x){return x.id===parseInt(el.dataset.id)});
-        if (c) total += c.duration;
-      } else if (el.dataset.start !== undefined) {
-        total += parseFloat(el.dataset.end) - parseFloat(el.dataset.start);
-      }
-    } else if (el.dataset.tltype === 'placeholder') {
-      total += parseFloat(el.dataset.phDuration) || 5;
-    }
-  });
-  return total;
+function getTlClipIds() {
+  return videoItems.map(function(v){return v.clip.id}).filter(function(id){return id !== undefined});
 }
 
 function clearTimeline() {
-  var items = document.querySelectorAll('#timeline [data-tltype]');
-  if (!items.length) return;
+  if (!videoItems.length && !soundItems.length && !textItems.length) return;
   if (!window.confirm('Clear the entire timeline?')) return;
-  items.forEach(function(el){ el.remove(); });
+  videoItems = []; soundItems = []; textItems = [];
   syncTl();
 }
 
@@ -1543,15 +1899,17 @@ function addSelectedSegments() {
   var clip = segmentState.clip;
   var count = clip.thumb_count;
   var interval = clip.duration / count;
-  var tl = document.getElementById('timeline');
-  var ph = tl.querySelector('.tl-empty');
-  if (ph) ph.remove();
   var indices = Array.from(segmentState.selected).sort(function(a,b){return a-b});
   for (var i = 0; i < indices.length; i++) {
     var idx = indices[i];
     var segStart = Math.round((clip.start + interval * idx) * 100) / 100;
     var segEnd = Math.round(Math.min(clip.start + interval * (idx + 1), clip.end) * 100) / 100;
-    tl.appendChild(makeTlSegment(clip, idx, clip.video_file, segStart, segEnd));
+    var segDur = Math.round((segEnd - segStart) * 10) / 10;
+    var trans = videoItems.length > 0 ? selectedTransition : null;
+    videoItems.push({
+      clip: {video_file: clip.video_file, start: segStart, end: segEnd, filename: clip.filename},
+      duration: segDur, transition: trans,
+    });
   }
   closeSegmentModal();
   syncTl();
@@ -1562,91 +1920,19 @@ function closeSegmentModal() {
   segmentState = {clip: null, selected: new Set()};
 }
 
-function makeTlSegment(parentClip, segIdx, videoFile, start, end) {
-  var dur = Math.round((end - start) * 10) / 10;
-  var el = document.createElement('div');
-  el.className = 'tl-item';
-  el.dataset.tltype = 'clip';
-  el.dataset.videoFile = videoFile;
-  el.dataset.start = start.toFixed(2);
-  el.dataset.end = end.toFixed(2);
-  el.dataset.parentId = parentClip.id;
-  el.dataset.segIdx = segIdx;
-  if (parentClip.wide) el.dataset.wide = '1';
-  var uid = ++tlUid;
-  el.dataset.uid = uid;
-  el.innerHTML = '<img class="thumb" src="/api/thumbnail/' + parentClip.id + '/' + segIdx + '"/>'
-    + '<div class="dur">' + dur + 's</div>'
-    + '<span class="wide-badge"></span>'
-    + '<button class="rm" onclick="event.stopPropagation();rmTlEl(this.parentNode)">&times;</button>';
-  el.addEventListener('contextmenu', function(e) { showTlCtx(e, el); });
-  return el;
-}
-
-function getTlClipIds() {
-  var ids = [];
-  document.querySelectorAll('#timeline .tl-item[data-id]').forEach(function(el) {
-    ids.push(parseInt(el.dataset.id));
-  });
-  document.querySelectorAll('#timeline .tl-split .tl-item[data-id]').forEach(function(el) {
-    var id = parseInt(el.dataset.id);
-    if (ids.indexOf(id) < 0) ids.push(id);
-  });
-  return ids;
-}
-
 function syncTl() {
-  var children = document.querySelectorAll('#timeline > [data-tltype]');
-  var clipIds = getTlClipIds();
-
-  var total = 0;
-  var totalClips = 0;
-  var splitCount = 0;
-
-  document.querySelectorAll('#timeline > .tl-item[data-id]').forEach(function(el) {
-    var c = allClips.find(function(x){return x.id===parseInt(el.dataset.id)});
-    if (c) total += c.duration;
-    totalClips++;
-  });
-  document.querySelectorAll('#timeline > .tl-item').forEach(function(el) {
-    if (el.dataset.id === undefined && el.dataset.start !== undefined) {
-      total += parseFloat(el.dataset.end) - parseFloat(el.dataset.start);
-      totalClips++;
-    }
-  });
-  document.querySelectorAll('#timeline > .tl-placeholder').forEach(function(el) {
-    total += parseFloat(el.dataset.phDuration) || 5;
-  });
-  document.querySelectorAll('#timeline > .tl-split').forEach(function(splitEl) {
-    splitCount++;
-    var topTrack = splitEl.querySelector('.tl-split-top');
-    var bottomTrack = splitEl.querySelector('.tl-split-bottom');
-    var topDur = topTrack ? getTrackDuration(topTrack) : 0;
-    var botDur = bottomTrack ? getTrackDuration(bottomTrack) : 0;
-    total += Math.max(topDur, botDur);
-    splitEl.querySelectorAll('.tl-item[data-id]').forEach(function() { totalClips++; });
-    splitEl.querySelectorAll('.tl-item').forEach(function(el) {
-      if (el.dataset.id === undefined && el.dataset.start !== undefined) totalClips++;
-    });
-  });
-
-  var musicCount = document.querySelectorAll('#timeline .tl-music').length;
-  var summary = totalClips + ' clip' + (totalClips !== 1 ? 's' : '');
-  if (splitCount) summary += ' + ' + splitCount + ' split' + (splitCount !== 1 ? 's' : '');
-  if (musicCount) summary += ' + ' + musicCount + ' music';
+  renderRuler();
+  renderVideoTrack();
+  renderSoundTrack();
+  renderTextTrack();
+  var total = getVideoDuration();
+  var summary = videoItems.length + ' clip' + (videoItems.length !== 1 ? 's' : '');
+  if (soundItems.length) summary += ' + ' + soundItems.length + ' music';
+  if (textItems.length) summary += ' + ' + textItems.length + ' text';
   summary += ' \u2014 ' + total.toFixed(1) + 's';
   document.getElementById('tl-total').textContent = summary;
 
-  var hasItems = children.length > 0;
-  var ph = document.querySelector('#timeline .tl-empty');
-  if (hasItems && ph) ph.remove();
-  if (!hasItems && !document.querySelector('#timeline .tl-empty')) {
-    var sp = document.createElement('span');
-    sp.className = 'tl-empty';
-    sp.textContent = 'Drag clips and music here to build your sequence';
-    document.getElementById('timeline').appendChild(sp);
-  }
-
+  var clipIds = getTlClipIds();
   document.querySelectorAll('#clip-grid .clip-card').forEach(function(card) {
     var cid = parseInt(card.dataset.id);
     card.classList.toggle('in-tl', clipIds.indexOf(cid) >= 0);
@@ -1712,58 +1998,31 @@ async function toggleIgnore(id, ignore) {
   renderGrid();
 }
 
-function serializeTlItem(el) {
-  var t = el.dataset.tltype;
-  if (t === 'clip') {
-    if (el.dataset.videoFile) {
-      return {type:'clip', video_file:el.dataset.videoFile,
-        start:parseFloat(el.dataset.start), end:parseFloat(el.dataset.end)};
-    } else {
-      return {type:'clip', id:parseInt(el.dataset.id)};
-    }
-  } else if (t === 'music') {
-    return {type:'music', name:el.dataset.music, volume:parseInt(el.dataset.volume)||0};
-  } else if (t === 'transition') {
-    return {type:'transition', name:el.dataset.transition};
-  } else if (t === 'mute') {
-    return {type:'mute'};
-  } else if (t === 'unmute') {
-    return {type:'unmute'};
-  } else if (t === 'placeholder') {
-    return {type:'placeholder', duration:parseFloat(el.dataset.phDuration)||5,
-            color:el.dataset.phColor||'black'};
-  } else if (t === 'split') {
-    var topTrack = el.querySelector('.tl-split-top');
-    var bottomTrack = el.querySelector('.tl-split-bottom');
-    var topItems = [];
-    var bottomItems = [];
-    if (topTrack) topTrack.querySelectorAll('[data-tltype]').forEach(function(child) {
-      var s = serializeTlItem(child);
-      if (s) topItems.push(s);
-    });
-    if (bottomTrack) bottomTrack.querySelectorAll('[data-tltype]').forEach(function(child) {
-      var s = serializeTlItem(child);
-      if (s) bottomItems.push(s);
-    });
-    return {type:'split', top:topItems, bottom:bottomItems};
-  }
-  return null;
-}
-
 function buildTimeline() {
-  var items = [];
-  var children = document.querySelectorAll('#timeline > [data-tltype]');
-  children.forEach(function(el) {
-    var s = serializeTlItem(el);
-    if (s) items.push(s);
+  var vt = [];
+  for (var i = 0; i < videoItems.length; i++) {
+    var vi = videoItems[i];
+    if (i > 0 && vi.transition) vt.push({type:'transition', name:vi.transition});
+    var c = vi.clip;
+    if (c.id !== undefined) vt.push({type:'clip', id:c.id});
+    else vt.push({type:'clip', video_file:c.video_file, start:c.start, end:c.end});
+  }
+  var st = soundItems.map(function(s) {
+    return {name:s.name, volume:s.volume, start_time:s.startTime, duration:s.duration};
   });
-  return items;
+  var tt = textItems.map(function(t) {
+    var o = {text:t.text, start_time:t.startTime, end_time:t.endTime,
+            position:t.position, fontsize:t.fontsize, fontcolor:t.fontcolor||'white',
+            box_opacity:t.box_opacity !== undefined ? t.box_opacity : 0.5};
+    if (t.x_frac !== undefined) { o.x_frac = t.x_frac; o.y_frac = t.y_frac; }
+    if (t.bold) o.bold = true;
+    return o;
+  });
+  return {video_track:vt, sound_track:st, text_overlays:tt};
 }
 
 async function generateVideo() {
-  var timeline = buildTimeline();
-  var hasClips = timeline.some(function(t){return t.type==='clip'});
-  if (!hasClips) { alert('Add clips to the timeline first!'); return; }
+  if (!videoItems.length) { alert('Add clips to the timeline first!'); return; }
 
   var btn = document.getElementById('gen-btn');
   btn.disabled = true;
@@ -1773,7 +2032,7 @@ async function generateVideo() {
     var res = await fetch('/api/generate', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({timeline: timeline}),
+      body: JSON.stringify(buildTimeline()),
     });
     var data = await res.json();
     document.getElementById('loading').classList.remove('active');
@@ -1810,99 +2069,8 @@ function closeResult() {
 }
 
 // -- Load timeline from JSON --
-var pendingLoad = null;
-
 function triggerLoad() {
   document.getElementById('load-input').click();
-}
-
-async function handleLoadVideo(file) {
-  try {
-    var res = await fetch('/api/load-video', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({filename: file.name}),
-    });
-    var data = await res.json();
-    if (data.error) {
-      alert(data.error);
-      return;
-    }
-    handleLoadData({timeline: data.timeline});
-  } catch (err) {
-    alert('Failed to load video: ' + err.message);
-  }
-}
-
-function handleLoadData(data) {
-  if (!data.timeline || !data.timeline.length) {
-    alert('No timeline data found');
-    return;
-  }
-  function resolveClipItem(item) {
-    var fname = item.video_file.split('/').pop();
-    var clip = allClips.find(function(c) {
-      return Math.abs(c.start - item.start) < 0.01
-        && Math.abs(c.end - item.end) < 0.01
-        && c.filename === fname;
-    });
-    if (clip) return {type:'clip', id:clip.id, clip:clip};
-    var parent = allClips.find(function(c) {
-      return c.filename === fname
-        && c.start <= item.start + 0.01
-        && c.end >= item.end - 0.01;
-    });
-    if (parent) {
-      var interval = parent.duration / parent.thumb_count;
-      var segIdx = Math.round((item.start - parent.start) / interval);
-      return {type:'segment', parent:parent, segIdx:segIdx,
-        start:item.start, end:item.end, video_file:item.video_file};
-    }
-    return null;
-  }
-  function resolveTrackItems(trackItems) {
-    var result = [];
-    var miss = 0;
-    for (var j = 0; j < trackItems.length; j++) {
-      var ti = trackItems[j];
-      if (ti.type === 'clip') {
-        var r = resolveClipItem(ti);
-        if (r) result.push(r); else miss++;
-      } else { result.push(ti); }
-    }
-    return {items: result, missing: miss};
-  }
-  var resolved = [];
-  var missing = 0;
-  for (var i = 0; i < data.timeline.length; i++) {
-    var item = data.timeline[i];
-    if (item.type === 'split') {
-      var topRes = resolveTrackItems(item.top || []);
-      var botRes = resolveTrackItems(item.bottom || []);
-      missing += topRes.missing + botRes.missing;
-      resolved.push({type:'split', top:topRes.items, bottom:botRes.items});
-    } else if (item.type === 'clip') {
-      var r = resolveClipItem(item);
-      if (r) resolved.push(r); else missing++;
-    } else { resolved.push(item); }
-  }
-  var clipCount = resolved.filter(function(r){return r.type==='clip'||r.type==='segment'}).length;
-  var musicCount = resolved.filter(function(r){return r.type==='music'}).length;
-  var transCount = resolved.filter(function(r){return r.type==='transition'}).length;
-  var splitCount = resolved.filter(function(r){return r.type==='split'}).length;
-  var info = clipCount + ' clip' + (clipCount !== 1 ? 's' : '');
-  if (splitCount) info += ', ' + splitCount + ' split' + (splitCount !== 1 ? 's' : '');
-  if (transCount) info += ', ' + transCount + ' transition' + (transCount !== 1 ? 's' : '');
-  if (musicCount) info += ', ' + musicCount + ' music';
-  if (missing) info += ' (' + missing + ' not found)';
-  pendingLoad = resolved;
-  document.getElementById('load-info').textContent = info;
-  var hasExisting = document.querySelectorAll('#timeline [data-tltype]').length > 0;
-  if (hasExisting) {
-    document.getElementById('load-modal').classList.add('active');
-  } else {
-    applyLoad('replace');
-  }
 }
 
 function handleLoadFile(e) {
@@ -1911,130 +2079,429 @@ function handleLoadFile(e) {
   var ext = file.name.split('.').pop().toLowerCase();
   var videoExts = ['mp4','mov','avi','mkv','webm','m4v'];
   if (videoExts.indexOf(ext) >= 0) {
-    handleLoadVideo(file);
+    fetch('/api/load-video', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({filename: file.name}),
+    }).then(function(r){return r.json()}).then(function(data) {
+      if (data.timeline) loadOldTimeline(data.timeline);
+    });
     e.target.value = '';
     return;
   }
   var reader = new FileReader();
   reader.onload = function(ev) {
     try {
-      handleLoadData(JSON.parse(ev.target.result));
-    } catch (err) {
-      alert('Invalid JSON file: ' + err.message);
-    }
+      var data = JSON.parse(ev.target.result);
+      if (data.video_track) {
+        loadNewTimeline(data);
+      } else if (data.timeline) {
+        loadOldTimeline(data.timeline);
+      }
+    } catch (err) { alert('Invalid JSON: ' + err.message); }
   };
   reader.readAsText(file);
   e.target.value = '';
 }
 
-function applyLoad(mode) {
-  document.getElementById('load-modal').classList.remove('active');
-  if (!pendingLoad) return;
-
-  var tl = document.getElementById('timeline');
-
-  if (mode === 'replace') {
-    tl.querySelectorAll('[data-tltype]').forEach(function(el){ el.remove(); });
-    var ph = tl.querySelector('.tl-empty');
-    if (ph) ph.remove();
-  }
-
-  function createElFromItem(item) {
-    if (item.type === 'clip' && item.clip) {
-      return makeTlItem(item.clip);
-    } else if (item.type === 'segment') {
-      return makeTlSegment(item.parent, item.segIdx, item.video_file, item.start, item.end);
-    } else if (item.type === 'transition') {
-      return makeTlTransition(item.name);
-    } else if (item.type === 'mute') {
-      return makeTlMute(true);
-    } else if (item.type === 'unmute') {
-      return makeTlMute(false);
-    } else if (item.type === 'placeholder') {
-      return makeTlPlaceholder(item.duration || 5, item.color || 'black');
-    } else if (item.type === 'music') {
-      var el = makeTlMusic(item.name);
-      el.dataset.volume = item.volume || 0;
-      var bars = el.querySelectorAll('.vol-bar');
-      bars.forEach(function(b) {
-        var bl = parseInt(b.dataset.level);
-        b.classList.toggle('active', bl <= (item.volume || 0));
+function loadOldTimeline(timeline) {
+  /* Convert old flat format to new multi-track */
+  videoItems = []; soundItems = []; textItems = [];
+  var pendTrans = null;
+  for (var i = 0; i < timeline.length; i++) {
+    var item = timeline[i];
+    if (item.type === 'transition') { pendTrans = item.name; }
+    else if (item.type === 'clip') {
+      var fname = (item.video_file || '').split('/').pop();
+      var clip = null;
+      if (item.id !== undefined) {
+        clip = allClips.find(function(c){return c.id===item.id});
+      }
+      if (!clip && item.video_file) {
+        clip = allClips.find(function(c){
+          return c.filename === fname && Math.abs(c.start - item.start) < 0.1;
+        });
+      }
+      var dur = clip ? clip.duration : (item.end - item.start);
+      videoItems.push({
+        clip: clip ? {id:clip.id, video_file:clip.video_file, start:clip.start, end:clip.end, filename:clip.filename}
+                    : {video_file:item.video_file, start:item.start, end:item.end, filename:fname},
+        duration: dur,
+        transition: videoItems.length > 0 ? (pendTrans || 'fade') : null,
       });
-      return el;
-    } else if (item.type === 'split') {
-      var splitEl = document.createElement('div');
-      splitEl.className = 'tl-split';
-      splitEl.dataset.tltype = 'split';
-      var uid = ++tlUid;
-      splitEl.dataset.uid = uid;
-
-      var topTrack = document.createElement('div');
-      topTrack.className = 'tl-split-track tl-split-top';
-      var bottomTrack = document.createElement('div');
-      bottomTrack.className = 'tl-split-track tl-split-bottom';
-
-      var topItems = item.top || [];
-      var bottomItems = item.bottom || [];
-
-      for (var ti = 0; ti < topItems.length; ti++) {
-        var te = createElFromItem(topItems[ti]);
-        if (te) topTrack.appendChild(te);
-      }
-      for (var bi = 0; bi < bottomItems.length; bi++) {
-        var be = createElFromItem(bottomItems[bi]);
-        if (be) bottomTrack.appendChild(be);
-      }
-
-      if (!topTrack.children.length) {
-        var sp = document.createElement('span');
-        sp.className = 'tl-split-empty';
-        sp.textContent = 'drag wide clips here';
-        topTrack.appendChild(sp);
-      }
-      if (!bottomTrack.children.length) {
-        var sp = document.createElement('span');
-        sp.className = 'tl-split-empty';
-        sp.textContent = 'drag wide clips here';
-        bottomTrack.appendChild(sp);
-      }
-
-      splitEl.appendChild(topTrack);
-      splitEl.appendChild(bottomTrack);
-      setupSplitTrack(topTrack, splitEl);
-      setupSplitTrack(bottomTrack, splitEl);
-      return splitEl;
-    }
-    return null;
-  }
-
-  var newEls = [];
-  for (var i = 0; i < pendingLoad.length; i++) {
-    var item = pendingLoad[i];
-    var el = createElFromItem(item);
-    if (el) newEls.push(el);
-  }
-
-  if (mode === 'prepend') {
-    var first = tl.querySelector('[data-tltype]');
-    for (var i = 0; i < newEls.length; i++) {
-      tl.insertBefore(newEls[i], first);
-    }
-  } else {
-    for (var i = 0; i < newEls.length; i++) {
-      tl.appendChild(newEls[i]);
+      pendTrans = null;
+    } else if (item.type === 'music' && item.name) {
+      addSoundBlock(item.name, item.volume || 3, 0, Math.max(5, getVideoDuration()));
     }
   }
+  syncTl();
+}
 
-  pendingLoad = null;
+function loadNewTimeline(data) {
+  videoItems = []; soundItems = []; textItems = [];
+  var vt = data.video_track || [];
+  var pendTrans = null;
+  for (var i = 0; i < vt.length; i++) {
+    var item = vt[i];
+    if (item.type === 'transition') { pendTrans = item.name; continue; }
+    if (item.type !== 'clip') continue;
+    var clip = null;
+    if (item.id !== undefined) clip = allClips.find(function(c){return c.id===item.id});
+    var dur = clip ? clip.duration : (item.end - item.start);
+    videoItems.push({
+      clip: clip ? {id:clip.id, video_file:clip.video_file, start:clip.start, end:clip.end, filename:clip.filename}
+                  : {video_file:item.video_file, start:item.start, end:item.end, filename:(item.video_file||'').split('/').pop()},
+      duration: dur,
+      transition: videoItems.length > 0 ? (pendTrans || null) : null,
+    });
+    pendTrans = null;
+  }
+  var st = data.sound_track || [];
+  for (var j = 0; j < st.length; j++) {
+    soundItems.push({id:++nextBlkId, name:st[j].name, volume:st[j].volume||3,
+      startTime:st[j].start_time||0, duration:st[j].duration||10, el:null});
+  }
+  var tt = data.text_overlays || [];
+  for (var k = 0; k < tt.length; k++) {
+    textItems.push({id:++nextBlkId, text:tt[k].text, startTime:tt[k].start_time||0,
+      endTime:tt[k].end_time||3, position:tt[k].position||'bottom',
+      fontsize:tt[k].fontsize||42, fontcolor:tt[k].fontcolor||'white',
+      bold:tt[k].bold||false, x_frac:tt[k].x_frac, y_frac:tt[k].y_frac, el:null});
+  }
   syncTl();
 }
 
 function cancelLoad() {
   document.getElementById('load-modal').classList.remove('active');
-  pendingLoad = null;
+}
+
+/* ─── Transition Picker ─── */
+var transPickerIdx = -1;
+
+function openTransPicker(idx) {
+  transPickerIdx = idx;
+  var current = videoItems[idx].transition || '';
+  var grid = document.getElementById('trans-picker-grid');
+  grid.innerHTML = '';
+  for (var i = 0; i < TRANSITION_LIST.length; i++) {
+    var name = TRANSITION_LIST[i];
+    var item = document.createElement('div');
+    item.className = 'tp-item' + (name === current ? ' current' : '');
+    item.textContent = name;
+    item.addEventListener('click', function(n) {
+      return function() { pickTransition(n); };
+    }(name));
+    grid.appendChild(item);
+  }
+  document.getElementById('trans-picker-modal').classList.add('active');
+}
+
+function pickTransition(name) {
+  if (transPickerIdx >= 0 && transPickerIdx < videoItems.length) {
+    videoItems[transPickerIdx].transition = name;
+  }
+  closeTransPicker();
+  syncTl();
+}
+
+function removeTransition() {
+  if (transPickerIdx >= 0 && transPickerIdx < videoItems.length) {
+    videoItems[transPickerIdx].transition = null;
+  }
+  closeTransPicker();
+  syncTl();
+}
+
+function closeTransPicker() {
+  document.getElementById('trans-picker-modal').classList.remove('active');
+  transPickerIdx = -1;
+}
+
+/* ─── Text Editor Modal ─── */
+var teState = {editId: null, startTime: 0, endTime: 3, boxes: [], selectedBox: null, dragging: false};
+var teNextBoxId = 0;
+
+function openTextEditor(existingItem, startTime, endTime) {
+  teState.editId = existingItem ? existingItem.id : null;
+  teState.startTime = startTime;
+  teState.endTime = endTime;
+  teState.boxes = [];
+  teState.selectedBox = null;
+
+  var canvas = document.getElementById('te-canvas');
+  canvas.innerHTML = '';
+
+  if (existingItem) {
+    /* Load existing item as a box */
+    teCreateBox({
+      text: existingItem.text,
+      fontsize: existingItem.fontsize || 42,
+      fontcolor: existingItem.fontcolor && existingItem.fontcolor !== 'white' ? existingItem.fontcolor : '#ffffff',
+      bold: existingItem.bold || false,
+      box_opacity: existingItem.box_opacity !== undefined ? existingItem.box_opacity : 0.5,
+      x_frac: existingItem.x_frac !== undefined ? existingItem.x_frac : 0.5,
+      y_frac: existingItem.y_frac !== undefined ? existingItem.y_frac : 0.5,
+    });
+  } else {
+    /* Create one default box */
+    teCreateBox({text: '', fontsize: 42, fontcolor: '#ffffff', bold: false, box_opacity: 0.5, x_frac: 0.5, y_frac: 0.5});
+  }
+
+  teSelectBox(teState.boxes[0]);
+  document.getElementById('text-editor-modal').classList.add('active');
+  document.getElementById('te-text-input').focus();
+
+  /* Live toolbar bindings — update selected box */
+  document.getElementById('te-text-input').oninput = teToolbarChanged;
+  document.getElementById('te-fontsize').onchange = teToolbarChanged;
+  document.getElementById('te-fontcolor').oninput = teToolbarChanged;
+  document.getElementById('te-bg-opacity').onchange = teToolbarChanged;
+}
+
+function teCreateBox(opts) {
+  var box = {
+    id: ++teNextBoxId,
+    text: opts.text || '',
+    fontsize: opts.fontsize || 42,
+    fontcolor: opts.fontcolor || '#ffffff',
+    bold: opts.bold || false,
+    box_opacity: opts.box_opacity !== undefined ? opts.box_opacity : 0.5,
+    x_frac: opts.x_frac !== undefined ? opts.x_frac : 0.5,
+    y_frac: opts.y_frac !== undefined ? opts.y_frac : 0.5,
+    el: null,
+  };
+
+  var canvas = document.getElementById('te-canvas');
+  var el = document.createElement('div');
+  el.className = 'te-box';
+  el.style.left = (box.x_frac * 100) + '%';
+  el.style.top = (box.y_frac * 100) + '%';
+  el.style.transform = 'translate(-50%,-50%)';
+
+  var rmBtn = document.createElement('button');
+  rmBtn.className = 'te-box-rm';
+  rmBtn.textContent = '\u00d7';
+  rmBtn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    teRemoveBox(box.id);
+  });
+  el.appendChild(rmBtn);
+
+  el.addEventListener('mousedown', function(e) {
+    if (e.target === rmBtn) return;
+    teSelectBox(box);
+  });
+
+  box.el = el;
+  teState.boxes.push(box);
+  canvas.appendChild(el);
+  teRenderBox(box);
+  teSetupBoxDrag(box);
+  return box;
+}
+
+function teRemoveBox(boxId) {
+  var box = teState.boxes.find(function(b){return b.id===boxId});
+  if (!box) return;
+  if (teState.boxes.length <= 1) return; /* keep at least one */
+  box.el.remove();
+  teState.boxes = teState.boxes.filter(function(b){return b.id !== boxId});
+  if (teState.selectedBox && teState.selectedBox.id === boxId) {
+    teSelectBox(teState.boxes[0]);
+  }
+}
+
+function teSelectBox(box) {
+  teState.selectedBox = box;
+  /* Update selection visuals */
+  teState.boxes.forEach(function(b) {
+    b.el.classList.toggle('te-selected', b.id === box.id);
+  });
+  /* Load box props into toolbar */
+  document.getElementById('te-text-input').value = box.text;
+  document.getElementById('te-fontsize').value = String(box.fontsize);
+  document.getElementById('te-fontcolor').value = box.fontcolor;
+  document.getElementById('te-bold-btn').classList.toggle('active', box.bold);
+  document.getElementById('te-bg-opacity').value = String(box.box_opacity);
+}
+
+function teToolbarChanged() {
+  var box = teState.selectedBox;
+  if (!box) return;
+  box.text = document.getElementById('te-text-input').value;
+  box.fontsize = parseInt(document.getElementById('te-fontsize').value) || 42;
+  box.fontcolor = document.getElementById('te-fontcolor').value;
+  box.bold = document.getElementById('te-bold-btn').classList.contains('active');
+  box.box_opacity = parseFloat(document.getElementById('te-bg-opacity').value);
+  teRenderBox(box);
+}
+
+function teRenderBox(box) {
+  var el = box.el;
+  var text = box.text || 'Text';
+  var previewSize = Math.round(box.fontsize / 3);
+
+  /* Preserve the remove button */
+  var rmBtn = el.querySelector('.te-box-rm');
+  el.textContent = text;
+  el.appendChild(rmBtn);
+
+  el.style.fontSize = previewSize + 'px';
+  el.style.color = box.fontcolor;
+  el.style.fontWeight = box.bold ? '700' : '400';
+
+  /* Background */
+  var existing = el.querySelector('.te-bg');
+  if (existing) existing.remove();
+  if (box.box_opacity > 0) {
+    var bg = document.createElement('div');
+    bg.className = 'te-bg';
+    bg.style.background = 'rgba(0,0,0,' + box.box_opacity + ')';
+    el.appendChild(bg);
+  }
+}
+
+function teToggleBold() {
+  document.getElementById('te-bold-btn').classList.toggle('active');
+  teToolbarChanged();
+}
+
+function teAddBox() {
+  var box = teCreateBox({
+    text: '',
+    fontsize: parseInt(document.getElementById('te-fontsize').value) || 42,
+    fontcolor: document.getElementById('te-fontcolor').value,
+    bold: document.getElementById('te-bold-btn').classList.contains('active'),
+    box_opacity: parseFloat(document.getElementById('te-bg-opacity').value),
+    x_frac: 0.5,
+    y_frac: 0.3 + Math.random() * 0.4,
+  });
+  teSelectBox(box);
+  document.getElementById('te-text-input').value = '';
+  document.getElementById('te-text-input').focus();
+}
+
+function teSetupBoxDrag(box) {
+  var canvas = document.getElementById('te-canvas');
+  var el = box.el;
+  var startX, startY, origLeft, origTop;
+
+  function onDown(e) {
+    if (e.target.classList.contains('te-box-rm')) return;
+    e.preventDefault();
+    teState.dragging = true;
+    teSelectBox(box);
+    var rect = canvas.getBoundingClientRect();
+    var touch = e.touches ? e.touches[0] : e;
+    startX = touch.clientX;
+    startY = touch.clientY;
+    origLeft = parseFloat(el.style.left) / 100 * rect.width;
+    origTop = parseFloat(el.style.top) / 100 * rect.height;
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.addEventListener('touchmove', onMove, {passive:false});
+    document.addEventListener('touchend', onUp);
+  }
+  function onMove(e) {
+    if (!teState.dragging) return;
+    e.preventDefault();
+    var touch = e.touches ? e.touches[0] : e;
+    var rect = canvas.getBoundingClientRect();
+    var dx = touch.clientX - startX;
+    var dy = touch.clientY - startY;
+    var newLeft = Math.max(0, Math.min(rect.width, origLeft + dx));
+    var newTop = Math.max(0, Math.min(rect.height, origTop + dy));
+    el.style.left = (newLeft / rect.width * 100) + '%';
+    el.style.top = (newTop / rect.height * 100) + '%';
+  }
+  function onUp() {
+    teState.dragging = false;
+    box.x_frac = parseFloat(el.style.left) / 100;
+    box.y_frac = parseFloat(el.style.top) / 100;
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    document.removeEventListener('touchmove', onMove);
+    document.removeEventListener('touchend', onUp);
+  }
+
+  el.addEventListener('mousedown', onDown);
+  el.addEventListener('touchstart', onDown);
+}
+
+function applyTextEditor() {
+  /* Collect all boxes with non-empty text */
+  var validBoxes = teState.boxes.filter(function(b){return b.text.trim()});
+  if (!validBoxes.length) { alert('Enter text in at least one box'); return; }
+
+  if (teState.editId !== null) {
+    /* Editing: update the first box into the existing item, add rest as new */
+    var first = validBoxes[0];
+    updateTextItem(teState.editId, {
+      text: first.text.trim(),
+      fontsize: first.fontsize,
+      fontcolor: first.fontcolor,
+      bold: first.bold,
+      box_opacity: first.box_opacity,
+      x_frac: Math.max(0.05, Math.min(0.95, first.x_frac)),
+      y_frac: Math.max(0.05, Math.min(0.95, first.y_frac)),
+      startTime: teState.startTime, endTime: teState.endTime,
+    });
+    for (var i = 1; i < validBoxes.length; i++) {
+      var b = validBoxes[i];
+      addTextBlock({
+        text: b.text.trim(), fontsize: b.fontsize, fontcolor: b.fontcolor,
+        bold: b.bold, box_opacity: b.box_opacity,
+        x_frac: Math.max(0.05, Math.min(0.95, b.x_frac)),
+        y_frac: Math.max(0.05, Math.min(0.95, b.y_frac)),
+        startTime: teState.startTime, endTime: teState.endTime,
+      });
+    }
+  } else {
+    /* New: add each box as a separate text item */
+    for (var j = 0; j < validBoxes.length; j++) {
+      var bx = validBoxes[j];
+      addTextBlock({
+        text: bx.text.trim(), fontsize: bx.fontsize, fontcolor: bx.fontcolor,
+        bold: bx.bold, box_opacity: bx.box_opacity,
+        x_frac: Math.max(0.05, Math.min(0.95, bx.x_frac)),
+        y_frac: Math.max(0.05, Math.min(0.95, bx.y_frac)),
+        startTime: teState.startTime, endTime: teState.endTime,
+      });
+    }
+  }
+  closeTextEditor();
+}
+
+function closeTextEditor() {
+  document.getElementById('text-editor-modal').classList.remove('active');
+  document.getElementById('te-canvas').innerHTML = '';
+  teState = {editId: null, startTime: 0, endTime: 3, boxes: [], selectedBox: null, dragging: false};
 }
 
 init();
+
+// -- Scene preview playback --
+function playScene(overlayEl, sceneId) {
+  var card = overlayEl.closest('.clip-card');
+  if (!card || card.querySelector('.scene-video')) return;
+  var video = document.createElement('video');
+  video.className = 'scene-video';
+  video.src = '/rate/api/clip/' + sceneId;
+  video.autoplay = true;
+  video.loop = true;
+  video.muted = false;
+  video.playsInline = true;
+  card.appendChild(video);
+  overlayEl.style.display = 'none';
+  video.play().catch(function(){});
+  function stopPreview() {
+    card.removeEventListener('mouseleave', stopPreview);
+    video.pause();
+    video.src = '';
+    video.remove();
+    overlayEl.style.display = '';
+  }
+  card.addEventListener('mouseleave', stopPreview);
+}
 
 // -- Hover thumbnail cycling --
 var hoverState = {card:null, interval:null, origSrc:null};
