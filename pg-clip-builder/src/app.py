@@ -425,6 +425,9 @@ def logo():
     return "", 404
 
 
+REPO_HTTPS = "https://github.com/paxlucta/peace-grappler.git"
+
+
 @app.route("/api/update", methods=["POST"])
 def check_for_updates():
     """Pull latest code from git. Werkzeug reloader restarts if .py files changed."""
@@ -436,7 +439,49 @@ def check_for_updates():
         ).stdout.strip()
 
         if not git_root:
-            return jsonify({"status": "error", "message": "Not a git repository"})
+            # Not a git repo — bootstrap one so updates work going forward
+            git_root = str(ROOT_DIR.parent)  # peace-grappler/ level
+            subprocess.run(
+                ["git", "init"], cwd=git_root,
+                capture_output=True, timeout=10,
+            )
+            subprocess.run(
+                ["git", "remote", "add", "origin", REPO_HTTPS],
+                cwd=git_root, capture_output=True, timeout=10,
+            )
+            subprocess.run(
+                ["git", "fetch", "origin"],
+                cwd=git_root, capture_output=True, timeout=30,
+            )
+            # Set the current state as tracking main
+            subprocess.run(
+                ["git", "checkout", "-b", "main"],
+                cwd=git_root, capture_output=True, timeout=10,
+            )
+            subprocess.run(
+                ["git", "branch", "--set-upstream-to=origin/main", "main"],
+                cwd=git_root, capture_output=True, timeout=10,
+            )
+            # Reset to match remote (picks up latest code)
+            result = subprocess.run(
+                ["git", "reset", "--hard", "origin/main"],
+                cwd=git_root, capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode != 0:
+                return jsonify({"status": "error",
+                                "message": "Bootstrap failed: " + result.stderr.strip()})
+            return jsonify({"status": "updated", "from": "initial", "to": "latest"})
+
+        # Ensure remote uses HTTPS (SSH won't work without keys)
+        cur_remote = subprocess.run(
+            ["git", "config", "--get", "remote.origin.url"],
+            capture_output=True, text=True, cwd=git_root, timeout=10,
+        ).stdout.strip()
+        if cur_remote.startswith("git@"):
+            subprocess.run(
+                ["git", "remote", "set-url", "origin", REPO_HTTPS],
+                cwd=git_root, capture_output=True, timeout=10,
+            )
 
         # Fetch latest
         fetch = subprocess.run(
