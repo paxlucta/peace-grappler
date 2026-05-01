@@ -294,6 +294,14 @@ def api_open():
     return jsonify({"ok": True})
 
 
+@clip_builder_bp.route("/api/serve-video")
+def api_serve_video():
+    path = request.args.get("path", "")
+    if path and os.path.exists(path) and str(OUTPUT_DIR) in os.path.abspath(path):
+        return send_file(os.path.abspath(path), mimetype="video/mp4")
+    return "", 404
+
+
 @clip_builder_bp.route("/api/hide", methods=["POST"])
 def api_hide():
     data = request.json
@@ -651,16 +659,20 @@ def _generate_multitrack(data):
     total_dur = int(sum(c.get("duration", 0) for c in clips))
     out_file = date_dir / f"hl-{total_dur}-{counter}.mp4"
 
+    include_intro = data.get("include_intro", True)
+    include_outro = data.get("include_outro", True)
+
     with tempfile.TemporaryDirectory() as tmp:
         clip_paths = []
         intro_count = 0
 
-        intro = find_asset("intro")
-        if intro:
-            intro_norm = os.path.join(tmp, "intro_norm.mp4")
-            if normalize_clip(str(intro), intro_norm):
-                clip_paths.append(intro_norm)
-                intro_count = 1
+        if include_intro:
+            intro = find_asset("intro")
+            if intro:
+                intro_norm = os.path.join(tmp, "intro_norm.mp4")
+                if normalize_clip(str(intro), intro_norm):
+                    clip_paths.append(intro_norm)
+                    intro_count = 1
 
         for i, clip in enumerate(clips):
             clip_out = os.path.join(tmp, f"clip_{i:03d}.mp4")
@@ -669,12 +681,13 @@ def _generate_multitrack(data):
                 clip_paths.append(clip_out)
 
         outro_added = False
-        outro = find_asset("outro")
-        if outro:
-            outro_norm = os.path.join(tmp, "outro_norm.mp4")
-            if normalize_clip(str(outro), outro_norm):
-                clip_paths.append(outro_norm)
-                outro_added = True
+        if include_outro:
+            outro = find_asset("outro")
+            if outro:
+                outro_norm = os.path.join(tmp, "outro_norm.mp4")
+                if normalize_clip(str(outro), outro_norm):
+                    clip_paths.append(outro_norm)
+                    outro_added = True
 
         if len(clip_paths) < 1:
             return jsonify({"error": "No clips could be extracted"}), 500
@@ -738,15 +751,26 @@ def _generate_multitrack(data):
                                            with_music, full_segments):
                         assembled = with_music
 
-        # Text overlays
+        # Text overlays — offset by intro duration so overlays
+        # only appear on user clips, not on intro/outro
+        intro_offset = 0.0
+        if intro_count:
+            intro_offset = get_video_duration(clip_paths[0])
+        outro_dur = 0.0
+        if outro_added:
+            outro_dur = get_video_duration(clip_paths[-1])
+
         if text_overlays:
             overlays = []
             for t in text_overlays:
                 if t.get("text", "").strip():
+                    raw_start = t.get("start_time", 0)
+                    raw_end = t.get("end_time", 3)
                     ov = {
                         "text": t["text"],
-                        "start_time": t.get("start_time", 0),
-                        "end_time": t.get("end_time", 3),
+                        "start_time": raw_start + intro_offset,
+                        "end_time": min(raw_end + intro_offset,
+                                        video_dur - outro_dur),
                         "position": t.get("position", "bottom"),
                         "fontsize": t.get("fontsize", 42),
                         "fontcolor": t.get("fontcolor", "white"),
@@ -755,8 +779,15 @@ def _generate_multitrack(data):
                     if "x_frac" in t and "y_frac" in t:
                         ov["x_frac"] = t["x_frac"]
                         ov["y_frac"] = t["y_frac"]
+                    if "w_frac" in t and "h_frac" in t:
+                        ov["w_frac"] = t["w_frac"]
+                        ov["h_frac"] = t["h_frac"]
                     if t.get("bold"):
                         ov["bold"] = True
+                    if t.get("italic"):
+                        ov["italic"] = True
+                    if t.get("bgcolor"):
+                        ov["bgcolor"] = t["bgcolor"]
                     overlays.append(ov)
             if overlays:
                 with_text = os.path.join(tmp, "with_text.mp4")
@@ -826,7 +857,7 @@ nav a:hover{color:#fff;border-color:#888}
 nav a.active{color:#e53935;border-color:#e53935}
 
 /* -- Main grid -- */
-main{flex:1;overflow-y:auto;padding:12px}
+main{flex:1;overflow-y:auto;padding:12px;min-height:0}
 #clip-grid{
   display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;
 }
@@ -838,6 +869,12 @@ main{flex:1;overflow-y:auto;padding:12px}
 .clip-card:active{cursor:grabbing}
 .clip-card.in-tl{opacity:.3;pointer-events:none}
 .clip-card.sortable-ghost{opacity:.4}
+#drag-preview{
+  position:absolute;top:-9999px;left:-9999px;
+  width:70px;height:50px;border-radius:4px;overflow:hidden;
+  pointer-events:none;
+}
+#drag-preview img{width:100%;height:100%;object-fit:cover;display:block}
 .clip-card .thumb{
   width:100%;aspect-ratio:9/16;object-fit:cover;display:block;background:#111;
 }
@@ -889,11 +926,11 @@ main{flex:1;overflow-y:auto;padding:12px}
 /* -- Footer / Timeline -- */
 footer{
   background:#141414;border-top:2px solid #e53935;
-  padding:10px 16px 12px;flex-shrink:0;
+  padding:10px 16px 31px;flex-shrink:0;overflow-y:auto;
 }
 .tl-hdr{
   display:flex;justify-content:space-between;align-items:center;
-  margin-bottom:8px;font-size:13px;
+  margin-bottom:4px;font-size:13px;
 }
 .tl-hdr .lbl{color:#e53935;font-weight:600}
 .tl-hdr .tot{color:#888}
@@ -958,7 +995,7 @@ footer{
 .track-block .blk-rm{
   position:absolute;top:1px;right:2px;
   background:none;border:none;color:inherit;opacity:.4;
-  font-size:12px;cursor:pointer;padding:0;line-height:1;
+  font-size:24px;cursor:pointer;padding:0;line-height:1;
 }
 .track-block .blk-rm:hover{opacity:1}
 .track-block .resize-handle{
@@ -969,34 +1006,45 @@ footer{
 
 /* Video blocks */
 .vblock{background:#1e1e1e;border:1px solid #333;color:#ccc;z-index:1}
-.vblock.sortable-ghost{
-  opacity:0 !important;width:4px !important;min-width:4px !important;
-  background:#fff !important;border:none !important;border-radius:2px !important;
-  padding:0 !important;overflow:hidden !important;z-index:10;
+/* Insertion indicator */
+#vt-insert-bar{
+  position:absolute;top:2px;width:3px;height:calc(100% - 4px);
+  background:#fff;border-radius:2px;z-index:10000;pointer-events:none;
+  display:none;box-shadow:0 0 8px rgba(255,255,255,.7);
 }
-.vblock.sortable-ghost *{display:none !important}
-/* Also show bar for cards being dragged into the track */
-#video-track .clip-card.sortable-ghost{
-  opacity:0 !important;width:4px !important;min-width:4px !important;max-width:4px !important;
-  height:calc(100% - 4px) !important;background:#fff !important;
-  border:none !important;border-radius:2px !important;padding:0 !important;
-  overflow:hidden !important;position:absolute;top:2px;z-index:10;
-}
-#video-track .clip-card.sortable-ghost *{display:none !important}
 .vblock .vblock-thumb{
   position:absolute;left:0;top:0;width:100%;height:100%;
   object-fit:cover;opacity:.5;border-radius:4px;
 }
-.vblock .blk-label{position:relative;z-index:1;text-shadow:0 1px 3px #000}
+.vblock .blk-label{
+  position:absolute;top:4px;right:4px;z-index:1;
+  background:rgba(0,0,0,.7);padding:1px 6px;border-radius:3px;
+  font-size:10px;text-shadow:none;color:#fff;line-height:18px;
+}
+.vblock .blk-rm{
+  position:absolute;top:4px;right:4px;z-index:2;
+  color:#fff;opacity:.7;font-size:20px;line-height:18px;
+  margin-left:4px;display:none;
+}
+.vblock:hover .blk-rm{display:block}
+.vblock:hover .blk-label{right:24px}
+.vblock-wide{
+  position:absolute;top:4px;left:4px;z-index:1;
+  width:16px;height:11px;border:1.5px solid rgba(255,255,255,.8);border-radius:2px;
+}
+.vblock-wide::after{
+  content:'';position:absolute;top:1.5px;left:3px;
+  width:8px;height:5px;background:rgba(255,255,255,.8);border-radius:1px;
+}
 
 /* Sound blocks */
 .sblock{border:1px solid rgba(255,255,255,.15);color:#fff}
 .sblock .blk-vol{
-  display:flex;gap:1px;align-items:flex-end;height:12px;
+  display:flex;gap:2px;align-items:flex-end;height:18px;
   margin-left:auto;flex-shrink:0;
 }
 .sblock .blk-vol .vb{
-  width:4px;border-radius:1px;cursor:pointer;opacity:.35;
+  width:6px;border-radius:1px;cursor:pointer;opacity:.35;
 }
 .sblock .blk-vol .vb.active{opacity:1}
 
@@ -1006,37 +1054,13 @@ footer{
 /* Transition markers */
 .trans-marker{
   position:absolute;top:50%;transform:translate(-50%,-50%);
-  background:#333;border:1px solid #555;border-radius:4px;
-  padding:1px 4px;font-size:8px;color:#aaa;z-index:2;
+  background:#333;border:1px solid #555;border-radius:6px;
+  padding:4px 8px;font-size:11px;color:#aaa;z-index:2;
   cursor:pointer;white-space:nowrap;font-weight:600;
 }
 .trans-marker:hover{background:#444;color:#fff}
 
-/* -- Source rows -- */
-.source-row{
-  display:flex;gap:16px;margin-top:8px;flex-wrap:wrap;align-items:flex-start;
-}
-.source-group{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.source-group .row-label{font-size:11px;color:#666;flex-shrink:0;font-weight:600;text-transform:uppercase;letter-spacing:0.5px}
-.music-pill{
-  display:inline-flex;align-items:center;gap:4px;
-  padding:4px 10px;border-radius:12px;font-size:11px;font-weight:600;
-  cursor:grab;user-select:none;white-space:nowrap;
-  transition:transform .15s,box-shadow .15s;
-}
-.music-pill:hover{transform:translateY(-1px);box-shadow:0 2px 8px rgba(0,0,0,.4)}
-.music-pill:active{cursor:grabbing}
-.music-pill.sortable-ghost{opacity:.4}
-.music-pill .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
-.trans-pill{
-  display:inline-flex;align-items:center;
-  padding:3px 8px;border-radius:10px;font-size:10px;font-weight:600;
-  cursor:pointer;user-select:none;white-space:nowrap;
-  background:#222;color:#888;border:1px solid #333;
-  transition:all .15s;
-}
-.trans-pill:hover{color:#fff;border-color:#666}
-.trans-pill.active{background:#e53935;color:#fff;border-color:#e53935}
+/* (source rows removed) */
 
 /* -- Context menu -- */
 .ctx-menu{
@@ -1092,7 +1116,9 @@ footer{
 }
 #clear-btn:hover{color:#e53935;border-color:#e53935}
 
-.controls{display:flex;align-items:center;gap:12px;margin-top:10px}
+.controls{display:flex;align-items:center;gap:12px;margin-top:6px}
+.tl-check{font-size:12px;color:#888;cursor:pointer;display:flex;align-items:center;gap:4px;user-select:none}
+.tl-check input{accent-color:#e53935;cursor:pointer}
 #gen-btn{
   background:#e53935;color:#fff;border:none;padding:8px 20px;font-weight:600;
   border-radius:6px;margin-left:auto;transition:background .2s;
@@ -1144,6 +1170,18 @@ footer{
 #trans-picker-grid .tp-item:hover{color:#fff;border-color:#666;background:#333}
 #trans-picker-grid .tp-item.current{background:#e53935;color:#fff;border-color:#e53935}
 
+/* -- Music Picker -- */
+#music-picker-list{
+  display:flex;flex-direction:column;gap:6px;margin-top:12px;max-height:300px;overflow-y:auto;
+}
+#music-picker-list .mp-item{
+  padding:8px 14px;border-radius:6px;font-size:13px;font-weight:600;
+  cursor:pointer;display:flex;align-items:center;gap:8px;
+  transition:all .15s;
+}
+#music-picker-list .mp-item:hover{filter:brightness(1.3)}
+#music-picker-list .mp-item .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+
 /* -- Text Editor Modal -- */
 #text-editor-modal .te-container{
   display:flex;flex-direction:column;
@@ -1185,16 +1223,16 @@ footer{
   position:absolute;
   color:#fff;font-size:14px;font-weight:400;
   text-align:center;cursor:grab;user-select:none;
-  padding:4px 8px;border-radius:4px;
-  white-space:pre-wrap;word-break:break-word;max-width:90%;
+  padding:0;border-radius:4px;
   text-shadow:0 2px 6px rgba(0,0,0,.8);
-  pointer-events:auto;
+  pointer-events:auto;width:200px;height:60px;
+  display:flex;align-items:center;justify-content:center;
 }
 .te-box:hover{outline:1px dashed rgba(255,255,255,.3)}
 .te-box.te-selected{outline:2px solid #e53935}
 .te-box:active{cursor:grabbing}
 .te-box .te-bg{
-  position:absolute;inset:-4px -8px;border-radius:4px;
+  position:absolute;inset:-5px;border-radius:4px;
   background:rgba(0,0,0,0.5);z-index:-1;
 }
 .te-box .te-box-rm{
@@ -1204,6 +1242,18 @@ footer{
   display:none;padding:0;z-index:2;
 }
 .te-box:hover .te-box-rm{display:block}
+.te-box .te-resize{
+  position:absolute;bottom:-3px;right:-3px;width:12px;height:12px;
+  cursor:nwse-resize;z-index:3;display:none;
+}
+.te-box .te-resize::before{
+  content:'';position:absolute;bottom:2px;right:2px;
+  width:8px;height:8px;
+  border-right:2px solid rgba(255,255,255,.6);
+  border-bottom:2px solid rgba(255,255,255,.6);
+}
+.te-box:hover .te-resize,.te-box.te-selected .te-resize{display:block}
+.te-text-span{display:block;outline:none;word-break:break-word;line-height:1.15;white-space:pre-wrap;padding:2px}
 .te-footer{
   display:flex;justify-content:flex-end;gap:10px;
   padding:12px 16px;background:#222;border-top:1px solid #333;
@@ -1250,24 +1300,16 @@ footer{
     <div id="tl-grid">
       <div id="time-ruler"></div>
       <div class="track-label">SND</div>
-      <div id="sound-track" class="track"><span class="track-empty">drag music here</span></div>
+      <div id="sound-track" class="track"><span class="track-empty">click to add music</span></div>
       <div class="track-label">TXT</div>
       <div id="text-track" class="track"><span class="track-empty">click to add text overlay</span></div>
       <div class="track-label">VID</div>
-      <div id="video-track" class="track"><span class="track-empty">drag clips here</span></div>
-    </div>
-  </div>
-  <div class="source-row">
-    <div class="source-group">
-      <span class="row-label">Music:</span>
-      <div id="music-labels"></div>
-    </div>
-    <div class="source-group">
-      <span class="row-label">Transition:</span>
-      <div id="trans-labels"></div>
+      <div id="video-track" class="track"><span class="track-empty">drag clips here</span><div id="vt-insert-bar"></div></div>
     </div>
   </div>
   <div class="controls">
+    <label class="tl-check"><input type="checkbox" id="include-intro" checked/> Include Intro Video</label>
+    <label class="tl-check"><input type="checkbox" id="include-outro" checked/> Include Outro Video</label>
     <button id="gen-btn" onclick="generateVideo()">Generate Video</button>
   </div>
 </footer>
@@ -1278,10 +1320,10 @@ footer{
 </div>
 
 <div class="overlay" id="result-modal">
-  <div class="modal">
-    <h2>Video Ready!</h2>
-    <p id="result-info"></p>
-    <button onclick="openResult()">Open Video</button>
+  <div class="modal" style="max-width:400px">
+    <video id="result-video" controls autoplay playsinline style="width:100%;max-height:70vh;border-radius:8px;background:#000;margin-bottom:12px"></video>
+    <p id="result-info" style="font-size:12px"></p>
+    <button onclick="openResult()">Open in Finder</button>
     <button onclick="closeResult()">Close</button>
   </div>
 </div>
@@ -1320,35 +1362,30 @@ footer{
   </div>
 </div>
 
+<div class="overlay" id="music-picker-modal">
+  <div class="modal" style="max-width:400px">
+    <h2 style="color:#4caf50">Add Music</h2>
+    <div id="music-picker-list"></div>
+    <div style="margin-top:16px">
+      <button onclick="closeMusicPicker()">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay" id="text-editor-modal">
   <div class="te-container">
     <div class="te-toolbar">
-      <input type="text" id="te-text-input" placeholder="Enter text..." spellcheck="false"/>
       <button class="te-btn te-add-btn" onclick="teAddBox()" title="Add text box">+</button>
       <div class="te-sep"></div>
-      <label class="te-label">Size</label>
-      <select id="te-fontsize">
-        <option value="24">24</option>
-        <option value="32">32</option>
-        <option value="42" selected>42</option>
-        <option value="56">56</option>
-        <option value="72">72</option>
-        <option value="96">96</option>
-      </select>
-      <div class="te-sep"></div>
-      <label class="te-label">Color</label>
+      <label class="te-label">Text</label>
       <input type="color" id="te-fontcolor" value="#ffffff"/>
       <div class="te-sep"></div>
       <button id="te-bold-btn" class="te-btn" onclick="teToggleBold()"><b>B</b></button>
+      <button id="te-italic-btn" class="te-btn" onclick="teToggleItalic()"><i>I</i></button>
       <div class="te-sep"></div>
       <label class="te-label">BG</label>
-      <select id="te-bg-opacity">
-        <option value="0">None</option>
-        <option value="0.3">Light</option>
-        <option value="0.5" selected>Medium</option>
-        <option value="0.7">Dark</option>
-        <option value="1">Solid</option>
-      </select>
+      <input type="color" id="te-bgcolor" value="#000000"/>
+      <button id="te-bg-none-btn" class="te-btn" onclick="teToggleBg()" title="Toggle background">&#8416;</button>
     </div>
     <div class="te-canvas-wrap">
       <div id="te-canvas"></div>
@@ -1401,8 +1438,6 @@ async function init() {
   for (var i = 0; i < musicList.length; i++) {
     musicColorMap[musicList[i].name] = MUSIC_COLORS[i % MUSIC_COLORS.length];
   }
-  renderMusicLabels();
-  renderTransitionLabels();
   setupTracks();
 }
 
@@ -1518,6 +1553,7 @@ function renderVideoTrack() {
     var thumbUrl = vi.clip.id !== undefined ? '/api/thumbnail/' + vi.clip.id : '';
     blk.innerHTML = (thumbUrl ? '<img class="vblock-thumb" src="' + thumbUrl + '"/>' : '')
       + '<span class="blk-label">' + vi.duration.toFixed(1) + 's</span>'
+      + (vi.clip.wide ? '<span class="vblock-wide"></span>' : '')
       + '<button class="blk-rm" onclick="event.stopPropagation();removeVideoItem(' + i + ')">&times;</button>';
     blk.dataset.idx = i;
     track.appendChild(blk);
@@ -1556,7 +1592,7 @@ function renderSoundTrack() {
     blk.style.top = (si._row * rowH) + '%';
     blk.style.height = rowH + '%';
     var volBars = '';
-    var heights = [3,5,7,9,12];
+    var heights = [5,8,11,14,18];
     for (var v = 0; v < 5; v++) {
       volBars += '<div class="vb' + (v < si.volume ? ' active' : '') + '" data-lv="' + (v+1) + '"'
         + ' style="height:' + heights[v] + 'px;background:' + col.dot + '"'
@@ -1597,16 +1633,27 @@ function renderTextTrack() {
     var rowH = rows.length > 1 ? (100 / rows.length) : 100;
     blk.style.top = (ti._row * rowH) + '%';
     blk.style.height = rowH + '%';
-    blk.innerHTML = '<span class="blk-label">' + ti.text + '</span>'
+    blk.innerHTML = '<span class="blk-label">' + (ti.label || ti.text || '') + '</span>'
       + '<button class="blk-rm" onclick="event.stopPropagation();removeTextItem(' + ti.id + ')">&times;</button>'
       + '<div class="resize-handle"></div>';
     blk.dataset.blkId = ti.id;
-    blk.addEventListener('dblclick', function(item) {
-      return function(e) {
-        e.stopPropagation();
-        openTextEditor(item, item.startTime, item.endTime);
-      };
-    }(ti));
+    /* Single-click to edit (track drag vs click via movement threshold) */
+    (function(item, block) {
+      var downX, downY, wasDrag = false;
+      block.addEventListener('mousedown', function(e) {
+        downX = e.clientX; downY = e.clientY; wasDrag = false;
+      });
+      block.addEventListener('mousemove', function(e) {
+        if (downX !== undefined && (Math.abs(e.clientX - downX) > 4 || Math.abs(e.clientY - downY) > 4)) wasDrag = true;
+      });
+      block.addEventListener('mouseup', function(e) {
+        if (!wasDrag && !e.target.closest('.blk-rm') && !e.target.closest('.resize-handle')) {
+          e.stopPropagation();
+          openTextEditor(item, item.startTime, item.endTime);
+        }
+        downX = undefined;
+      });
+    })(ti, blk);
     ti.el = blk;
     makeDraggable(blk, ti, 'text');
     track.appendChild(blk);
@@ -1683,7 +1730,7 @@ function addVideoItem(clip) {
   var dur = clip.duration;
   var trans = videoItems.length > 0 ? selectedTransition : null;
   videoItems.push({
-    clip: {id: clip.id, video_file: clip.video_file, start: clip.start, end: clip.end, filename: clip.filename},
+    clip: {id: clip.id, video_file: clip.video_file, start: clip.start, end: clip.end, filename: clip.filename, wide: clip.wide},
     duration: dur,
     transition: trans,
   });
@@ -1709,33 +1756,26 @@ function removeSoundItem(id) {
   syncTl();
 }
 
-function addTextBlock(opts) {
+function addTextGroup(boxes, startTime, endTime) {
+  /* boxes: array of {text,fontsize,fontcolor,bold,box_opacity,x_frac,y_frac} */
+  var label = boxes.map(function(b){return b.text}).join(' / ');
   textItems.push({
-    id: ++nextBlkId, text: opts.text,
-    startTime: opts.startTime, endTime: opts.endTime,
-    position: opts.position || 'bottom',
-    fontsize: opts.fontsize || 42,
-    fontcolor: opts.fontcolor || 'white',
-    bold: opts.bold || false,
-    box_opacity: opts.box_opacity !== undefined ? opts.box_opacity : 0.5,
-    x_frac: opts.x_frac,
-    y_frac: opts.y_frac,
+    id: ++nextBlkId,
+    label: label,
+    boxes: boxes,
+    startTime: startTime, endTime: endTime,
     el: null,
   });
   syncTl();
 }
 
-function updateTextItem(id, opts) {
+function updateTextGroup(id, boxes, startTime, endTime) {
   var item = textItems.find(function(t){return t.id===id});
   if (!item) return;
-  item.text = opts.text;
-  item.fontsize = opts.fontsize || 42;
-  item.fontcolor = opts.fontcolor || 'white';
-  item.bold = opts.bold || false;
-  item.box_opacity = opts.box_opacity !== undefined ? opts.box_opacity : 0.5;
-  item.x_frac = opts.x_frac;
-  item.y_frac = opts.y_frac;
-  item.position = opts.position || 'bottom';
+  item.boxes = boxes;
+  item.label = boxes.map(function(b){return b.text}).join(' / ');
+  item.startTime = startTime;
+  item.endTime = endTime;
   syncTl();
 }
 
@@ -1779,6 +1819,39 @@ function setupTracks() {
       videoItems = reordered;
       syncTl();
     },
+  });
+
+  /* Insertion bar for video track */
+  var insertBar = document.getElementById('vt-insert-bar');
+  vt.addEventListener('dragover', function(e) {
+    var rect = vt.getBoundingClientRect();
+    var mouseX = e.clientX - rect.left;
+    /* Find closest gap between blocks */
+    var bestX = 0;
+    var x = 0;
+    for (var i = 0; i < videoItems.length; i++) {
+      var blockEnd = x + videoItems[i].duration * CELL_W;
+      if (Math.abs(mouseX - x) < Math.abs(mouseX - bestX)) bestX = x;
+      if (Math.abs(mouseX - blockEnd) < Math.abs(mouseX - bestX)) bestX = blockEnd;
+      x = blockEnd;
+    }
+    if (Math.abs(mouseX - x) < Math.abs(mouseX - bestX)) bestX = x;
+    insertBar.style.left = bestX + 'px';
+    insertBar.style.display = 'block';
+  });
+  vt.addEventListener('dragleave', function(e) {
+    if (!vt.contains(e.relatedTarget)) insertBar.style.display = 'none';
+  });
+  vt.addEventListener('drop', function() { insertBar.style.display = 'none'; });
+  document.addEventListener('dragend', function() { insertBar.style.display = 'none'; });
+
+  /* Sound track: click to add music */
+  document.getElementById('sound-track').addEventListener('click', function(e) {
+    if (e.target.closest('.sblock')) return;
+    var rect = this.getBoundingClientRect();
+    var x = e.clientX - rect.left + this.parentElement.parentElement.scrollLeft;
+    var startSec = Math.max(0, Math.round((x - 50) / CELL_W));
+    openMusicPicker(startSec);
   });
 
   /* Text track: click to add */
@@ -1844,6 +1917,21 @@ function renderGrid() {
     sort: false,
     animation: 150,
     filter: '.in-tl,.ignored',
+    setData: function(dataTransfer, el) {
+      /* Create small drag image near cursor */
+      var img = el.querySelector('.thumb');
+      if (img) {
+        var preview = document.getElementById('drag-preview');
+        if (!preview) {
+          preview = document.createElement('div');
+          preview.id = 'drag-preview';
+          preview.innerHTML = '<img/>';
+          document.body.appendChild(preview);
+        }
+        preview.querySelector('img').src = img.src;
+        dataTransfer.setDragImage(preview, 35, 25);
+      }
+    },
   });
 }
 
@@ -2010,15 +2098,27 @@ function buildTimeline() {
   var st = soundItems.map(function(s) {
     return {name:s.name, volume:s.volume, start_time:s.startTime, duration:s.duration};
   });
-  var tt = textItems.map(function(t) {
-    var o = {text:t.text, start_time:t.startTime, end_time:t.endTime,
-            position:t.position, fontsize:t.fontsize, fontcolor:t.fontcolor||'white',
-            box_opacity:t.box_opacity !== undefined ? t.box_opacity : 0.5};
-    if (t.x_frac !== undefined) { o.x_frac = t.x_frac; o.y_frac = t.y_frac; }
-    if (t.bold) o.bold = true;
-    return o;
-  });
-  return {video_track:vt, sound_track:st, text_overlays:tt};
+  var tt = [];
+  for (var ti = 0; ti < textItems.length; ti++) {
+    var tg = textItems[ti];
+    var boxes = tg.boxes || [{text:tg.text,fontsize:tg.fontsize,fontcolor:tg.fontcolor,
+      bold:tg.bold,box_opacity:tg.box_opacity,x_frac:tg.x_frac,y_frac:tg.y_frac}];
+    for (var bj = 0; bj < boxes.length; bj++) {
+      var bx = boxes[bj];
+      var o = {text:bx.text, start_time:tg.startTime, end_time:tg.endTime,
+              fontsize:bx.fontsize||42, fontcolor:bx.fontcolor||'white',
+              box_opacity:bx.box_opacity !== undefined ? bx.box_opacity : 0.5};
+      if (bx.x_frac !== undefined) { o.x_frac = bx.x_frac; o.y_frac = bx.y_frac; }
+      if (bx.w_frac) { o.w_frac = bx.w_frac; o.h_frac = bx.h_frac; }
+      if (bx.bold) o.bold = true;
+      if (bx.italic) o.italic = true;
+      if (bx.bgcolor) o.bgcolor = bx.bgcolor;
+      tt.push(o);
+    }
+  }
+  return {video_track:vt, sound_track:st, text_overlays:tt,
+    include_intro: document.getElementById('include-intro').checked,
+    include_outro: document.getElementById('include-outro').checked};
 }
 
 async function generateVideo() {
@@ -2042,8 +2142,12 @@ async function generateVideo() {
       alert('Error: ' + data.error);
     } else {
       resultPath = data.path;
+      var vid = document.getElementById('result-video');
+      vid.src = '/api/serve-video?path=' + encodeURIComponent(data.path);
+      vid.load();
+      vid.play().catch(function(){});
       document.getElementById('result-info').textContent =
-        'Duration: ' + data.duration + 's\n' + data.path;
+        data.duration + 's \u2014 ' + data.path;
       document.getElementById('result-modal').classList.add('active');
     }
   } catch (e) {
@@ -2065,6 +2169,8 @@ function openResult() {
 }
 
 function closeResult() {
+  var vid = document.getElementById('result-video');
+  vid.pause(); vid.src = '';
   document.getElementById('result-modal').classList.remove('active');
 }
 
@@ -2160,12 +2266,21 @@ function loadNewTimeline(data) {
     soundItems.push({id:++nextBlkId, name:st[j].name, volume:st[j].volume||3,
       startTime:st[j].start_time||0, duration:st[j].duration||10, el:null});
   }
+  /* Group loaded text overlays by matching start_time+end_time */
   var tt = data.text_overlays || [];
+  var ttGroups = {};
   for (var k = 0; k < tt.length; k++) {
-    textItems.push({id:++nextBlkId, text:tt[k].text, startTime:tt[k].start_time||0,
-      endTime:tt[k].end_time||3, position:tt[k].position||'bottom',
-      fontsize:tt[k].fontsize||42, fontcolor:tt[k].fontcolor||'white',
-      bold:tt[k].bold||false, x_frac:tt[k].x_frac, y_frac:tt[k].y_frac, el:null});
+    var key = (tt[k].start_time||0) + '_' + (tt[k].end_time||3);
+    if (!ttGroups[key]) ttGroups[key] = {startTime:tt[k].start_time||0, endTime:tt[k].end_time||3, boxes:[]};
+    ttGroups[key].boxes.push({text:tt[k].text, fontsize:tt[k].fontsize||42,
+      fontcolor:tt[k].fontcolor||'white', bold:tt[k].bold||false,
+      box_opacity:tt[k].box_opacity!==undefined?tt[k].box_opacity:0.5,
+      x_frac:tt[k].x_frac, y_frac:tt[k].y_frac});
+  }
+  for (var gk in ttGroups) {
+    var g = ttGroups[gk];
+    textItems.push({id:++nextBlkId, label:g.boxes.map(function(b){return b.text}).join(' / '),
+      boxes:g.boxes, startTime:g.startTime, endTime:g.endTime, el:null});
   }
   syncTl();
 }
@@ -2216,6 +2331,38 @@ function closeTransPicker() {
   transPickerIdx = -1;
 }
 
+/* ─── Music Picker ─── */
+var musicPickerStartSec = 0;
+
+function openMusicPicker(startSec) {
+  musicPickerStartSec = startSec;
+  var list = document.getElementById('music-picker-list');
+  list.innerHTML = '';
+  for (var i = 0; i < musicList.length; i++) {
+    var m = musicList[i];
+    var col = musicColorMap[m.name] || NO_MUSIC_COLOR;
+    var item = document.createElement('div');
+    item.className = 'mp-item';
+    item.style.background = col.bg;
+    item.style.color = col.fg;
+    item.innerHTML = '<span class="dot" style="background:' + col.dot + '"></span>' + m.name;
+    item.addEventListener('click', function(name) {
+      return function() { pickMusic(name); };
+    }(m.name));
+    list.appendChild(item);
+  }
+  document.getElementById('music-picker-modal').classList.add('active');
+}
+
+function pickMusic(name) {
+  addSoundBlock(name, 3, musicPickerStartSec, Math.max(5, getVideoDuration() - musicPickerStartSec));
+  closeMusicPicker();
+}
+
+function closeMusicPicker() {
+  document.getElementById('music-picker-modal').classList.remove('active');
+}
+
 /* ─── Text Editor Modal ─── */
 var teState = {editId: null, startTime: 0, endTime: 3, boxes: [], selectedBox: null, dragging: false};
 var teNextBoxId = 0;
@@ -2230,31 +2377,55 @@ function openTextEditor(existingItem, startTime, endTime) {
   var canvas = document.getElementById('te-canvas');
   canvas.innerHTML = '';
 
-  if (existingItem) {
-    /* Load existing item as a box */
-    teCreateBox({
+  /* Show modal FIRST so elements have layout dimensions */
+  document.getElementById('text-editor-modal').classList.add('active');
+
+  var boxOpts = [];
+  if (existingItem && existingItem.boxes && existingItem.boxes.length) {
+    for (var bi = 0; bi < existingItem.boxes.length; bi++) {
+      var eb = existingItem.boxes[bi];
+      boxOpts.push({
+        text: eb.text || '',
+        fontsize: eb.fontsize || 42,
+        fontcolor: eb.fontcolor && eb.fontcolor !== 'white' ? eb.fontcolor : '#ffffff',
+        bold: eb.bold || false,
+        italic: eb.italic || false,
+        bgcolor: eb.bgcolor || '#000000',
+        box_opacity: eb.box_opacity !== undefined ? eb.box_opacity : 0.5,
+        x_frac: eb.x_frac !== undefined ? eb.x_frac : 0.5,
+        y_frac: eb.y_frac !== undefined ? eb.y_frac : 0.5,
+        w_frac: eb.w_frac,
+        h_frac: eb.h_frac,
+      });
+    }
+  } else if (existingItem && existingItem.text) {
+    boxOpts.push({
       text: existingItem.text,
       fontsize: existingItem.fontsize || 42,
       fontcolor: existingItem.fontcolor && existingItem.fontcolor !== 'white' ? existingItem.fontcolor : '#ffffff',
       bold: existingItem.bold || false,
+      italic: existingItem.italic || false,
+      bgcolor: existingItem.bgcolor || '#000000',
       box_opacity: existingItem.box_opacity !== undefined ? existingItem.box_opacity : 0.5,
       x_frac: existingItem.x_frac !== undefined ? existingItem.x_frac : 0.5,
       y_frac: existingItem.y_frac !== undefined ? existingItem.y_frac : 0.5,
+      w_frac: existingItem.w_frac,
+      h_frac: existingItem.h_frac,
     });
   } else {
-    /* Create one default box */
-    teCreateBox({text: '', fontsize: 42, fontcolor: '#ffffff', bold: false, box_opacity: 0.5, x_frac: 0.5, y_frac: 0.5});
+    boxOpts.push({text: '', fontsize: 42, fontcolor: '#ffffff', bold: false, box_opacity: 0.5, x_frac: 0.5, y_frac: 0.5});
+  }
+
+  /* Create boxes now that modal is visible and has layout */
+  for (var boi = 0; boi < boxOpts.length; boi++) {
+    teCreateBox(boxOpts[boi]);
   }
 
   teSelectBox(teState.boxes[0]);
-  document.getElementById('text-editor-modal').classList.add('active');
-  document.getElementById('te-text-input').focus();
 
-  /* Live toolbar bindings — update selected box */
-  document.getElementById('te-text-input').oninput = teToolbarChanged;
-  document.getElementById('te-fontsize').onchange = teToolbarChanged;
+  /* Live toolbar bindings */
   document.getElementById('te-fontcolor').oninput = teToolbarChanged;
-  document.getElementById('te-bg-opacity').onchange = teToolbarChanged;
+  document.getElementById('te-bgcolor').oninput = teToolbarChanged;
 }
 
 function teCreateBox(opts) {
@@ -2264,6 +2435,8 @@ function teCreateBox(opts) {
     fontsize: opts.fontsize || 42,
     fontcolor: opts.fontcolor || '#ffffff',
     bold: opts.bold || false,
+    italic: opts.italic || false,
+    bgcolor: opts.bgcolor || '#000000',
     box_opacity: opts.box_opacity !== undefined ? opts.box_opacity : 0.5,
     x_frac: opts.x_frac !== undefined ? opts.x_frac : 0.5,
     y_frac: opts.y_frac !== undefined ? opts.y_frac : 0.5,
@@ -2271,11 +2444,15 @@ function teCreateBox(opts) {
   };
 
   var canvas = document.getElementById('te-canvas');
+  var cW = canvas.offsetWidth || 360;
+  var cH = canvas.offsetHeight || 640;
   var el = document.createElement('div');
   el.className = 'te-box';
   el.style.left = (box.x_frac * 100) + '%';
   el.style.top = (box.y_frac * 100) + '%';
   el.style.transform = 'translate(-50%,-50%)';
+  if (opts.w_frac) el.style.width = Math.round(opts.w_frac * cW) + 'px';
+  if (opts.h_frac) el.style.height = Math.round(opts.h_frac * cH) + 'px';
 
   var rmBtn = document.createElement('button');
   rmBtn.className = 'te-box-rm';
@@ -2286,9 +2463,18 @@ function teCreateBox(opts) {
   });
   el.appendChild(rmBtn);
 
+  var resizeHandle = document.createElement('div');
+  resizeHandle.className = 'te-resize';
+  el.appendChild(resizeHandle);
+
   el.addEventListener('mousedown', function(e) {
     if (e.target === rmBtn) return;
     teSelectBox(box);
+  });
+
+  el.addEventListener('dblclick', function(e) {
+    e.stopPropagation();
+    teEditBoxInline(box);
   });
 
   box.el = el;
@@ -2317,47 +2503,94 @@ function teSelectBox(box) {
     b.el.classList.toggle('te-selected', b.id === box.id);
   });
   /* Load box props into toolbar */
-  document.getElementById('te-text-input').value = box.text;
-  document.getElementById('te-fontsize').value = String(box.fontsize);
   document.getElementById('te-fontcolor').value = box.fontcolor;
   document.getElementById('te-bold-btn').classList.toggle('active', box.bold);
-  document.getElementById('te-bg-opacity').value = String(box.box_opacity);
+  document.getElementById('te-italic-btn').classList.toggle('active', box.italic);
+  document.getElementById('te-bgcolor').value = box.bgcolor || '#000000';
+  document.getElementById('te-bg-none-btn').classList.toggle('active', box.box_opacity > 0);
 }
 
 function teToolbarChanged() {
   var box = teState.selectedBox;
   if (!box) return;
-  box.text = document.getElementById('te-text-input').value;
-  box.fontsize = parseInt(document.getElementById('te-fontsize').value) || 42;
   box.fontcolor = document.getElementById('te-fontcolor').value;
   box.bold = document.getElementById('te-bold-btn').classList.contains('active');
-  box.box_opacity = parseFloat(document.getElementById('te-bg-opacity').value);
+  box.italic = document.getElementById('te-italic-btn').classList.contains('active');
+  box.bgcolor = document.getElementById('te-bgcolor').value;
+  teRenderBox(box);
+}
+
+function teToggleBg() {
+  var box = teState.selectedBox;
+  if (!box) return;
+  box.box_opacity = box.box_opacity > 0 ? 0 : 1;
+  document.getElementById('te-bg-none-btn').classList.toggle('active', box.box_opacity > 0);
   teRenderBox(box);
 }
 
 function teRenderBox(box) {
   var el = box.el;
   var text = box.text || 'Text';
-  var previewSize = Math.round(box.fontsize / 3);
 
-  /* Preserve the remove button */
+  /* Preserve special child elements */
   var rmBtn = el.querySelector('.te-box-rm');
-  el.textContent = text;
-  el.appendChild(rmBtn);
+  var resizeH = el.querySelector('.te-resize');
 
-  el.style.fontSize = previewSize + 'px';
+  /* Update or create text span */
+  var span = el.querySelector('.te-text-span');
+  if (!span) {
+    span = document.createElement('span');
+    span.className = 'te-text-span';
+    el.insertBefore(span, rmBtn);
+  }
+  span.textContent = text;
+
   el.style.color = box.fontcolor;
   el.style.fontWeight = box.bold ? '700' : '400';
+  el.style.fontStyle = box.italic ? 'italic' : 'normal';
+
+  /* Auto-fit: find largest font that fits within the box */
+  teFitText(box);
 
   /* Background */
   var existing = el.querySelector('.te-bg');
   if (existing) existing.remove();
-  if (box.box_opacity > 0) {
+  if (box.box_opacity > 0 && box.bgcolor) {
+    var r = parseInt(box.bgcolor.slice(1,3),16);
+    var g = parseInt(box.bgcolor.slice(3,5),16);
+    var b = parseInt(box.bgcolor.slice(5,7),16);
     var bg = document.createElement('div');
     bg.className = 'te-bg';
-    bg.style.background = 'rgba(0,0,0,' + box.box_opacity + ')';
+    bg.style.background = 'rgba(' + r + ',' + g + ',' + b + ',' + box.box_opacity + ')';
     el.appendChild(bg);
   }
+}
+
+function teFitText(box) {
+  var el = box.el;
+  var span = el.querySelector('.te-text-span');
+  if (!span) return;
+  var boxW = el.offsetWidth || 200;
+  var boxH = el.offsetHeight || 60;
+  /* Use a hidden measurer so flex layout doesn't interfere */
+  span.style.position = 'absolute';
+  span.style.width = boxW + 'px';
+  /* Binary search for largest font that fits */
+  var lo = 6, hi = Math.min(boxW, boxH), best = lo;
+  while (lo <= hi) {
+    var mid = Math.floor((lo + hi) / 2);
+    span.style.fontSize = mid + 'px';
+    if (span.scrollHeight <= boxH) {
+      best = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  span.style.fontSize = best + 'px';
+  span.style.position = '';
+  span.style.width = '';
+  box.fontsize = Math.round(best * 3); /* scale for 1080px output */
 }
 
 function teToggleBold() {
@@ -2365,30 +2598,68 @@ function teToggleBold() {
   teToolbarChanged();
 }
 
+function teToggleItalic() {
+  document.getElementById('te-italic-btn').classList.toggle('active');
+  teToolbarChanged();
+}
+
+function teEditBoxInline(box) {
+  var el = box.el;
+  var span = el.querySelector('.te-text-span');
+  if (!span) return;
+  span.contentEditable = 'true';
+  span.focus();
+  /* Select all text */
+  var range = document.createRange();
+  range.selectNodeContents(span);
+  var sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+
+  function finish() {
+    span.contentEditable = 'false';
+    box.text = span.textContent.trim() || 'Text';
+    span.removeEventListener('blur', finish);
+    span.removeEventListener('keydown', onKey);
+    teRenderBox(box);
+  }
+  function onKey(e) {
+    if (e.key === 'Enter') { e.preventDefault(); finish(); }
+    if (e.key === 'Escape') { span.textContent = box.text; finish(); }
+  }
+  span.addEventListener('blur', finish);
+  span.addEventListener('keydown', onKey);
+}
+
 function teAddBox() {
+  var bgOn = document.getElementById('te-bg-none-btn').classList.contains('active');
   var box = teCreateBox({
     text: '',
-    fontsize: parseInt(document.getElementById('te-fontsize').value) || 42,
+    fontsize: 42,
     fontcolor: document.getElementById('te-fontcolor').value,
     bold: document.getElementById('te-bold-btn').classList.contains('active'),
-    box_opacity: parseFloat(document.getElementById('te-bg-opacity').value),
+    italic: document.getElementById('te-italic-btn').classList.contains('active'),
+    bgcolor: document.getElementById('te-bgcolor').value,
+    box_opacity: bgOn ? 1 : 0,
     x_frac: 0.5,
     y_frac: 0.3 + Math.random() * 0.4,
   });
   teSelectBox(box);
-  document.getElementById('te-text-input').value = '';
-  document.getElementById('te-text-input').focus();
+  teEditBoxInline(box);
 }
 
 function teSetupBoxDrag(box) {
   var canvas = document.getElementById('te-canvas');
   var el = box.el;
-  var startX, startY, origLeft, origTop;
+  var resizeHandle = el.querySelector('.te-resize');
+  var startX, startY, origLeft, origTop, origW, isResizing = false;
 
+  /* Position drag — lock width */
   function onDown(e) {
-    if (e.target.classList.contains('te-box-rm')) return;
+    if (e.target.classList.contains('te-box-rm') || e.target.classList.contains('te-resize')) return;
     e.preventDefault();
     teState.dragging = true;
+    isResizing = false;
     teSelectBox(box);
     var rect = canvas.getBoundingClientRect();
     var touch = e.touches ? e.touches[0] : e;
@@ -2425,6 +2696,44 @@ function teSetupBoxDrag(box) {
 
   el.addEventListener('mousedown', onDown);
   el.addEventListener('touchstart', onDown);
+
+  /* Resize via corner handle — both width and height */
+  var origH;
+  function onResizeDown(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    isResizing = true;
+    teSelectBox(box);
+    var touch = e.touches ? e.touches[0] : e;
+    startX = touch.clientX;
+    startY = touch.clientY;
+    origW = el.offsetWidth;
+    origH = el.offsetHeight;
+    document.addEventListener('mousemove', onResizeMove);
+    document.addEventListener('mouseup', onResizeUp);
+    document.addEventListener('touchmove', onResizeMove, {passive:false});
+    document.addEventListener('touchend', onResizeUp);
+  }
+  function onResizeMove(e) {
+    if (!isResizing) return;
+    e.preventDefault();
+    var touch = e.touches ? e.touches[0] : e;
+    var dx = touch.clientX - startX;
+    var dy = touch.clientY - startY;
+    el.style.width = Math.max(40, origW + dx) + 'px';
+    el.style.height = Math.max(24, origH + dy) + 'px';
+    teFitText(box);
+  }
+  function onResizeUp() {
+    isResizing = false;
+    teFitText(box);
+    document.removeEventListener('mousemove', onResizeMove);
+    document.removeEventListener('mouseup', onResizeUp);
+    document.removeEventListener('touchmove', onResizeMove);
+    document.removeEventListener('touchend', onResizeUp);
+  }
+  resizeHandle.addEventListener('mousedown', onResizeDown);
+  resizeHandle.addEventListener('touchstart', onResizeDown);
 }
 
 function applyTextEditor() {
@@ -2432,41 +2741,25 @@ function applyTextEditor() {
   var validBoxes = teState.boxes.filter(function(b){return b.text.trim()});
   if (!validBoxes.length) { alert('Enter text in at least one box'); return; }
 
+  var canvas = document.getElementById('te-canvas');
+  var cW = canvas.offsetWidth || 360;
+  var cH = canvas.offsetHeight || 640;
+  var boxData = validBoxes.map(function(b) {
+    var el = b.el;
+    return {
+      text: b.text.trim(), fontsize: b.fontsize, fontcolor: b.fontcolor,
+      bold: b.bold, italic: b.italic, bgcolor: b.bgcolor, box_opacity: b.box_opacity,
+      x_frac: Math.max(0.02, Math.min(0.98, b.x_frac)),
+      y_frac: Math.max(0.02, Math.min(0.98, b.y_frac)),
+      w_frac: (el ? el.offsetWidth : 200) / cW,
+      h_frac: (el ? el.offsetHeight : 60) / cH,
+    };
+  });
+
   if (teState.editId !== null) {
-    /* Editing: update the first box into the existing item, add rest as new */
-    var first = validBoxes[0];
-    updateTextItem(teState.editId, {
-      text: first.text.trim(),
-      fontsize: first.fontsize,
-      fontcolor: first.fontcolor,
-      bold: first.bold,
-      box_opacity: first.box_opacity,
-      x_frac: Math.max(0.05, Math.min(0.95, first.x_frac)),
-      y_frac: Math.max(0.05, Math.min(0.95, first.y_frac)),
-      startTime: teState.startTime, endTime: teState.endTime,
-    });
-    for (var i = 1; i < validBoxes.length; i++) {
-      var b = validBoxes[i];
-      addTextBlock({
-        text: b.text.trim(), fontsize: b.fontsize, fontcolor: b.fontcolor,
-        bold: b.bold, box_opacity: b.box_opacity,
-        x_frac: Math.max(0.05, Math.min(0.95, b.x_frac)),
-        y_frac: Math.max(0.05, Math.min(0.95, b.y_frac)),
-        startTime: teState.startTime, endTime: teState.endTime,
-      });
-    }
+    updateTextGroup(teState.editId, boxData, teState.startTime, teState.endTime);
   } else {
-    /* New: add each box as a separate text item */
-    for (var j = 0; j < validBoxes.length; j++) {
-      var bx = validBoxes[j];
-      addTextBlock({
-        text: bx.text.trim(), fontsize: bx.fontsize, fontcolor: bx.fontcolor,
-        bold: bx.bold, box_opacity: bx.box_opacity,
-        x_frac: Math.max(0.05, Math.min(0.95, bx.x_frac)),
-        y_frac: Math.max(0.05, Math.min(0.95, bx.y_frac)),
-        startTime: teState.startTime, endTime: teState.endTime,
-      });
-    }
+    addTextGroup(boxData, teState.startTime, teState.endTime);
   }
   closeTextEditor();
 }

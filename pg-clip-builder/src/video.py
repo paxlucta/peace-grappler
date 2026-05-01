@@ -742,58 +742,260 @@ def add_text_overlay(video_path, text, out_path, position="bottom",
         return False
 
 
+def _find_system_font():
+    """Find a usable TrueType font on the system."""
+    candidates = [
+        "/System/Library/Fonts/Helvetica.ttc",
+        "/System/Library/Fonts/HelveticaNeue.ttc",
+        "/System/Library/Fonts/Geneva.ttf",
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/Library/Fonts/Arial Unicode.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    return None
+
+
+def _parse_color(color_str, default=(255, 255, 255, 255)):
+    """Parse a color string (#hex, 0xhex, or name) to RGBA tuple."""
+    if not isinstance(color_str, str):
+        return default
+    if color_str.startswith("#") and len(color_str) >= 7:
+        return (int(color_str[1:3], 16), int(color_str[3:5], 16),
+                int(color_str[5:7], 16), 255)
+    if color_str.startswith("0x") and len(color_str) >= 8:
+        return (int(color_str[2:4], 16), int(color_str[4:6], 16),
+                int(color_str[6:8], 16), 255)
+    names = {"white": (255,255,255,255), "black": (0,0,0,255),
+             "red": (255,0,0,255), "yellow": (255,255,0,255)}
+    return names.get(color_str, default)
+
+
+def _wrap_text(text, font, max_width, draw):
+    """Word-wrap text to fit within max_width pixels. Returns list of lines."""
+    words = text.split()
+    if not words:
+        return [text]
+    lines = []
+    current = words[0]
+    for word in words[1:]:
+        test = current + " " + word
+        bbox = draw.textbbox((0, 0), test, font=font)
+        if bbox[2] - bbox[0] <= max_width:
+            current = test
+        else:
+            lines.append(current)
+            current = word
+    lines.append(current)
+    return lines
+
+
+def _render_text_image(text, width, height, fontsize, fontcolor, bold,
+                       box_opacity, x_frac, y_frac, position,
+                       italic=False, bgcolor="#000000",
+                       w_frac=None, h_frac=None):
+    """Render text onto a transparent RGBA image using Pillow.
+
+    WYSIWYG: when w_frac/h_frac are provided, text is auto-sized to fill
+    the box area, word-wrapped, and centered — matching the editor preview.
+    """
+    from PIL import Image, ImageDraw, ImageFont
+
+    img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    font_path = _find_system_font()
+    color = _parse_color(fontcolor)
+
+    if w_frac and h_frac and x_frac is not None and y_frac is not None:
+        # WYSIWYG mode: replicate the editor's auto-fit behavior
+        box_w = int(width * w_frac)
+        box_h = int(height * h_frac)
+        box_cx = int(width * x_frac)
+        box_cy = int(height * y_frac)
+
+        # Binary search for largest font that fits in the box
+        # Must fit BOTH width and height
+        lo, hi, best_size = 6, max(box_w, box_h), 6
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            try:
+                test_font = ImageFont.truetype(font_path, mid) if font_path else ImageFont.load_default()
+            except Exception:
+                test_font = ImageFont.load_default()
+            lines = _wrap_text(text, test_font, box_w, draw)
+            total_h = 0
+            max_line_w = 0
+            for line in lines:
+                bb = draw.textbbox((0, 0), line, font=test_font)
+                total_h += bb[3] - bb[1]
+                max_line_w = max(max_line_w, bb[2] - bb[0])
+            total_h += int(mid * 0.15) * max(0, len(lines) - 1)
+            if total_h <= box_h and max_line_w <= box_w:
+                best_size = mid
+                lo = mid + 1
+            else:
+                hi = mid - 1
+
+        try:
+            font = ImageFont.truetype(font_path, best_size) if font_path else ImageFont.load_default()
+        except Exception:
+            font = ImageFont.load_default()
+
+        lines = _wrap_text(text, font, box_w, draw)
+        line_heights = []
+        line_widths = []
+        for line in lines:
+            bb = draw.textbbox((0, 0), line, font=font)
+            line_widths.append(bb[2] - bb[0])
+            line_heights.append(bb[3] - bb[1])
+        spacing = int(best_size * 0.15)
+        total_h = sum(line_heights) + spacing * max(0, len(lines) - 1)
+
+        # Box top-left from center
+        bx = box_cx - box_w // 2
+        by = box_cy - box_h // 2
+
+        # Draw background
+        if box_opacity > 0:
+            pad = 5
+            bg_rgba = _parse_color(bgcolor, (0, 0, 0, 255))
+            bg_fill = (bg_rgba[0], bg_rgba[1], bg_rgba[2], int(box_opacity * 255))
+            box_overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+            box_draw = ImageDraw.Draw(box_overlay)
+            box_draw.rounded_rectangle(
+                [bx - pad, by - pad, bx + box_w + pad, by + box_h + pad],
+                radius=4, fill=bg_fill,
+            )
+            img = Image.alpha_composite(img, box_overlay)
+            draw = ImageDraw.Draw(img)
+
+        # Draw lines centered in box
+        cursor_y = by + (box_h - total_h) // 2
+        for i, line in enumerate(lines):
+            lx = bx + (box_w - line_widths[i]) // 2
+            draw.text((lx, cursor_y), line, font=font, fill=color)
+            cursor_y += line_heights[i] + spacing
+
+        return img
+
+    # Legacy fallback: simple centered text
+    try:
+        font = ImageFont.truetype(font_path, fontsize) if font_path else ImageFont.load_default()
+    except Exception:
+        font = ImageFont.load_default()
+
+    bbox = draw.textbbox((0, 0), text, font=font)
+    tw = bbox[2] - bbox[0]
+    th = bbox[3] - bbox[1]
+
+    if x_frac is not None and y_frac is not None:
+        tx = int(width * x_frac - tw / 2)
+        ty = int(height * y_frac - th / 2)
+    else:
+        tx = int((width - tw) / 2)
+        if position == "top":
+            ty = int(height * 0.08)
+        elif position == "center":
+            ty = int((height - th) / 2)
+        else:
+            ty = int(height * 0.85)
+
+    if box_opacity > 0:
+        pad = 5
+        bg_rgba = _parse_color(bgcolor, (0, 0, 0, 255))
+        bg_fill = (bg_rgba[0], bg_rgba[1], bg_rgba[2], int(box_opacity * 255))
+        box_overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        box_draw = ImageDraw.Draw(box_overlay)
+        box_draw.rounded_rectangle(
+            [tx - pad, ty - pad, tx + tw + pad, ty + th + pad],
+            radius=4, fill=bg_fill,
+        )
+        img = Image.alpha_composite(img, box_overlay)
+        draw = ImageDraw.Draw(img)
+
+    draw.text((tx, ty), text, font=font, fill=color)
+    return img
+
+
 def add_multiple_text_overlays(video_path, overlays, out_path):
-    """Apply multiple text overlays in a single FFmpeg pass.
+    """Apply multiple text overlays using Pillow + FFmpeg overlay filter.
+
+    Uses Pillow to render text to transparent PNG images, then composites
+    them onto the video using FFmpeg's overlay filter with enable expressions.
 
     overlays: list of dicts with keys:
         text, start_time, end_time, position ("top"/"center"/"bottom"),
-        fontsize (default 42), fontcolor (default "white"), box_opacity (default 0.5)
+        fontsize (default 42), fontcolor (default "white"), box_opacity (default 0.5),
+        x_frac, y_frac (optional fractional position)
     """
     if not overlays:
         shutil.copy2(str(video_path), out_path)
         return True
 
-    filters = []
-    for ov in overlays:
-        safe_text = _escape_drawtext(ov["text"])
+    # Video is always 1080x1920
+    W, H = 1080, 1920
+
+    tmp_dir = os.path.dirname(out_path)
+    inputs = ["-i", str(video_path)]
+    filter_parts = []
+    prev_label = "[0:v]"
+
+    for idx, ov in enumerate(overlays):
+        text = ov["text"]
         fs = ov.get("fontsize", 42)
         fc = ov.get("fontcolor", "white")
-        # Convert #RRGGBB to 0xRRGGBB — '#' is a comment char in FFmpeg filters
-        if fc.startswith("#"):
-            fc = "0x" + fc[1:]
+        bold = ov.get("bold", False)
+        italic = ov.get("italic", False)
         bo = ov.get("box_opacity", 0.5)
+        bgcolor = ov.get("bgcolor", "#000000")
         s = ov["start_time"]
         e = ov["end_time"]
+        x_frac = ov.get("x_frac")
+        y_frac = ov.get("y_frac")
+        w_frac = ov.get("w_frac")
+        h_frac = ov.get("h_frac")
+        position = ov.get("position", "bottom")
 
-        # Support precise x/y positioning (as fraction of video dimensions)
-        if "x_frac" in ov and "y_frac" in ov:
-            x_expr = f"w*{ov['x_frac']}-text_w/2"
-            y_expr = f"h*{ov['y_frac']}-text_h/2"
-        else:
-            x_expr = "(w-text_w)/2"
-            y_expr = _drawtext_y(ov.get("position", "bottom"))
+        # Render text to PNG
+        try:
+            img = _render_text_image(text, W, H, fs, fc, bold, bo,
+                                     x_frac, y_frac, position,
+                                     italic=italic, bgcolor=bgcolor,
+                                     w_frac=w_frac, h_frac=h_frac)
+            png_path = os.path.join(tmp_dir, f"_txt_{idx}.png")
+            img.save(png_path)
+        except Exception as exc:
+            print(f"[text-overlay] Pillow render failed: {exc}")
+            continue
 
-        box_part = f":box=1:boxcolor=black@{bo}:boxborderw=8" if bo > 0 else ""
-
-        filters.append(
-            f"drawtext=text='{safe_text}':"
-            f"fontsize={fs}:fontcolor={fc}:"
-            f"x={x_expr}:y={y_expr}"
-            f"{box_part}:"
-            f"enable='between(t,{s},{e})'"
+        input_idx = len(inputs) // 2  # each -i adds 2 args
+        inputs.extend(["-i", png_path])
+        out_label = f"[txt{idx}]"
+        filter_parts.append(
+            f"{prev_label}[{input_idx}:v]overlay=0:0:"
+            f"enable='between(t,{s},{e})'{out_label}"
         )
+        prev_label = out_label
 
-    vf = ",".join(filters)
+    if not filter_parts:
+        shutil.copy2(str(video_path), out_path)
+        return True
+
+    vf = ";".join(filter_parts)
+    cmd = ["ffmpeg", "-y"] + inputs + [
+        "-filter_complex", vf,
+        "-map", prev_label, "-map", "0:a?",
+        "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+        "-c:a", "copy", "-movflags", "+faststart", out_path,
+    ]
+
     try:
-        r = subprocess.run(
-            ["ffmpeg", "-y", "-i", str(video_path),
-             "-vf", vf,
-             "-c:v", "libx264", "-preset", "fast", "-crf", "23",
-             "-c:a", "copy", "-movflags", "+faststart", out_path],
-            capture_output=True, timeout=120,
-        )
+        r = subprocess.run(cmd, capture_output=True, timeout=180)
         if r.returncode != 0:
-            print(f"[text-overlay] FFmpeg failed: {r.stderr.decode('utf-8', errors='replace')[-500:]}")
+            print(f"[text-overlay] FFmpeg failed: {r.stderr.decode('utf-8', errors='replace')[-800:]}")
         return r.returncode == 0 and os.path.exists(out_path)
     except Exception as exc:
         print(f"[text-overlay] Exception: {exc}")
