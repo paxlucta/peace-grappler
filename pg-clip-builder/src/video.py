@@ -536,6 +536,64 @@ def stack_split_videos(top_path, bottom_path, out_path):
         return False
 
 
+def stack_wide_videos(paths, out_path):
+    """Stack 1-3 wide (landscape) videos vertically in a 1080x1920 portrait frame.
+
+    Each video gets an equal share of the vertical space with the remaining
+    space distributed as equal padding above, between, and after each video.
+    Audio is mixed from all inputs.
+    """
+    n = len(paths)
+    if n < 1:
+        return False
+    if n == 1:
+        # Single wide video — scale to 1080 wide, center in 1080x1920
+        return normalize_clip(paths[0], out_path)
+
+    durations = [get_video_duration(p) for p in paths]
+    max_dur = max(durations)
+
+    # Compute per-slot height: divide 1920 equally among n videos
+    slot_h = 1920 // n
+
+    vf_parts = []
+    labels = []
+    for i, p in enumerate(paths):
+        pad_expr = ""
+        if durations[i] < max_dur - 0.05:
+            pad_expr = (f",tpad=stop_mode=clone:"
+                        f"stop_duration={max_dur - durations[i]:.3f}")
+        vf_parts.append(
+            f"[{i}:v]scale=1080:{slot_h}:force_original_aspect_ratio=decrease,"
+            f"pad=1080:{slot_h}:(ow-iw)/2:(oh-ih)/2:color=black,"
+            f"setsar=1,fps=30{pad_expr}[v{i}]"
+        )
+        labels.append(f"[v{i}]")
+
+    stack = "".join(labels) + f"vstack=inputs={n}[vout]"
+    audio_labels = "".join(f"[{i}:a]" for i in range(n))
+    audio = f"{audio_labels}amix=inputs={n}:duration=longest[aout]"
+    filter_complex = ";".join(vf_parts) + ";" + stack + ";" + audio
+
+    inputs = []
+    for p in paths:
+        inputs.extend(["-i", p])
+
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-y"] + inputs +
+            ["-filter_complex", filter_complex,
+             "-map", "[vout]", "-map", "[aout]",
+             "-c:v", "libx264", "-preset", "fast", "-crf", "22",
+             "-c:a", "aac", "-b:a", "192k",
+             "-pix_fmt", "yuv420p", "-movflags", "+faststart", out_path],
+            capture_output=True, text=True, timeout=300,
+        )
+        return r.returncode == 0 and os.path.exists(out_path)
+    except Exception:
+        return False
+
+
 def process_track(items, tmp_dir, prefix, resolve_clip_fn):
     """Process a list of timeline items (clips, transitions, mute, placeholders)
     into a single video.

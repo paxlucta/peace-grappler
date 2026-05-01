@@ -21,9 +21,10 @@ from video import (
     ASSETS_DIR, AUDIO_EXTENSIONS, OUTPUT_DIR, THUMB_DIR, TRANSITIONS,
     VIDEO_EXTENSIONS, XFADE_DUR,
     add_multiple_text_overlays, build_music_track, concatenate_clips,
-    extract_subclip, find_asset, generate_placeholder, get_video_duration,
-    has_audio_stream, normalize_clip, overlay_music, overlay_music_track,
-    process_split_section, process_track,
+    extract_subclip, extract_wide_subclip, find_asset, generate_placeholder,
+    get_video_duration, has_audio_stream, is_wide_video, normalize_clip,
+    overlay_music, overlay_music_track, process_split_section, process_track,
+    stack_wide_videos,
 )
 
 clip_builder_bp = Blueprint("clip_builder", __name__)
@@ -615,26 +616,92 @@ def api_generate():
     })
 
 
+def _build_time_segments(clips):
+    """Group clips into non-overlapping time segments.
+
+    Overlapping wide clips are grouped together so they can be stacked.
+    Non-wide clips are always in their own segment (they never overlap).
+    Returns list of {"start": float, "end": float, "clips": [...]}.
+    """
+    if not clips:
+        return []
+
+    # Separate wide and non-wide clips
+    wides = [c for c in clips if c["wide"]]
+    non_wides = [c for c in clips if not c["wide"]]
+
+    # Group overlapping wides using BFS
+    wide_groups = []
+    visited = set()
+    for i, wc in enumerate(wides):
+        if i in visited:
+            continue
+        group = [wc]
+        visited.add(i)
+        queue = [i]
+        while queue:
+            cur = queue.pop(0)
+            cs = wides[cur]["start_time"]
+            ce = cs + wides[cur]["duration"]
+            for j, wj in enumerate(wides):
+                if j in visited:
+                    continue
+                js = wj["start_time"]
+                je = js + wj["duration"]
+                if js < ce and je > cs:
+                    visited.add(j)
+                    group.append(wj)
+                    queue.append(j)
+        wide_groups.append(group)
+
+    segments = []
+
+    # Each wide group becomes a segment
+    for grp in wide_groups:
+        segments.append({
+            "start": min(c["start_time"] for c in grp),
+            "end": max(c["start_time"] + c["duration"] for c in grp),
+            "clips": grp,
+        })
+
+    # Each non-wide clip is its own segment
+    for nc in non_wides:
+        segments.append({
+            "start": nc["start_time"],
+            "end": nc["start_time"] + nc["duration"],
+            "clips": [nc],
+        })
+
+    # Sort segments by start time
+    segments.sort(key=lambda s: s["start"])
+    return segments
+
+
 def _generate_multitrack(data):
-    """Handle new multi-track timeline format."""
+    """Handle new multi-track timeline format with position-based clips."""
     video_track = data.get("video_track", [])
     sound_track = data.get("sound_track", [])
     text_overlays = data.get("text_overlays", [])
 
-    # Parse video track into clips + transitions
+    # Parse video track: each clip has start_time, wide flag, stack_order
     clips = []
-    transitions = []
     for item in video_track:
-        itype = item.get("type", "")
-        if itype == "transition":
-            transitions.append(item.get("name", "fade"))
-        elif itype == "clip":
-            clip_data = _resolve_clip(item)
-            if clip_data:
-                clips.append(clip_data)
+        if item.get("type") != "clip":
+            continue
+        clip_data = _resolve_clip(item)
+        if clip_data:
+            clip_data["start_time"] = item.get("start_time", 0)
+            clip_data["wide"] = item.get("wide", False)
+            clip_data["stack_order"] = item.get("stack_order", 0)
+            clip_data["trans_in"] = item.get("trans_in")
+            clip_data["trans_out"] = item.get("trans_out")
+            clips.append(clip_data)
 
     if not clips:
         return jsonify({"error": "No valid clips in video track"}), 400
+
+    # Sort by start_time
+    clips.sort(key=lambda c: (c["start_time"], c["stack_order"]))
 
     music_list = _load_music_files()
     music_lookup = {m["name"]: m["path"] for m in music_list}
@@ -656,14 +723,19 @@ def _generate_multitrack(data):
                     except ValueError:
                         pass
 
-    total_dur = int(sum(c.get("duration", 0) for c in clips))
-    out_file = date_dir / f"hl-{total_dur}-{counter}.mp4"
+    total_dur = max((c["start_time"] + c["duration"]) for c in clips)
+    out_file = date_dir / f"hl-{int(total_dur)}-{counter}.mp4"
 
     include_intro = data.get("include_intro", True)
     include_outro = data.get("include_outro", True)
 
     with tempfile.TemporaryDirectory() as tmp:
+        # Build time segments: group overlapping wide clips together
+        # Each segment is a list of clips that play during that time
+        segments = _build_time_segments(clips)
+
         clip_paths = []
+        all_transitions = []
         intro_count = 0
 
         if include_intro:
@@ -672,13 +744,49 @@ def _generate_multitrack(data):
                 intro_norm = os.path.join(tmp, "intro_norm.mp4")
                 if normalize_clip(str(intro), intro_norm):
                     clip_paths.append(intro_norm)
+                    all_transitions.append("fade")
                     intro_count = 1
 
-        for i, clip in enumerate(clips):
-            clip_out = os.path.join(tmp, f"clip_{i:03d}.mp4")
-            if extract_subclip(clip["video_file"], clip["start"],
-                               clip["duration"], clip_out):
-                clip_paths.append(clip_out)
+        for si, seg in enumerate(segments):
+            seg_clips = seg["clips"]
+            wide_clips = [c for c in seg_clips if c["wide"]]
+            non_wide_clips = [c for c in seg_clips if not c["wide"]]
+
+            if len(wide_clips) >= 2:
+                # Stack wide videos vertically
+                wide_clips.sort(key=lambda c: c["stack_order"])
+                wide_paths = []
+                for wi, wc in enumerate(wide_clips):
+                    wp = os.path.join(tmp, f"seg{si:03d}_wide{wi}.mp4")
+                    if extract_wide_subclip(wc["video_file"], wc["start"],
+                                            wc["duration"], wp):
+                        wide_paths.append(wp)
+                if wide_paths:
+                    stacked = os.path.join(tmp, f"seg{si:03d}_stacked.mp4")
+                    if stack_wide_videos(wide_paths, stacked):
+                        clip_paths.append(stacked)
+                        # Transition from the first clip in this segment
+                        trans = wide_clips[0].get("trans_in")
+                        if len(clip_paths) > 1:
+                            all_transitions.append(trans)
+            elif len(wide_clips) == 1:
+                # Single wide clip — extract as portrait-padded
+                wc = wide_clips[0]
+                wp = os.path.join(tmp, f"seg{si:03d}_clip.mp4")
+                if extract_subclip(wc["video_file"], wc["start"],
+                                   wc["duration"], wp):
+                    clip_paths.append(wp)
+                    if len(clip_paths) > 1:
+                        all_transitions.append(wc.get("trans_in"))
+
+            # Non-wide clips in this segment
+            for ni, nc in enumerate(non_wide_clips):
+                np = os.path.join(tmp, f"seg{si:03d}_nw{ni}.mp4")
+                if extract_subclip(nc["video_file"], nc["start"],
+                                   nc["duration"], np):
+                    clip_paths.append(np)
+                    if len(clip_paths) > 1:
+                        all_transitions.append(nc.get("trans_in"))
 
         outro_added = False
         if include_outro:
@@ -688,21 +796,16 @@ def _generate_multitrack(data):
                 if normalize_clip(str(outro), outro_norm):
                     clip_paths.append(outro_norm)
                     outro_added = True
+                    if len(clip_paths) > 1:
+                        all_transitions.append("fade")
 
         if len(clip_paths) < 1:
             return jsonify({"error": "No clips could be extracted"}), 500
 
-        # Build per-gap transition list
-        n_paths = len(clip_paths)
-        all_transitions = [None] * max(0, n_paths - 1)
-        if intro_count and n_paths > 1:
-            all_transitions[0] = "fade"
-        for j, trans_name in enumerate(transitions):
-            path_idx = j + intro_count
-            if path_idx < len(all_transitions):
-                all_transitions[path_idx] = trans_name
-        if outro_added and n_paths > 1:
-            all_transitions[-1] = "fade"
+        # Pad transitions list
+        while len(all_transitions) < len(clip_paths) - 1:
+            all_transitions.append(None)
+        all_transitions = all_transitions[:len(clip_paths) - 1]
 
         if len(clip_paths) == 1:
             assembled = clip_paths[0]
@@ -947,7 +1050,7 @@ footer{
 #tl-grid{
   display:grid;
   grid-template-columns:50px 1fr;
-  grid-template-rows:20px 50px 40px 70px;
+  grid-template-rows:20px 50px 40px minmax(70px, auto);
   min-width:100%;
 }
 /* Time ruler */
@@ -1010,6 +1113,7 @@ footer{
 
 /* Video blocks */
 .vblock{background:#1e1e1e;border:1px solid #333;color:#ccc;z-index:1}
+.vblock-is-wide{border-color:#5a5a2a}
 /* Insertion indicator */
 #vt-insert-bar{
   position:absolute;top:2px;width:3px;height:calc(100% - 4px);
@@ -1040,6 +1144,17 @@ footer{
   width:4px;border-radius:1px;cursor:pointer;opacity:.3;background:#fff;
 }
 .vblock .vblk-vol .vv.active{opacity:.9}
+/* Video transition pills */
+.vtrans{
+  position:absolute;bottom:2px;
+  background:rgba(60,60,60,.85);color:#aaa;font-size:8px;font-weight:600;
+  padding:1px 4px;border-radius:3px;cursor:pointer;z-index:2;
+  max-width:50px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.vtrans.vt-in{left:4px}
+.vtrans.vt-out{right:20px}
+.vtrans:hover{background:#555;color:#fff}
+
 .vblock-wide{
   position:absolute;top:4px;left:4px;z-index:1;
   width:16px;height:11px;border:1.5px solid rgba(255,255,255,.8);border-radius:2px;
@@ -1517,11 +1632,12 @@ function renderTransitionLabels() {
 /* ─── Multi-track timeline ─── */
 
 function getVideoDuration() {
-  var total = 0;
+  var maxEnd = 0;
   for (var i = 0; i < videoItems.length; i++) {
-    total += videoItems[i].duration;
+    var end = videoItems[i].startTime + videoItems[i].duration;
+    if (end > maxEnd) maxEnd = end;
   }
-  return total;
+  return maxEnd;
 }
 
 function renderRuler() {
@@ -1545,31 +1661,56 @@ function renderRuler() {
   }
 }
 
+function computeVideoRows() {
+  /* Assign visual rows using greedy interval packing.
+     Sort by stackOrder first so overlapping wides respect user's vertical order. */
+  var sorted = videoItems.slice().sort(function(a, b) {
+    return a.startTime - b.startTime || a.stackOrder - b.stackOrder;
+  });
+  var rowEnds = []; /* tracks end-time of last item in each row */
+  for (var i = 0; i < sorted.length; i++) {
+    var vi = sorted[i];
+    var s = vi.startTime, e = s + vi.duration;
+    var placed = false;
+    for (var r = 0; r < rowEnds.length; r++) {
+      if (rowEnds[r] <= s) {
+        rowEnds[r] = e;
+        vi._row = r;
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) {
+      vi._row = rowEnds.length;
+      rowEnds.push(e);
+    }
+  }
+  return Math.max(1, rowEnds.length);
+}
+
 function renderVideoTrack() {
   var track = document.getElementById('video-track');
   track.querySelectorAll('.vblock,.trans-marker').forEach(function(e){e.remove()});
   var dur = Math.max(getVideoDuration(), 10);
   track.style.width = (dur * CELL_W) + 'px';
-  var x = 0;
+  var numRows = computeVideoRows();
+
+  /* Adjust track height for stacked rows */
+  var baseH = 70;
+  track.style.minHeight = (numRows > 1 ? numRows * 50 : baseH) + 'px';
+
   for (var i = 0; i < videoItems.length; i++) {
     var vi = videoItems[i];
-    /* transition marker */
-    if (i > 0 && vi.transition) {
-      var tm = document.createElement('div');
-      tm.className = 'trans-marker';
-      tm.style.left = (x * CELL_W) + 'px';
-      tm.textContent = vi.transition;
-      tm.title = 'Click to change';
-      tm.addEventListener('click', function(idx) {
-        return function(e) { e.stopPropagation(); openTransPicker(idx); };
-      }(i));
-      track.appendChild(tm);
-    }
     /* clip block */
     var blk = document.createElement('div');
-    blk.className = 'track-block vblock';
-    blk.style.left = (x * CELL_W) + 'px';
+    blk.className = 'track-block vblock' + (vi.clip.wide ? ' vblock-is-wide' : '');
+    blk.style.left = (vi.startTime * CELL_W) + 'px';
     blk.style.width = (vi.duration * CELL_W) + 'px';
+    if (numRows > 1) {
+      var rowH = 100 / numRows;
+      blk.style.top = (vi._row * rowH) + '%';
+      blk.style.height = rowH + '%';
+    }
     var thumbUrl = vi.clip.id !== undefined ? '/api/thumbnail/' + vi.clip.id : '';
     var vol = vi.volume !== undefined ? vi.volume : 5;
     var vBars = '';
@@ -1578,14 +1719,26 @@ function renderVideoTrack() {
       vBars += '<div class="vv' + (vv < vol ? ' active' : '') + '" data-lv="' + (vv+1) + '" data-vidx="' + i + '"'
         + ' style="height:' + vH[vv] + 'px" onclick="event.stopPropagation();setVideoVol(this)"></div>';
     }
+    var transIn = vi.trans_in || '';
+    var transOut = vi.trans_out || '';
     blk.innerHTML = (thumbUrl ? '<img class="vblock-thumb" src="' + thumbUrl + '"/>' : '')
       + '<span class="blk-label">' + vi.duration.toFixed(1) + 's</span>'
       + '<div class="vblk-vol">' + vBars + '</div>'
       + (vi.clip.wide ? '<span class="vblock-wide"></span>' : '')
+      + '<span class="vtrans vt-in" data-vidx="' + i + '" data-dir="in">' + (transIn || '+') + '</span>'
+      + '<span class="vtrans vt-out" data-vidx="' + i + '" data-dir="out">' + (transOut || '+') + '</span>'
       + '<button class="blk-rm" onclick="event.stopPropagation();removeVideoItem(' + i + ')">&times;</button>';
     blk.dataset.idx = i;
+    vi._el = blk;
+    /* Transition pill clicks */
+    blk.querySelectorAll('.vtrans').forEach(function(pill) {
+      pill.addEventListener('click', function(e) {
+        e.stopPropagation();
+        openVideoTransPicker(parseInt(this.dataset.vidx), this.dataset.dir);
+      });
+    });
+    makeVideoDraggable(blk, vi, i);
     track.appendChild(blk);
-    x += vi.duration;
   }
   /* update empty label */
   var emp = track.querySelector('.track-empty');
@@ -1702,6 +1855,125 @@ function renderTextTrack() {
   else if (!textItems.length && emp) emp.style.display = '';
 }
 
+/* ─── Video drag and overlap resolution ─── */
+function makeVideoDraggable(el, data, idx) {
+  var startX, startLeft, startY, startTopPx, moved;
+  el.addEventListener('mousedown', function(e) {
+    if (e.target.classList.contains('blk-rm') || e.target.classList.contains('vv')) return;
+    e.preventDefault();
+    startX = e.clientX;
+    startY = e.clientY;
+    startLeft = parseFloat(el.style.left);
+    startTopPx = el.offsetTop;
+    moved = false;
+    function onMove(e2) {
+      if (Math.abs(e2.clientX - startX) > 3 || Math.abs(e2.clientY - startY) > 3) moved = true;
+      if (!moved) return;
+      var dx = e2.clientX - startX;
+      el.style.left = Math.max(0, startLeft + dx) + 'px';
+      /* Vertical drag for wide videos to reorder stack */
+      if (data.clip.wide) {
+        el.style.top = (startTopPx + (e2.clientY - startY)) + 'px';
+      }
+    }
+    function onUp(e2) {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      if (!moved) return;
+      var newStart = Math.max(0, parseFloat(el.style.left) / CELL_W);
+      /* Snap to 0.5s grid */
+      newStart = Math.round(newStart * 2) / 2;
+      var vidIdx = videoItems.indexOf(data);
+      data.startTime = newStart;
+      /* Handle vertical reorder for wide videos */
+      if (data.clip.wide && vidIdx >= 0) {
+        reorderWideStack(vidIdx, e2.clientY - startY);
+      }
+      if (vidIdx >= 0) resolveVideoOverlaps(vidIdx);
+      syncTl();
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+}
+
+function reorderWideStack(movedIdx, dy) {
+  /* Find the overlap group this wide video belongs to */
+  var moved = videoItems[movedIdx];
+  var mStart = moved.startTime, mEnd = mStart + moved.duration;
+  var group = [movedIdx];
+  for (var i = 0; i < videoItems.length; i++) {
+    if (i === movedIdx || !videoItems[i].clip.wide) continue;
+    var s = videoItems[i].startTime, e = s + videoItems[i].duration;
+    if (s < mEnd && e > mStart) group.push(i);
+  }
+  if (group.length < 2) return;
+  /* Sort by stackOrder */
+  group.sort(function(a, b) { return videoItems[a].stackOrder - videoItems[b].stackOrder; });
+  var oldPos = group.indexOf(movedIdx);
+  /* Determine new position from dy: each row ~ 50px */
+  var shift = Math.round(dy / 40);
+  var newPos = Math.max(0, Math.min(group.length - 1, oldPos + shift));
+  if (newPos === oldPos) return;
+  /* Remove from old position and insert at new */
+  group.splice(oldPos, 1);
+  group.splice(newPos, 0, movedIdx);
+  /* Reassign stackOrder */
+  for (var k = 0; k < group.length; k++) {
+    videoItems[group[k]].stackOrder = k;
+  }
+}
+
+function resolveVideoOverlaps(droppedIdx) {
+  var dropped = videoItems[droppedIdx];
+  if (dropped.clip.wide) return; /* wide videos can overlap freely */
+
+  var dropStart = dropped.startTime;
+  var dropEnd = dropStart + dropped.duration;
+
+  /* Find the leftmost video that overlaps with the dropped one */
+  var overlapped = null;
+  for (var i = 0; i < videoItems.length; i++) {
+    if (i === droppedIdx) continue;
+    var vi = videoItems[i];
+    var viEnd = vi.startTime + vi.duration;
+    if (vi.startTime < dropEnd && viEnd > dropStart) {
+      if (!overlapped || vi.startTime < overlapped.startTime) {
+        overlapped = vi;
+      }
+    }
+  }
+  if (!overlapped) return;
+
+  /* Collect: overlapped video + all videos to its left, excluding the dropped */
+  var toPush = [];
+  for (var i = 0; i < videoItems.length; i++) {
+    if (i === droppedIdx) continue;
+    if (videoItems[i].startTime <= overlapped.startTime) {
+      toPush.push(videoItems[i]);
+    }
+  }
+  /* Sort by startTime to maintain relative order */
+  toPush.sort(function(a, b) { return a.startTime - b.startTime; });
+
+  /* Place sequentially after dropped video */
+  var cursor = dropEnd;
+  for (var j = 0; j < toPush.length; j++) {
+    toPush[j].startTime = cursor;
+    cursor += toPush[j].duration;
+  }
+
+  /* Sweep: resolve any remaining non-wide overlaps */
+  var nonWide = videoItems.filter(function(v) { return !v.clip.wide; });
+  nonWide.sort(function(a, b) { return a.startTime - b.startTime; });
+  for (var i = 1; i < nonWide.length; i++) {
+    var prevEnd = nonWide[i-1].startTime + nonWide[i-1].duration;
+    if (nonWide[i].startTime < prevEnd) {
+      nonWide[i].startTime = prevEnd;
+    }
+  }
+}
+
 /* Drag and resize for sound/text blocks */
 function makeDraggable(el, data, trackType) {
   var startX, startLeft, startW, resizing = false;
@@ -1774,23 +2046,26 @@ function setVideoVol(barEl) {
   });
 }
 
-function addVideoItem(clip) {
+function addVideoItem(clip, startTime) {
   /* Prevent adding the same scene twice */
   if (clip.id !== undefined && getTlClipIds().indexOf(clip.id) >= 0) return;
   var dur = clip.duration;
-  var trans = videoItems.length > 0 ? selectedTransition : null;
+  var st = startTime !== undefined ? startTime : getVideoDuration();
   videoItems.push({
     clip: {id: clip.id, video_file: clip.video_file, start: clip.start, end: clip.end, filename: clip.filename, wide: clip.wide},
     duration: dur,
-    transition: trans,
+    startTime: st,
+    trans_in: selectedTransition,
+    trans_out: null,
     volume: 5,
+    stackOrder: 0,
   });
+  resolveVideoOverlaps(videoItems.length - 1);
   syncTl();
 }
 
 function removeVideoItem(idx) {
   videoItems.splice(idx, 1);
-  if (videoItems.length > 0 && videoItems[0].transition) videoItems[0].transition = null;
   syncTl();
 }
 
@@ -1837,40 +2112,27 @@ function removeTextItem(id) {
   syncTl();
 }
 
+var lastInsertX = 0;
+
 function setupTracks() {
-  /* Video track: accept clips from grid via SortableJS */
+  /* Video track: accept clips from grid via SortableJS (drop only, no reorder) */
   var vt = document.getElementById('video-track');
   new Sortable(vt, {
     group: {name:'timeline', pull:false, put:function(to, from, el) {
       return el.classList.contains('clip-card') && !el.classList.contains('in-tl') && !el.classList.contains('ignored');
     }},
-    sort: true,
-    draggable: '.vblock',
-    animation: 150,
+    sort: false,
+    draggable: '.no-sort-dummy',
+    animation: 0,
     onAdd: function(evt) {
       var el = evt.item;
       var id = parseInt(el.dataset.id);
       var clip = allClips.find(function(c){return c.id===id});
       el.remove();
-      if (clip) addVideoItem(clip);
-    },
-    onSort: function(evt) {
-      if (evt.from !== evt.to) return;
-      var oldIdx = parseInt(evt.item.dataset.idx);
-      var newIdx = evt.newIndex;
-      /* Count only vblock elements to determine real position */
-      var blocks = vt.querySelectorAll('.vblock');
-      var positions = [];
-      blocks.forEach(function(b) { positions.push(parseInt(b.dataset.idx)); });
-      /* Rebuild videoItems from the new DOM order */
-      var reordered = positions.map(function(i) { return videoItems[i]; });
-      /* Fix transitions: first item never has a transition */
-      for (var i = 0; i < reordered.length; i++) {
-        if (i === 0) reordered[i].transition = null;
-        else if (!reordered[i].transition) reordered[i].transition = selectedTransition;
+      if (clip) {
+        var startTime = Math.max(0, Math.round(lastInsertX / CELL_W * 2) / 2);
+        addVideoItem(clip, startTime);
       }
-      videoItems = reordered;
-      syncTl();
     },
   });
 
@@ -1878,18 +2140,11 @@ function setupTracks() {
   var insertBar = document.getElementById('vt-insert-bar');
   vt.addEventListener('dragover', function(e) {
     var rect = vt.getBoundingClientRect();
-    var mouseX = e.clientX - rect.left;
-    /* Find closest gap between blocks */
-    var bestX = 0;
-    var x = 0;
-    for (var i = 0; i < videoItems.length; i++) {
-      var blockEnd = x + videoItems[i].duration * CELL_W;
-      if (Math.abs(mouseX - x) < Math.abs(mouseX - bestX)) bestX = x;
-      if (Math.abs(mouseX - blockEnd) < Math.abs(mouseX - bestX)) bestX = blockEnd;
-      x = blockEnd;
-    }
-    if (Math.abs(mouseX - x) < Math.abs(mouseX - bestX)) bestX = x;
-    insertBar.style.left = bestX + 'px';
+    var mouseX = e.clientX - rect.left + vt.parentElement.parentElement.scrollLeft;
+    /* Snap to 0.5s grid */
+    var snapped = Math.max(0, Math.round(mouseX / (CELL_W / 2)) * (CELL_W / 2));
+    lastInsertX = snapped;
+    insertBar.style.left = snapped + 'px';
     insertBar.style.display = 'block';
   });
   vt.addEventListener('dragleave', function(e) {
@@ -2046,10 +2301,14 @@ function addSelectedSegments() {
     var segStart = Math.round((clip.start + interval * idx) * 100) / 100;
     var segEnd = Math.round(Math.min(clip.start + interval * (idx + 1), clip.end) * 100) / 100;
     var segDur = Math.round((segEnd - segStart) * 10) / 10;
-    var trans = videoItems.length > 0 ? selectedTransition : null;
     videoItems.push({
-      clip: {video_file: clip.video_file, start: segStart, end: segEnd, filename: clip.filename},
-      duration: segDur, transition: trans,
+      clip: {video_file: clip.video_file, start: segStart, end: segEnd, filename: clip.filename, wide: clip.wide},
+      duration: segDur,
+      startTime: getVideoDuration(),
+      trans_in: selectedTransition,
+      trans_out: null,
+      volume: 5,
+      stackOrder: 0,
     });
   }
   closeSegmentModal();
@@ -2140,13 +2399,17 @@ async function toggleIgnore(id, ignore) {
 }
 
 function buildTimeline() {
+  /* Sort by startTime for generation order */
+  var sorted = videoItems.slice().sort(function(a,b){return a.startTime - b.startTime});
   var vt = [];
-  for (var i = 0; i < videoItems.length; i++) {
-    var vi = videoItems[i];
-    if (i > 0 && vi.transition) vt.push({type:'transition', name:vi.transition});
+  for (var i = 0; i < sorted.length; i++) {
+    var vi = sorted[i];
     var c = vi.clip;
-    if (c.id !== undefined) vt.push({type:'clip', id:c.id});
-    else vt.push({type:'clip', video_file:c.video_file, start:c.start, end:c.end});
+    var entry = {type:'clip', start_time:vi.startTime, wide:!!c.wide, stack_order:vi.stackOrder||0, volume:vi.volume||5,
+      trans_in:vi.trans_in||null, trans_out:vi.trans_out||null};
+    if (c.id !== undefined) entry.id = c.id;
+    else { entry.video_file = c.video_file; entry.start = c.start; entry.end = c.end; }
+    vt.push(entry);
   }
   var st = soundItems.map(function(s) {
     return {name:s.name, volume:s.volume, start_time:s.startTime, duration:s.duration};
@@ -2283,10 +2546,14 @@ function loadOldTimeline(timeline) {
       }
       var dur = clip ? clip.duration : (item.end - item.start);
       videoItems.push({
-        clip: clip ? {id:clip.id, video_file:clip.video_file, start:clip.start, end:clip.end, filename:clip.filename}
+        clip: clip ? {id:clip.id, video_file:clip.video_file, start:clip.start, end:clip.end, filename:clip.filename, wide:clip.wide}
                     : {video_file:item.video_file, start:item.start, end:item.end, filename:fname},
         duration: dur,
-        transition: videoItems.length > 0 ? (pendTrans || 'fade') : null,
+        startTime: getVideoDuration(),
+        trans_in: videoItems.length > 0 ? (pendTrans || 'fade') : null,
+        trans_out: null,
+        volume: 5,
+        stackOrder: 0,
       });
       pendTrans = null;
     } else if (item.type === 'music' && item.name) {
@@ -2308,10 +2575,14 @@ function loadNewTimeline(data) {
     if (item.id !== undefined) clip = allClips.find(function(c){return c.id===item.id});
     var dur = clip ? clip.duration : (item.end - item.start);
     videoItems.push({
-      clip: clip ? {id:clip.id, video_file:clip.video_file, start:clip.start, end:clip.end, filename:clip.filename}
+      clip: clip ? {id:clip.id, video_file:clip.video_file, start:clip.start, end:clip.end, filename:clip.filename, wide:clip.wide}
                   : {video_file:item.video_file, start:item.start, end:item.end, filename:(item.video_file||'').split('/').pop()},
       duration: dur,
-      transition: videoItems.length > 0 ? (pendTrans || null) : null,
+      startTime: item.start_time !== undefined ? item.start_time : getVideoDuration(),
+      trans_in: item.trans_in || (videoItems.length > 0 ? (pendTrans || null) : null),
+      trans_out: item.trans_out || null,
+      volume: item.volume || 5,
+      stackOrder: item.stack_order || 0,
     });
     pendTrans = null;
   }
@@ -2345,10 +2616,15 @@ function cancelLoad() {
 
 /* ─── Transition Picker ─── */
 var transPickerIdx = -1;
+var transPickerDir = 'in'; /* 'in' or 'out' */
 
-function openTransPicker(idx) {
+function openTransPicker(idx) { openVideoTransPicker(idx, 'in'); }
+
+function openVideoTransPicker(idx, dir) {
   transPickerIdx = idx;
-  var current = videoItems[idx].transition || '';
+  transPickerDir = dir || 'in';
+  var vi = videoItems[idx];
+  var current = (dir === 'out' ? vi.trans_out : vi.trans_in) || '';
   var grid = document.getElementById('trans-picker-grid');
   grid.innerHTML = '';
   for (var i = 0; i < TRANSITION_LIST.length; i++) {
@@ -2366,7 +2642,8 @@ function openTransPicker(idx) {
 
 function pickTransition(name) {
   if (transPickerIdx >= 0 && transPickerIdx < videoItems.length) {
-    videoItems[transPickerIdx].transition = name;
+    if (transPickerDir === 'out') videoItems[transPickerIdx].trans_out = name;
+    else videoItems[transPickerIdx].trans_in = name;
   }
   closeTransPicker();
   syncTl();
@@ -2374,7 +2651,8 @@ function pickTransition(name) {
 
 function removeTransition() {
   if (transPickerIdx >= 0 && transPickerIdx < videoItems.length) {
-    videoItems[transPickerIdx].transition = null;
+    if (transPickerDir === 'out') videoItems[transPickerIdx].trans_out = null;
+    else videoItems[transPickerIdx].trans_in = null;
   }
   closeTransPicker();
   syncTl();
