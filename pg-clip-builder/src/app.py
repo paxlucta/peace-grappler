@@ -367,6 +367,41 @@ main,.content,table{animation:pgFadeIn 0.35s ease-out}
   }
 })();
 </script>
+<style>
+.nav-badge{
+  display:inline-flex;align-items:center;justify-content:center;
+  min-width:16px;height:16px;padding:0 4px;
+  background:#e53935;color:#fff;font-size:10px;font-weight:700;
+  border-radius:8px;margin-left:4px;vertical-align:middle;
+  animation:badge-pulse 2s ease-in-out infinite;
+}
+@keyframes badge-pulse{0%,100%{opacity:1}50%{opacity:.6}}
+</style>
+<script>
+(function(){
+  var analyzeLink = document.querySelector('nav a[href="/analyze"]');
+  if (!analyzeLink) return;
+  var badge = null;
+  function updateBadge() {
+    fetch('/api/unanalyzed-count').then(function(r){return r.json()}).then(function(d) {
+      var c = d.count || 0;
+      if (c > 0) {
+        if (!badge) {
+          badge = document.createElement('span');
+          badge.className = 'nav-badge';
+          analyzeLink.appendChild(badge);
+        }
+        badge.textContent = c;
+      } else if (badge) {
+        badge.remove();
+        badge = null;
+      }
+    }).catch(function(){});
+  }
+  updateBadge();
+  setInterval(updateBadge, 15000);
+})();
+</script>
 """
 
 
@@ -452,6 +487,18 @@ def check_for_updates():
         return jsonify({"status": "error", "message": str(e)})
 
 
+@app.route("/api/unanalyzed-count")
+def unanalyzed_count():
+    """Return count of videos that haven't been analyzed yet."""
+    from db import get_all_videos, get_analyzed_tags
+    try:
+        videos = get_all_videos()
+        count = sum(1 for v in videos if not get_analyzed_tags(v["id"]) and v["duration"] > 0)
+        return jsonify({"count": count})
+    except Exception:
+        return jsonify({"count": 0})
+
+
 @app.after_request
 def inject_scripts(response):
     """Inject live-reload and update button into HTML responses."""
@@ -461,6 +508,78 @@ def inject_scripts(response):
         data = data.replace("</body>", _INJECTED_SCRIPT + "</body>")
         response.set_data(data)
     return response
+
+
+def _start_video_watcher():
+    """Background thread that watches the videos/ folder for new files,
+    registers them, and auto-analyzes unanalyzed videos."""
+    import threading
+    from video import VIDEO_DIR, VIDEO_EXTENSIONS
+    from db import register_video, get_all_videos, get_analyzed_tags
+
+    SCAN_INTERVAL = 30  # seconds between scans
+    _known_files = set()
+
+    def _scan_and_analyze():
+        VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+        current_files = set()
+        for root, _, files in os.walk(VIDEO_DIR):
+            for name in sorted(files):
+                if Path(name).suffix.lower() in VIDEO_EXTENSIONS and not name.startswith("."):
+                    current_files.add(str(Path(root) / name))
+
+        new_files = current_files - _known_files
+        _known_files.update(current_files)
+
+        if new_files:
+            print(f"[watcher] Found {len(new_files)} new video(s), registering...")
+            for fpath in sorted(new_files):
+                try:
+                    register_video(fpath)
+                    print(f"[watcher] Registered: {Path(fpath).name}")
+                except Exception as exc:
+                    print(f"[watcher] Failed to register {fpath}: {exc}")
+
+        # Auto-analyze unanalyzed videos
+        try:
+            from analyzer import analyze_full, save_analysis, ALL_TAG_SET, get_analyzed_tags as get_at
+            videos = get_all_videos()
+            for v in videos:
+                analyzed_tags = get_at(v["id"])
+                if not analyzed_tags and v["duration"] > 0:
+                    print(f"[watcher] Auto-analyzing: {v['filename']}...")
+                    try:
+                        result = analyze_full(v["path"], v["duration"])
+                        if result:
+                            save_analysis(v["id"], result["tags"],
+                                          result["moments"], list(ALL_TAG_SET))
+                            print(f"[watcher] Analyzed {v['filename']}: {len(result['tags'])} tags")
+                        else:
+                            print(f"[watcher] Analysis returned no results for {v['filename']}")
+                    except Exception as exc:
+                        print(f"[watcher] Analysis failed for {v['filename']}: {exc}")
+        except Exception as exc:
+            print(f"[watcher] Auto-analyze error: {exc}")
+
+    def _watcher_loop():
+        # Initial scan to populate known files
+        VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+        for root, _, files in os.walk(VIDEO_DIR):
+            for name in sorted(files):
+                if Path(name).suffix.lower() in VIDEO_EXTENSIONS and not name.startswith("."):
+                    _known_files.add(str(Path(root) / name))
+        print(f"[watcher] Watching {VIDEO_DIR} ({len(_known_files)} existing videos)")
+
+        import time as _time
+        while True:
+            _time.sleep(SCAN_INTERVAL)
+            try:
+                _scan_and_analyze()
+            except Exception as exc:
+                print(f"[watcher] Error: {exc}")
+
+    t = threading.Thread(target=_watcher_loop, daemon=True)
+    t.start()
 
 
 def main():
@@ -475,6 +594,10 @@ def main():
 
     use_reloader = "--no-reload" not in sys.argv
     debug = use_reloader
+
+    # Start background video watcher (only in the main process, not reloader child)
+    if os.environ.get("WERKZEUG_RUN_MAIN") or not use_reloader:
+        _start_video_watcher()
 
     # Only open browser on first launch, not on reloader restarts
     if not os.environ.get("WERKZEUG_RUN_MAIN"):

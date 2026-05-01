@@ -65,8 +65,12 @@ def library_videos():
             path = Path(v["path"])
             # Extract tags from timeline clips
             tags = set()
-            for item in v.get("timeline", []):
-                if item.get("type") == "clip":
+            tl = v.get("timeline", [])
+            # Normalize: new multitrack format stores a dict
+            if isinstance(tl, dict):
+                tl = tl.get("video_track", [])
+            for item in tl:
+                if isinstance(item, dict) and item.get("type") == "clip":
                     vf = item.get("video_file", "")
                     if vf:
                         tags.add(Path(vf).stem)
@@ -90,6 +94,39 @@ def library_videos():
         return jsonify(result)
     finally:
         conn.close()
+
+
+@library_bp.route("/library/api/delete/<int:video_id>", methods=["POST"])
+def library_delete_video(video_id):
+    """Delete a generated video from DB and disk."""
+    import os
+    from db import get_db
+    videos = get_all_generated_videos()
+    video = next((v for v in videos if v["id"] == video_id), None)
+    if not video:
+        return jsonify({"error": "Not found"}), 404
+    # Delete file from disk
+    path = Path(video["path"])
+    if path.exists():
+        try:
+            os.remove(str(path))
+        except Exception:
+            pass
+    # Delete thumbnail
+    thumb = _get_video_thumbnail(video["path"])
+    if thumb and thumb.exists():
+        try:
+            os.remove(str(thumb))
+        except Exception:
+            pass
+    # Delete from DB
+    conn = get_db()
+    try:
+        conn.execute("DELETE FROM generated_videos WHERE id=?", (video_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify({"ok": True})
 
 
 @library_bp.route("/library/api/video/<int:video_id>")
@@ -206,6 +243,15 @@ select:focus{outline:none;border-color:#e53935}
   background:rgba(0,0,0,.8);color:#fff;font-size:12px;font-weight:600;
   padding:2px 8px;border-radius:4px;
 }
+.video-card .card-del{
+  position:absolute;top:6px;right:6px;
+  width:24px;height:24px;border-radius:50%;
+  background:rgba(0,0,0,.6);border:1px solid rgba(255,255,255,.2);
+  color:#fff;font-size:16px;line-height:22px;text-align:center;
+  cursor:pointer;display:none;padding:0;z-index:2;
+}
+.video-card:hover .card-del{display:block}
+.video-card .card-del:hover{background:#e53935;border-color:#e53935}
 .video-card .meta{padding:10px 12px}
 .video-card .meta .filename{
   font-size:13px;font-weight:600;color:#e0e0e0;
@@ -278,6 +324,9 @@ select:focus{outline:none;border-color:#e53935}
 .pd-btn.ig:hover{background:#c13584;color:#fff}
 .pd-btn.ig:hover svg{fill:#fff}
 .pd-btn.copy-btn.copied{border-color:#4caf50;color:#4caf50}
+.pd-btn.del-btn{border-color:#e53935;color:#e53935}
+.pd-btn.del-btn:hover{background:#e53935;color:#fff}
+.pd-btn.del-btn:hover svg{fill:#fff}
 
 @media (max-width:800px) {
   .player-layout{flex-direction:column;align-items:center}
@@ -463,6 +512,7 @@ function renderGrid(videos) {
       + '<div class="play-icon"><svg viewBox="0 0 24 24"><polygon points="8,5 19,12 8,19"/></svg></div>'
       + '</div>'
       + '<span class="dur-badge">' + formatDuration(v.duration) + '</span>'
+      + '<button class="card-del" onclick="event.stopPropagation();deleteVideo(' + v.id + ')" title="Delete">&times;</button>'
       + '</div>'
       + '<div class="meta">'
       + '<div class="filename">' + escHtml(v.filename) + '</div>'
@@ -534,6 +584,9 @@ function playVideo(id, filename) {
   html += '<button class="pd-btn" onclick="emailFromLibrary(' + v.id + ',\'' + escHtml(v.filename) + '\')">'
     + '<svg viewBox="0 0 24 24"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/></svg>'
     + 'Email</button>';
+  html += '<button class="pd-btn del-btn" onclick="deleteVideo(' + v.id + ')">'
+    + '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>'
+    + 'Delete</button>';
   html += '</div>';
 
   detail.innerHTML = html;
@@ -547,6 +600,21 @@ function closePlayer() {
   video.pause();
   video.src = '';
   overlay.classList.remove('active');
+}
+
+function deleteVideo(id) {
+  if (!confirm('Delete this video permanently?')) return;
+  fetch('/library/api/delete/' + id, {method:'POST'})
+    .then(function(r){return r.json()})
+    .then(function(d) {
+      if (d.ok) {
+        allVideos = allVideos.filter(function(v){return v.id !== id});
+        closePlayer();
+        applyFilters();
+      } else {
+        alert('Delete failed');
+      }
+    });
 }
 
 function copyCaption() {

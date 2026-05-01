@@ -943,6 +943,8 @@ def add_multiple_text_overlays(video_path, overlays, out_path):
     filter_parts = []
     prev_label = "[0:v]"
 
+    ANIM_DUR = 0.4  # seconds for enter/exit animation
+
     for idx, ov in enumerate(overlays):
         text = ov["text"]
         fs = ov.get("fontsize", 42)
@@ -958,6 +960,8 @@ def add_multiple_text_overlays(video_path, overlays, out_path):
         w_frac = ov.get("w_frac")
         h_frac = ov.get("h_frac")
         position = ov.get("position", "bottom")
+        trans_in = ov.get("trans_in", "fade")
+        trans_out = ov.get("trans_out", "fade")
 
         # Render text to PNG
         try:
@@ -971,13 +975,73 @@ def add_multiple_text_overlays(video_path, overlays, out_path):
             print(f"[text-overlay] Pillow render failed: {exc}")
             continue
 
-        input_idx = len(inputs) // 2  # each -i adds 2 args
-        inputs.extend(["-i", png_path])
+        dur = e - s
+        input_idx = idx + 1  # input 0 is the video, overlays are 1, 2, 3...
+        # Loop the still image and give it a duration so fade/timing works
+        inputs.extend(["-loop", "1", "-t", f"{dur + 1:.2f}", "-i", png_path])
+
+        # Build overlay with separate enter/exit animations
+        ad = min(ANIM_DUR, dur / 3)
+        overlay_label = f"[{input_idx}:v]"
         out_label = f"[txt{idx}]"
-        filter_parts.append(
-            f"{prev_label}[{input_idx}:v]overlay=0:0:"
-            f"enable='between(t,{s},{e})'{out_label}"
-        )
+        need_fade = trans_in == "fade" or trans_out == "fade"
+        use_slide = trans_in.startswith("slide_") or trans_out.startswith("slide_")
+
+        # Apply fade filter on the image input if needed
+        cur_label = overlay_label
+        if need_fade:
+            fade_label = f"[tf{idx}]"
+            fade_parts = []
+            if trans_in == "fade":
+                fade_parts.append(f"fade=t=in:st=0:d={ad}:alpha=1")
+            if trans_out == "fade":
+                fade_parts.append(f"fade=t=out:st={dur - ad}:d={ad}:alpha=1")
+            filter_parts.append(f"{overlay_label}{','.join(fade_parts)}{fade_label}")
+            cur_label = fade_label
+
+        # Build x/y expressions for slide effects
+        def _slide_enter(direction, axis):
+            d = direction.split("_")[1] if "_" in direction else ""
+            if axis == "x":
+                if d == "left": return f"if(lt(t-{s},{ad}),W-W*(t-{s})/{ad},0)"
+                if d == "right": return f"if(lt(t-{s},{ad}),-W+W*(t-{s})/{ad},0)"
+            else:
+                if d == "up": return f"if(lt(t-{s},{ad}),H-H*(t-{s})/{ad},0)"
+                if d == "down": return f"if(lt(t-{s},{ad}),-H+H*(t-{s})/{ad},0)"
+            return "0"
+
+        def _slide_exit(direction, axis):
+            d = direction.split("_")[1] if "_" in direction else ""
+            if axis == "x":
+                if d == "left": return f"if(gt(t,{e-ad}),-W*(t-{e-ad})/{ad},0)"
+                if d == "right": return f"if(gt(t,{e-ad}),W*(t-{e-ad})/{ad},0)"
+            else:
+                if d == "up": return f"if(gt(t,{e-ad}),-H*(t-{e-ad})/{ad},0)"
+                if d == "down": return f"if(gt(t,{e-ad}),H*(t-{e-ad})/{ad},0)"
+            return "0"
+
+        if use_slide:
+            enter_x = _slide_enter(trans_in, "x") if trans_in.startswith("slide_") else "0"
+            enter_y = _slide_enter(trans_in, "y") if trans_in.startswith("slide_") else "0"
+            exit_x = _slide_exit(trans_out, "x") if trans_out.startswith("slide_") else "0"
+            exit_y = _slide_exit(trans_out, "y") if trans_out.startswith("slide_") else "0"
+            # Combine: during enter phase use enter expr, during exit use exit, else 0
+            x_expr = f"if(lt(t,{s+ad}),{enter_x},if(gt(t,{e-ad}),{exit_x},0))"
+            y_expr = f"if(lt(t,{s+ad}),{enter_y},if(gt(t,{e-ad}),{exit_y},0))"
+            # Simplify if one side is just "0"
+            if enter_x == "0" and exit_x == "0": x_expr = "0"
+            if enter_y == "0" and exit_y == "0": y_expr = "0"
+            filter_parts.append(
+                f"{prev_label}{cur_label}overlay="
+                f"x='{x_expr}':y='{y_expr}':"
+                f"enable='between(t,{s},{e})'{out_label}"
+            )
+        else:
+            filter_parts.append(
+                f"{prev_label}{cur_label}overlay=0:0:"
+                f"enable='between(t,{s},{e})':"
+                f"shortest=0{out_label}"
+            )
         prev_label = out_label
 
     if not filter_parts:
