@@ -56,6 +56,23 @@ pip install -q -r requirements.txt
 # Create directories
 mkdir -p videos assets/music assets/videos output data .cache/thumbnails
 
+# Set up git repo for auto-updates
+echo "Setting up auto-updates..."
+PARENT_DIR="$(cd .. && pwd)"
+if [ ! -d "$PARENT_DIR/.git" ]; then
+    cd "$PARENT_DIR"
+    git init -q
+    git remote add origin https://github.com/paxlucta/peace-grappler.git 2>/dev/null || \
+        git remote set-url origin https://github.com/paxlucta/peace-grappler.git
+    git fetch -q origin 2>/dev/null || true
+    git checkout -b main 2>/dev/null || true
+    git branch --set-upstream-to=origin/main main 2>/dev/null || true
+    cd "$(dirname "$0")"
+    echo "Auto-updates configured ✓"
+else
+    echo "Git repo already configured ✓"
+fi
+
 echo ""
 echo "════════════════════════════════════════"
 echo "  Installation complete!"
