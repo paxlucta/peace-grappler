@@ -39,6 +39,24 @@ chmod +x "$APP_DIR/PeaceGrappler.command"
 find "$APP_DIR" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 find "$APP_DIR" -name "*.pyc" -delete 2>/dev/null || true
 
+# Add Desktop alias so user can drag the folder there
+ln -s "$HOME/Desktop" "${STAGE_DIR}/Desktop"
+
+# Create a README on the DMG root
+cat > "${STAGE_DIR}/READ ME FIRST.txt" << 'INSTRUCTIONS'
+HOW TO INSTALL
+==============
+
+1. Drag the "PeaceGrappler" folder to your Desktop (or wherever you like)
+2. Open the PeaceGrappler folder
+3. Double-click "Install.command"
+   - If macOS says it can't be opened: right-click → Open → click Open
+   - Wait for "Installation complete!" to appear
+4. Double-click "PeaceGrappler.command" to launch the app
+
+That's it! The app opens in your browser at localhost:5555.
+INSTRUCTIONS
+
 # Create DMG
 echo "Creating DMG..."
 hdiutil create \

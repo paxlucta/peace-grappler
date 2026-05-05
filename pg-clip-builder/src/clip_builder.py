@@ -2144,7 +2144,15 @@ function addVideoItem(clip, startTime) {
 }
 
 function removeVideoItem(idx) {
+  var removed = videoItems[idx];
+  var gap = removed.duration;
+  var threshold = removed.startTime;
   videoItems.splice(idx, 1);
+  for (var i = 0; i < videoItems.length; i++) {
+    if (videoItems[i].startTime >= threshold + gap) {
+      videoItems[i].startTime -= gap;
+    }
+  }
   syncTl();
 }
 

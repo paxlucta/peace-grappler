@@ -60,13 +60,34 @@ for group in TAGS.values():
     ALL_TAGS.extend(group)
 ALL_TAG_SET = set(ALL_TAGS)
 
-# ── progress queue ───────────────────────────────────────────────────────────
+# ── server-side analysis state ────────────────────────────────────────────────
 
 progress_queue = queue.Queue()
+_analysis_lock = threading.Lock()
+_analysis_state = {
+    "running": False,
+    "video_id": None,
+    "video_name": None,
+    "queued": [],       # list of {"id": int, "force": bool}
+    "completed": 0,
+    "total": 0,
+}
 
 
 def emit_progress(msg):
     progress_queue.put(msg)
+
+
+def _get_status_snapshot():
+    with _analysis_lock:
+        return {
+            "running": _analysis_state["running"],
+            "video_id": _analysis_state["video_id"],
+            "video_name": _analysis_state["video_name"],
+            "queued": len(_analysis_state["queued"]),
+            "completed": _analysis_state["completed"],
+            "total": _analysis_state["total"],
+        }
 
 
 # ── frame extraction ─────────────────────────────────────────────────────────
@@ -421,68 +442,136 @@ def scan_videos():
     return jsonify({"registered": registered, "videos": result})
 
 
+def _analyze_one(video_id, force):
+    """Analyze a single video. Runs inside the worker thread."""
+    video = get_video_by_id(video_id)
+    if not video:
+        emit_progress(f"Video {video_id} not found")
+        return False
+
+    with _analysis_lock:
+        _analysis_state["video_id"] = video_id
+        _analysis_state["video_name"] = video["filename"]
+
+    try:
+        video_path = video["path"]
+        duration = video["duration"]
+
+        if duration <= 0:
+            emit_progress(f"Cannot read duration for {video['filename']}")
+            return False
+
+        analyzed_tags = get_analyzed_tags(video_id)
+        new_tags = ALL_TAG_SET - analyzed_tags
+
+        if force or not analyzed_tags:
+            emit_progress(f"Full analysis of {video['filename']} ({duration:.1f}s)...")
+            result = analyze_full(video_path, duration)
+            if result is None:
+                emit_progress("Analysis failed")
+                return False
+            save_analysis(video_id, result["tags"], result["moments"],
+                          list(ALL_TAG_SET))
+            emit_progress(f"Saved {len(result['tags'])} tags")
+
+        elif new_tags:
+            emit_progress(f"Incremental analysis ({len(new_tags)} new tags)...")
+            new_tag_results = analyze_incremental(video_path, duration, new_tags)
+            if new_tag_results:
+                save_analysis(video_id, new_tag_results, [], list(new_tags))
+                emit_progress(f"Saved {len(new_tag_results)} new tags")
+            else:
+                save_analysis(video_id, {}, [], list(new_tags))
+                emit_progress("No new tags found")
+
+        else:
+            emit_progress("Video is up to date, nothing to analyze")
+
+        return True
+    except Exception as e:
+        emit_progress(f"Error: {e}")
+        return False
+
+
+def _worker_loop():
+    """Background worker that processes the analysis queue."""
+    while True:
+        with _analysis_lock:
+            if not _analysis_state["queued"]:
+                _analysis_state["running"] = False
+                _analysis_state["video_id"] = None
+                _analysis_state["video_name"] = None
+                emit_progress("QUEUE:done")
+                return
+            item = _analysis_state["queued"].pop(0)
+
+        vid_id = item["id"]
+        force = item["force"]
+        emit_progress(f"--- Video {_analysis_state['completed'] + 1}/{_analysis_state['total']} ---")
+        ok = _analyze_one(vid_id, force)
+
+        with _analysis_lock:
+            _analysis_state["completed"] += 1
+        emit_progress(f"VIDEO:{vid_id}:{'ok' if ok else 'error'}")
+
+        if not ok:
+            with _analysis_lock:
+                _analysis_state["queued"].clear()
+
+
+def _start_worker(items):
+    """Enqueue items and start worker if not already running."""
+    with _analysis_lock:
+        if _analysis_state["running"]:
+            # Add to existing queue
+            _analysis_state["queued"].extend(items)
+            _analysis_state["total"] += len(items)
+            return
+        _analysis_state["running"] = True
+        _analysis_state["queued"] = list(items)
+        _analysis_state["completed"] = 0
+        _analysis_state["total"] = len(items)
+    # Drain any stale messages
+    while not progress_queue.empty():
+        try:
+            progress_queue.get_nowait()
+        except queue.Empty:
+            break
+    threading.Thread(target=_worker_loop, daemon=True).start()
+
+
 @analyzer_bp.route("/analyze/run/<int:video_id>", methods=["POST"])
 def run_analysis(video_id):
-    """Analyze a single video (runs in background thread)."""
+    """Queue a single video for analysis."""
     video = get_video_by_id(video_id)
     if not video:
         return jsonify({"error": "Video not found"}), 404
-
     force = request.json.get("force", False) if request.json else False
-
-    def _run():
-        try:
-            video_path = video["path"]
-            duration = video["duration"]
-
-            if duration <= 0:
-                emit_progress(f"Cannot read duration for {video['filename']}")
-                emit_progress("DONE:error")
-                return
-
-            # Check which tags need analysis
-            analyzed_tags = get_analyzed_tags(video_id)
-            new_tags = ALL_TAG_SET - analyzed_tags
-
-            if force or not analyzed_tags:
-                # Full analysis
-                emit_progress(f"Full analysis of {video['filename']} ({duration:.1f}s)...")
-                result = analyze_full(video_path, duration)
-                if result is None:
-                    emit_progress("Analysis failed")
-                    emit_progress("DONE:error")
-                    return
-
-                save_analysis(video_id, result["tags"], result["moments"],
-                              list(ALL_TAG_SET))
-                emit_progress(f"Saved {len(result['tags'])} tags")
-                emit_progress("DONE:ok")
-
-            elif new_tags:
-                # Incremental analysis
-                emit_progress(f"Incremental analysis ({len(new_tags)} new tags)...")
-                new_tag_results = analyze_incremental(video_path, duration, new_tags)
-
-                if new_tag_results:
-                    save_analysis(video_id, new_tag_results, [],
-                                  list(new_tags))
-                    emit_progress(f"Saved {len(new_tag_results)} new tags")
-                else:
-                    # Still mark tags as analyzed even if none found
-                    save_analysis(video_id, {}, [], list(new_tags))
-                    emit_progress("No new tags found")
-                emit_progress("DONE:ok")
-
-            else:
-                emit_progress("Video is up to date, nothing to analyze")
-                emit_progress("DONE:ok")
-
-        except Exception as e:
-            emit_progress(f"Error: {e}")
-            emit_progress("DONE:error")
-
-    threading.Thread(target=_run, daemon=True).start()
+    _start_worker([{"id": video_id, "force": force}])
     return jsonify({"status": "started"})
+
+
+@analyzer_bp.route("/analyze/run-all", methods=["POST"])
+def run_all_analysis():
+    """Queue all pending videos for analysis."""
+    videos = get_all_videos()
+    items = []
+    for v in videos:
+        analyzed_tags = get_analyzed_tags(v["id"])
+        new_tags = ALL_TAG_SET - analyzed_tags
+        if not v["analyzed_at"] or new_tags:
+            force = bool(v["analyzed_at"] and not new_tags)
+            items.append({"id": v["id"], "force": force})
+    if not items:
+        return jsonify({"status": "nothing", "count": 0})
+    _start_worker(items)
+    return jsonify({"status": "started", "count": len(items)})
+
+
+@analyzer_bp.route("/analyze/state")
+def analyze_state():
+    """Return current analysis state (for reconnecting after navigation)."""
+    return jsonify(_get_status_snapshot())
 
 
 @analyzer_bp.route("/analyze/status")
@@ -493,9 +582,14 @@ def analyze_status():
             try:
                 msg = progress_queue.get(timeout=30)
                 yield f"data: {json.dumps({'message': msg})}\n\n"
-                if msg.startswith("DONE:"):
+                if msg == "QUEUE:done":
                     break
             except queue.Empty:
+                # Send heartbeat and check if still running
+                snap = _get_status_snapshot()
+                if not snap["running"]:
+                    yield f"data: {json.dumps({'message': 'QUEUE:done'})}\n\n"
+                    break
                 yield f"data: {json.dumps({'message': 'waiting...'})}\n\n"
 
     return Response(generate(), mimetype="text/event-stream")
@@ -599,8 +693,8 @@ td{font-size:13px}
 <script>
 var videos = [];
 var analyzing = false;
-var analyzingAll = false;
 var analyzingVideoId = null;
+var evtSource = null;
 
 async function scanVideos() {
   document.getElementById('scan-status').textContent = 'Scanning...';
@@ -614,12 +708,6 @@ async function scanVideos() {
   } catch(e) {
     document.getElementById('scan-status').textContent = 'Scan failed: ' + e.message;
   }
-}
-
-function getPendingVideos() {
-  return videos.filter(function(v) {
-    return !v.analyzed_at || v.needs_update;
-  });
 }
 
 function renderList() {
@@ -655,8 +743,7 @@ function renderList() {
       + '</tr>';
   }
 
-  // Show/hide Analyze All button
-  var pending = getPendingVideos();
+  var pending = videos.filter(function(v) { return !v.analyzed_at || v.needs_update; });
   var allBtn = document.getElementById('analyze-all-btn');
   if (pending.length > 0 && !analyzing) {
     allBtn.style.display = '';
@@ -670,102 +757,104 @@ function renderList() {
   }
 }
 
+function connectSSE() {
+  if (evtSource) evtSource.close();
+  var prog = document.getElementById('progress');
+  prog.classList.add('active');
+
+  evtSource = new EventSource('/analyze/status');
+  evtSource.onmessage = function(e) {
+    var data = JSON.parse(e.data);
+    var msg = data.message;
+    if (msg === 'QUEUE:done') {
+      evtSource.close();
+      evtSource = null;
+      analyzing = false;
+      analyzingVideoId = null;
+      addLine('All done!', 'done');
+      scanVideos();
+      return;
+    }
+    var m = msg.match(/^VIDEO:(\d+):(ok|error)$/);
+    if (m) {
+      var ok = m[2] === 'ok';
+      addLine(ok ? 'Video complete' : 'Video failed', ok ? 'done' : 'error');
+      scanVideos();
+      return;
+    }
+    if (msg !== 'waiting...') addLine(msg);
+  };
+  evtSource.onerror = function() {
+    evtSource.close();
+    evtSource = null;
+    // Don't mark as not-analyzing — server may still be running
+    checkState();
+  };
+}
+
 function analyzeVideo(videoId, force) {
-  if (analyzing) return Promise.resolve(false);
+  if (analyzing) return;
   analyzing = true;
   analyzingVideoId = videoId;
   renderList();
-
-  var prog = document.getElementById('progress');
-  prog.classList.add('active');
-  if (!analyzingAll) {
-    document.getElementById('progress-lines').innerHTML = '';
-  }
-
+  document.getElementById('progress-lines').innerHTML = '';
   addLine('Starting analysis...');
 
-  return new Promise(function(resolve) {
-    fetch('/analyze/run/' + videoId, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({force: force}),
-    }).then(function() {
-      var es = new EventSource('/analyze/status');
-      es.onmessage = function(e) {
-        var data = JSON.parse(e.data);
-        var msg = data.message;
-        if (msg.startsWith('DONE:')) {
-          es.close();
-          analyzing = false;
-          analyzingVideoId = null;
-          var ok = msg === 'DONE:ok';
-          addLine(ok ? 'Analysis complete!' : 'Analysis failed',
-                  ok ? 'done' : 'error');
-          if (!analyzingAll) scanVideos();
-          resolve(ok);
-        } else {
-          addLine(msg);
-        }
-      };
-      es.onerror = function() {
-        es.close();
-        analyzing = false;
-        analyzingVideoId = null;
-        addLine('Connection lost', 'error');
-        renderList();
-        resolve(false);
-      };
-    }).catch(function(e) {
-      analyzing = false;
-      analyzingVideoId = null;
-      addLine('Error: ' + e.message, 'error');
-      renderList();
-      resolve(false);
-    });
+  fetch('/analyze/run/' + videoId, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({force: force}),
+  }).then(function() {
+    connectSSE();
+  }).catch(function(e) {
+    analyzing = false;
+    analyzingVideoId = null;
+    addLine('Error: ' + e.message, 'error');
+    renderList();
   });
 }
 
-async function analyzeAll() {
-  if (analyzing || analyzingAll) return;
-  analyzingAll = true;
+function analyzeAll() {
+  if (analyzing) return;
+  analyzing = true;
+  renderList();
   document.getElementById('progress-lines').innerHTML = '';
+  addLine('Queuing all pending videos...');
 
-  var prog = document.getElementById('progress');
-  prog.classList.add('active');
-
-  // Refresh list first
-  await scanVideos();
-  var pending = getPendingVideos();
-  var total = pending.length;
-  if (!total) {
-    addLine('No videos pending analysis.');
-    analyzingAll = false;
-    return;
-  }
-
-  addLine('Analyzing all ' + total + ' pending videos...', 'done');
-  var done = 0;
-
-  while (true) {
-    pending = getPendingVideos();
-    if (!pending.length) break;
-
-    var v = pending[0];
-    done++;
-    var force = !v.needs_update && v.analyzed_at;
-    addLine('\n--- Video ' + done + '/' + total + ': ' + v.filename + ' ---');
-    var ok = await analyzeVideo(v.id, force);
-    // Refresh videos list to update statuses
-    await scanVideos();
-    if (!ok) {
-      addLine('Stopping due to failure', 'error');
-      break;
+  fetch('/analyze/run-all', {method: 'POST'}).then(function(r) {
+    return r.json();
+  }).then(function(data) {
+    if (data.status === 'nothing') {
+      analyzing = false;
+      addLine('No videos pending analysis.');
+      renderList();
+      return;
     }
-  }
+    addLine('Analyzing ' + data.count + ' videos...', 'done');
+    connectSSE();
+  }).catch(function(e) {
+    analyzing = false;
+    addLine('Error: ' + e.message, 'error');
+    renderList();
+  });
+}
 
-  analyzingAll = false;
-  addLine('\nAll done! Analyzed ' + done + ' videos.', 'done');
-  scanVideos();
+async function checkState() {
+  try {
+    var res = await fetch('/analyze/state');
+    var state = await res.json();
+    if (state.running) {
+      analyzing = true;
+      analyzingVideoId = state.video_id;
+      var prog = document.getElementById('progress');
+      prog.classList.add('active');
+      addLine('Reconnected — analyzing ' + (state.video_name || 'video') +
+        ' (' + state.completed + '/' + state.total + ' done, ' +
+        state.queued + ' queued)');
+      renderList();
+      connectSSE();
+    }
+  } catch(e) {}
 }
 
 function addLine(text, cls) {
@@ -779,6 +868,7 @@ function addLine(text, cls) {
 }
 
 scanVideos();
+checkState();
 </script>
 </body>
 </html>"""
