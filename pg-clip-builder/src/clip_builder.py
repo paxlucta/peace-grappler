@@ -722,6 +722,7 @@ def _generate_multitrack(data):
         clip_data = _resolve_clip(item)
         if clip_data:
             clip_data["start_time"] = item.get("start_time", 0)
+            clip_data["track"] = item.get("track", 0)
             clip_data["wide"] = item.get("wide", False)
             clip_data["stack_order"] = item.get("stack_order", 0)
             clip_data["trans_in"] = item.get("trans_in")
@@ -732,7 +733,7 @@ def _generate_multitrack(data):
         return jsonify({"error": "No valid clips in video track"}), 400
 
     # Sort by start_time
-    clips.sort(key=lambda c: (c["start_time"], c["stack_order"]))
+    clips.sort(key=lambda c: (c.get("track", 0), c["start_time"], c["stack_order"]))
 
     music_list = _load_music_files()
     music_lookup = {m["name"]: m["path"] for m in music_list}
@@ -1113,7 +1114,7 @@ footer{
 #tl-grid{
   display:grid;
   grid-template-columns:50px 1fr;
-  grid-template-rows:20px 50px 40px minmax(70px, auto);
+  grid-auto-rows:auto;
   min-width:100%;
 }
 /* Time ruler */
@@ -1134,18 +1135,31 @@ footer{
 .track-label{
   font-size:9px;color:#666;font-weight:700;text-transform:uppercase;
   letter-spacing:1px;background:#111;border-right:1px solid #2a2a2a;
-  display:flex;align-items:center;justify-content:center;
-  padding:0 4px;user-select:none;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  padding:2px 4px;user-select:none;
 }
 /* Tracks */
 .track{
   position:relative;border-bottom:1px solid #1a1a1a;
   background:#0d0d0d;min-height:40px;
 }
-#video-track{min-height:70px;border-bottom:none;overflow:hidden}
-#video-track > .clip-card{display:none !important}
+.video-track{min-height:70px;overflow:hidden}
+.video-track:last-child{border-bottom:none}
+.video-track > .clip-card{display:none !important}
+.video-track-0{background:#0d0d0d}
+.video-track-1{background:#111114}
+.video-track-2{background:#14140f}
+.video-track-row{display:none}
+.video-track-row.active{display:contents}
 #sound-track{background:#0c0e0c;z-index:2}
 #text-track{background:#0c0c0e;z-index:2}
+.vt-group{display:flex;gap:2px;margin-left:4px}
+.vt-group-btn{
+  font-size:9px;font-weight:700;color:#555;background:#1a1a1a;border:1px solid #333;
+  border-radius:4px;padding:2px 6px;cursor:pointer;line-height:1.2;
+}
+.vt-group-btn:hover{color:#aaa;border-color:#555}
+.vt-group-btn.active{color:#e53935;border-color:#e53935;background:#1a1012}
 .track-empty{
   position:absolute;left:60px;top:50%;transform:translateY(-50%);
   color:#333;font-size:10px;pointer-events:none;white-space:nowrap;
@@ -1179,7 +1193,7 @@ footer{
 .vblock{background:#1e1e1e;border:1px solid #333;color:#ccc;z-index:1}
 .vblock-is-wide{border-color:#5a5a2a}
 /* Insertion indicator */
-#vt-insert-bar{
+.vt-insert-bar{
   position:absolute;top:2px;width:3px;height:calc(100% - 4px);
   background:#fff;border-radius:2px;z-index:10000;pointer-events:none;
   display:none;box-shadow:0 0 8px rgba(255,255,255,.7);
@@ -1519,18 +1533,39 @@ footer{
       <div class="track-label">TXT</div>
       <div id="text-track" class="track"><span class="track-empty">click to add text overlay</span></div>
       <div class="track-label">VID</div>
-      <div id="video-track" class="track"><span class="track-empty">drag clips here</span><div id="vt-insert-bar"></div></div>
+      <div id="video-track-0" class="track video-track video-track-0"><span class="track-empty">drag clips here</span><div class="vt-insert-bar"></div></div>
+      <div class="video-track-row" id="vt-row-1"><div class="track-label">II</div><div id="video-track-1" class="track video-track video-track-1"><span class="track-empty">wide clips only</span><div class="vt-insert-bar"></div></div></div>
+      <div class="video-track-row" id="vt-row-2"><div class="track-label">III</div><div id="video-track-2" class="track video-track video-track-2"><span class="track-empty">wide clips only</span><div class="vt-insert-bar"></div></div></div>
     </div>
   </div>
   <div class="controls">
     <label class="tl-check"><input type="checkbox" id="include-intro" checked/> Include Intro Video</label>
     <label class="tl-check"><input type="checkbox" id="include-outro" checked/> Include Outro Video</label>
+    <span style="font-size:12px;color:#888">Video Timelines</span>
+    <div class="vt-group"><button class="vt-group-btn active" onclick="setTrackCount(1)">I</button><button class="vt-group-btn" onclick="setTrackCount(2)">II</button><button class="vt-group-btn" onclick="setTrackCount(3)">III</button></div>
     <div class="tl-mode-toggle">
+      <span style="color:#aaa">I</span>
       <span>Free</span>
-      <div class="toggle-track active" id="tl-mode-toggle" onclick="toggleTimelineMode()">
+      <div class="toggle-track active" id="tl-mode-toggle-0" onclick="toggleTimelineMode(0)">
         <div class="toggle-knob"></div>
       </div>
-      <span>Sequential</span>
+      <span>Seq</span>
+    </div>
+    <div class="tl-mode-toggle" id="tl-mode-wrap-1" style="display:none">
+      <span style="color:#aaa">II</span>
+      <span>Free</span>
+      <div class="toggle-track active" id="tl-mode-toggle-1" onclick="toggleTimelineMode(1)">
+        <div class="toggle-knob"></div>
+      </div>
+      <span>Seq</span>
+    </div>
+    <div class="tl-mode-toggle" id="tl-mode-wrap-2" style="display:none">
+      <span style="color:#aaa">III</span>
+      <span>Free</span>
+      <div class="toggle-track active" id="tl-mode-toggle-2" onclick="toggleTimelineMode(2)">
+        <div class="toggle-knob"></div>
+      </div>
+      <span>Seq</span>
     </div>
     <button id="gen-btn" onclick="generateVideo()">Generate Video</button>
   </div>
@@ -1644,7 +1679,8 @@ var soundItems = [];    /* [{id, name, volume, startTime, duration, el}] */
 var textItems = [];     /* [{id, text, startTime, endTime, position, fontsize, el}] */
 var selectedTransition = 'fade';
 var nextBlkId = 0;
-var tlSequential = true; /* true = sequential mode (clips packed), false = free-form */
+var tlTrackCount = 1;
+var tlSequential = [true, true, true]; /* per-track: true = sequential, false = free-form */
 
 async function init() {
   var tags = await fetch('/api/tags').then(function(r){return r.json()});
@@ -1814,61 +1850,80 @@ function computeVideoRows() {
 }
 
 function renderVideoTrack() {
-  var track = document.getElementById('video-track');
-  track.querySelectorAll('.vblock,.trans-marker').forEach(function(e){e.remove()});
   var dur = Math.max(getVideoDuration(), 10);
-  track.style.width = (dur * CELL_W) + 'px';
-  var numRows = computeVideoRows();
 
-  /* Adjust track height for stacked rows */
-  var baseH = 70;
-  track.style.minHeight = (numRows > 1 ? numRows * 50 : baseH) + 'px';
+  for (var t = 0; t < 3; t++) {
+    var track = document.getElementById('video-track-' + t);
+    track.querySelectorAll('.vblock,.trans-marker').forEach(function(e){e.remove()});
+    track.style.width = (dur * CELL_W) + 'px';
 
-  for (var i = 0; i < videoItems.length; i++) {
-    var vi = videoItems[i];
-    /* clip block */
-    var blk = document.createElement('div');
-    blk.className = 'track-block vblock' + (vi.clip.wide ? ' vblock-is-wide' : '');
-    blk.style.left = (vi.startTime * CELL_W) + 'px';
-    blk.style.width = (vi.duration * CELL_W) + 'px';
-    if (numRows > 1) {
-      var rowH = 100 / numRows;
-      blk.style.top = (vi._row * rowH) + '%';
-      blk.style.height = rowH + '%';
+    var trackItems = [];
+    for (var i = 0; i < videoItems.length; i++) {
+      if ((videoItems[i].track || 0) === t) trackItems.push(i);
     }
-    var thumbUrl = vi.clip.id !== undefined ? '/api/thumbnail/' + vi.clip.id : '';
-    var vol = vi.volume !== undefined ? vi.volume : 5;
-    var vBars = '';
-    var vH = [3,5,7,9,12];
-    for (var vv = 0; vv < 5; vv++) {
-      vBars += '<div class="vv' + (vv < vol ? ' active' : '') + '" data-lv="' + (vv+1) + '" data-vidx="' + i + '"'
-        + ' style="height:' + vH[vv] + 'px" onclick="event.stopPropagation();setVideoVol(this)"></div>';
+
+    /* Compute rows for this track */
+    var rowEnds = [];
+    trackItems.sort(function(a, b) { return videoItems[a].startTime - videoItems[b].startTime; });
+    for (var ti = 0; ti < trackItems.length; ti++) {
+      var vi = videoItems[trackItems[ti]];
+      var s = vi.startTime, e = s + vi.duration;
+      var placed = false;
+      for (var r = 0; r < rowEnds.length; r++) {
+        if (rowEnds[r] <= s) { rowEnds[r] = e; vi._row = r; placed = true; break; }
+      }
+      if (!placed) { vi._row = rowEnds.length; rowEnds.push(e); }
     }
-    var transIn = vi.trans_in || '';
-    var transOut = vi.trans_out || '';
-    blk.innerHTML = (thumbUrl ? '<img class="vblock-thumb" src="' + thumbUrl + '"/>' : '')
-      + '<span class="blk-label">' + vi.duration.toFixed(1) + 's</span>'
-      + '<div class="vblk-vol">' + vBars + '</div>'
-      + (vi.clip.wide ? '<span class="vblock-wide"></span>' : '')
-      + '<span class="vtrans vt-in" data-vidx="' + i + '" data-dir="in">' + (transIn || '+') + '</span>'
-      + '<span class="vtrans vt-out" data-vidx="' + i + '" data-dir="out">' + (transOut || '+') + '</span>'
-      + '<button class="blk-rm" onclick="event.stopPropagation();removeVideoItem(' + i + ')">&times;</button>';
-    blk.dataset.idx = i;
-    vi._el = blk;
-    /* Transition pill clicks */
-    blk.querySelectorAll('.vtrans').forEach(function(pill) {
-      pill.addEventListener('click', function(e) {
-        e.stopPropagation();
-        openVideoTransPicker(parseInt(this.dataset.vidx), this.dataset.dir);
+    var numRows = Math.max(1, rowEnds.length);
+    var baseH = 70;
+    track.style.minHeight = (numRows > 1 ? numRows * 50 : baseH) + 'px';
+
+    for (var ti = 0; ti < trackItems.length; ti++) {
+      var idx = trackItems[ti];
+      var vi = videoItems[idx];
+      var blk = document.createElement('div');
+      blk.className = 'track-block vblock' + (vi.clip.wide ? ' vblock-is-wide' : '');
+      blk.style.left = (vi.startTime * CELL_W) + 'px';
+      blk.style.width = (vi.duration * CELL_W) + 'px';
+      if (numRows > 1) {
+        var rowH = 100 / numRows;
+        blk.style.top = (vi._row * rowH) + '%';
+        blk.style.height = rowH + '%';
+      }
+      var thumbUrl = vi.clip.id !== undefined ? '/api/thumbnail/' + vi.clip.id : '';
+      var vol = vi.volume !== undefined ? vi.volume : 5;
+      var vBars = '';
+      var vH = [3,5,7,9,12];
+      for (var vv = 0; vv < 5; vv++) {
+        vBars += '<div class="vv' + (vv < vol ? ' active' : '') + '" data-lv="' + (vv+1) + '" data-vidx="' + idx + '"'
+          + ' style="height:' + vH[vv] + 'px" onclick="event.stopPropagation();setVideoVol(this)"></div>';
+      }
+      var transIn = vi.trans_in || '';
+      var transOut = vi.trans_out || '';
+      blk.innerHTML = (thumbUrl ? '<img class="vblock-thumb" src="' + thumbUrl + '"/>' : '')
+        + '<span class="blk-label">' + vi.duration.toFixed(1) + 's</span>'
+        + '<div class="vblk-vol">' + vBars + '</div>'
+        + (vi.clip.wide ? '<span class="vblock-wide"></span>' : '')
+        + '<span class="vtrans vt-in" data-vidx="' + idx + '" data-dir="in">' + (transIn || '+') + '</span>'
+        + '<span class="vtrans vt-out" data-vidx="' + idx + '" data-dir="out">' + (transOut || '+') + '</span>'
+        + '<button class="blk-rm" onclick="event.stopPropagation();removeVideoItem(' + idx + ')">&times;</button>';
+      blk.dataset.idx = idx;
+      vi._el = blk;
+      blk.querySelectorAll('.vtrans').forEach(function(pill) {
+        pill.addEventListener('click', function(e) {
+          e.stopPropagation();
+          openVideoTransPicker(parseInt(this.dataset.vidx), this.dataset.dir);
+        });
       });
-    });
-    makeVideoDraggable(blk, vi, i);
-    track.appendChild(blk);
+      makeVideoDraggable(blk, vi, idx);
+      track.appendChild(blk);
+    }
+
+    /* update empty label */
+    var emp = track.querySelector('.track-empty');
+    if (trackItems.length && emp) emp.style.display = 'none';
+    else if (!trackItems.length && emp) emp.style.display = '';
   }
-  /* update empty label */
-  var emp = track.querySelector('.track-empty');
-  if (videoItems.length && emp) emp.style.display = 'none';
-  else if (!videoItems.length && emp) emp.style.display = '';
 }
 
 function renderSoundTrack() {
@@ -2009,13 +2064,11 @@ function makeVideoDraggable(el, data, idx) {
       /* Snap to 0.5s grid */
       newStart = Math.round(newStart * 2) / 2;
       var vidIdx = videoItems.indexOf(data);
-      if (tlSequential) {
+      var t = data.track || 0;
+      if (tlSequential[t]) {
         /* In sequential mode, reorder by drop position */
         data.startTime = newStart;
-        var isWide = data.clip.wide;
-        var peers = videoItems.filter(function(v) { return v.clip.wide === isWide; });
-        peers.sort(function(a, b) { return a.startTime - b.startTime; });
-        packTimeline();
+        packTimeline(t);
       } else {
         data.startTime = newStart;
         /* Handle vertical reorder for wide videos */
@@ -2060,20 +2113,17 @@ function reorderWideStack(movedIdx, dy) {
 
 function resolveVideoOverlaps(droppedIdx) {
   var dropped = videoItems[droppedIdx];
-  if (dropped.clip.wide) {
-    /* Wide video dropped: just sweep non-wide videos to avoid overlapping it */
-    sweepNonWideOverlaps();
-    return;
-  }
+  var t = dropped.track || 0;
+  var sameTrack = videoItems.filter(function(v) { return (v.track || 0) === t; });
 
   var dropStart = dropped.startTime;
   var dropEnd = dropStart + dropped.duration;
 
-  /* Find the leftmost video that overlaps with the dropped non-wide */
+  /* Find the leftmost video on this track that overlaps with the dropped */
   var overlapped = null;
-  for (var i = 0; i < videoItems.length; i++) {
-    if (i === droppedIdx) continue;
-    var vi = videoItems[i];
+  for (var i = 0; i < sameTrack.length; i++) {
+    var vi = sameTrack[i];
+    if (vi === dropped) continue;
     var viEnd = vi.startTime + vi.duration;
     if (vi.startTime < dropEnd && viEnd > dropStart) {
       if (!overlapped || vi.startTime < overlapped.startTime) {
@@ -2083,18 +2133,14 @@ function resolveVideoOverlaps(droppedIdx) {
   }
 
   if (overlapped) {
-    /* Collect: overlapped video + all non-wide videos to its left, excluding the dropped */
     var toPush = [];
-    for (var i = 0; i < videoItems.length; i++) {
-      if (i === droppedIdx) continue;
-      if (!videoItems[i].clip.wide && videoItems[i].startTime <= overlapped.startTime) {
-        toPush.push(videoItems[i]);
+    for (var i = 0; i < sameTrack.length; i++) {
+      if (sameTrack[i] === dropped) continue;
+      if (sameTrack[i].startTime <= overlapped.startTime) {
+        toPush.push(sameTrack[i]);
       }
     }
-    /* Sort by startTime to maintain relative order */
     toPush.sort(function(a, b) { return a.startTime - b.startTime; });
-
-    /* Place sequentially after dropped video */
     var cursor = dropEnd;
     for (var j = 0; j < toPush.length; j++) {
       toPush[j].startTime = cursor;
@@ -2102,63 +2148,68 @@ function resolveVideoOverlaps(droppedIdx) {
     }
   }
 
-  /* Sweep: ensure no non-wide video overlaps with ANY other video */
-  sweepNonWideOverlaps();
+  /* Sweep overlaps within this track */
+  sweepTrackOverlaps(t);
 }
 
-function sweepNonWideOverlaps() {
-  /* Ensure no non-wide video overlaps with any other video (wide or not).
-     Wide videos can overlap with each other, but non-wide cannot overlap anything. */
-  var nonWide = videoItems.filter(function(v) { return !v.clip.wide; });
-  nonWide.sort(function(a, b) { return a.startTime - b.startTime; });
+function sweepTrackOverlaps(trackIdx) {
+  var items = videoItems.filter(function(v) { return (v.track || 0) === trackIdx; });
+  items.sort(function(a, b) { return a.startTime - b.startTime; });
 
-  for (var i = 0; i < nonWide.length; i++) {
-    var nw = nonWide[i];
-    var nwStart = nw.startTime;
-    var nwEnd = nwStart + nw.duration;
+  for (var i = 0; i < items.length; i++) {
+    var vi = items[i];
+    var viEnd = vi.startTime + vi.duration;
 
-    /* Check against ALL other videos */
-    var maxEnd = nwStart; /* earliest safe start = current position */
-    for (var j = 0; j < videoItems.length; j++) {
-      if (videoItems[j] === nw) continue;
-      var vs = videoItems[j].startTime;
-      var ve = vs + videoItems[j].duration;
-      /* If this other video overlaps with our non-wide video, push right */
-      if (vs < nwEnd && ve > nwStart) {
-        maxEnd = Math.max(maxEnd, ve);
+    for (var j = 0; j < items.length; j++) {
+      if (items[j] === vi) continue;
+      var vs = items[j].startTime;
+      var ve = vs + items[j].duration;
+      if (vs < viEnd && ve > vi.startTime) {
+        vi.startTime = Math.max(vi.startTime, ve);
+        viEnd = vi.startTime + vi.duration;
       }
-    }
-    if (maxEnd > nwStart) {
-      nw.startTime = maxEnd;
-      nwEnd = maxEnd + nw.duration;
     }
   }
 }
 
-function toggleTimelineMode() {
-  tlSequential = !tlSequential;
-  var tog = document.getElementById('tl-mode-toggle');
-  tog.classList.toggle('active', tlSequential);
-  if (tlSequential) packTimeline();
+function setTrackCount(n) {
+  tlTrackCount = n;
+  document.querySelectorAll('.vt-group-btn').forEach(function(b, i) {
+    b.classList.toggle('active', i < n);
+  });
+  for (var t = 1; t <= 2; t++) {
+    var row = document.getElementById('vt-row-' + t);
+    var wrap = document.getElementById('tl-mode-wrap-' + t);
+    if (t < n) {
+      row.classList.add('active');
+      wrap.style.display = '';
+    } else {
+      row.classList.remove('active');
+      wrap.style.display = 'none';
+      /* Move items from hidden tracks to track 0 */
+      videoItems.forEach(function(vi) { if (vi.track === t) vi.track = 0; });
+    }
+  }
+  if (tlSequential[0]) packTimeline(0);
   syncTl();
 }
 
-function packTimeline() {
-  /* Pack all non-wide clips sequentially with no gaps, preserving order */
-  var nonWide = videoItems.filter(function(v) { return !v.clip.wide; });
-  nonWide.sort(function(a, b) { return a.startTime - b.startTime; });
+function toggleTimelineMode(trackIdx) {
+  tlSequential[trackIdx] = !tlSequential[trackIdx];
+  var tog = document.getElementById('tl-mode-toggle-' + trackIdx);
+  tog.classList.toggle('active', tlSequential[trackIdx]);
+  if (tlSequential[trackIdx]) packTimeline(trackIdx);
+  syncTl();
+}
+
+function packTimeline(trackIdx) {
+  /* Pack clips on a given track sequentially with no gaps, preserving order */
+  var items = videoItems.filter(function(v) { return (v.track || 0) === trackIdx; });
+  items.sort(function(a, b) { return a.startTime - b.startTime; });
   var cursor = 0;
-  for (var i = 0; i < nonWide.length; i++) {
-    nonWide[i].startTime = cursor;
-    cursor += nonWide[i].duration;
-  }
-  /* Pack wide clips similarly among themselves */
-  var wide = videoItems.filter(function(v) { return v.clip.wide; });
-  wide.sort(function(a, b) { return a.startTime - b.startTime; });
-  cursor = 0;
-  for (var i = 0; i < wide.length; i++) {
-    wide[i].startTime = cursor;
-    cursor += wide[i].duration;
+  for (var i = 0; i < items.length; i++) {
+    items[i].startTime = cursor;
+    cursor += items[i].duration;
   }
 }
 
@@ -2234,22 +2285,27 @@ function setVideoVol(barEl) {
   });
 }
 
-function addVideoItem(clip, startTime) {
+function addVideoItem(clip, startTime, trackIdx) {
   /* Prevent adding the same scene twice */
   if (clip.id !== undefined && getTlClipIds().indexOf(clip.id) >= 0) return;
+  var t = trackIdx !== undefined ? trackIdx : 0;
   var dur = clip.duration;
-  var st = startTime !== undefined ? startTime : getVideoDuration();
+  var trackItems = videoItems.filter(function(v) { return (v.track || 0) === t; });
+  var trackEnd = 0;
+  trackItems.forEach(function(v) { trackEnd = Math.max(trackEnd, v.startTime + v.duration); });
+  var st = startTime !== undefined ? startTime : trackEnd;
   videoItems.push({
     clip: {id: clip.id, video_file: clip.video_file, start: clip.start, end: clip.end, filename: clip.filename, wide: clip.wide},
     duration: dur,
     startTime: st,
+    track: t,
     trans_in: selectedTransition,
     trans_out: null,
     volume: 5,
     stackOrder: 0,
   });
-  if (tlSequential) {
-    packTimeline();
+  if (tlSequential[t]) {
+    packTimeline(t);
   } else {
     resolveVideoOverlaps(videoItems.length - 1);
   }
@@ -2258,14 +2314,15 @@ function addVideoItem(clip, startTime) {
 
 function removeVideoItem(idx) {
   var removed = videoItems[idx];
+  var t = removed.track || 0;
   videoItems.splice(idx, 1);
-  if (tlSequential) {
-    packTimeline();
+  if (tlSequential[t]) {
+    packTimeline(t);
   } else {
     var gap = removed.duration;
     var threshold = removed.startTime;
     for (var i = 0; i < videoItems.length; i++) {
-      if (videoItems[i].startTime >= threshold + gap) {
+      if ((videoItems[i].track || 0) === t && videoItems[i].startTime >= threshold + gap) {
         videoItems[i].startTime -= gap;
       }
     }
@@ -2319,44 +2376,52 @@ function removeTextItem(id) {
 var lastInsertX = 0;
 
 function setupTracks() {
-  /* Video track: accept clips from grid via SortableJS (drop only, no reorder) */
-  var vt = document.getElementById('video-track');
-  new Sortable(vt, {
-    group: {name:'timeline', pull:false, put:function(to, from, el) {
-      return el.classList.contains('clip-card') && !el.classList.contains('in-tl') && !el.classList.contains('ignored');
-    }},
-    sort: false,
-    draggable: '.no-sort-dummy',
-    animation: 0,
-    onAdd: function(evt) {
-      var el = evt.item;
-      el.style.display = 'none';
-      var id = parseInt(el.dataset.id);
-      var clip = allClips.find(function(c){return c.id===id});
-      el.remove();
-      if (clip) {
-        var startTime = Math.max(0, Math.round(lastInsertX / CELL_W * 2) / 2);
-        addVideoItem(clip, startTime);
-      }
-    },
-  });
+  /* Video tracks: accept clips from grid via SortableJS */
+  for (var t = 0; t < 3; t++) {
+    (function(trackIdx) {
+      var vt = document.getElementById('video-track-' + trackIdx);
+      new Sortable(vt, {
+        group: {name:'timeline', pull:false, put:function(to, from, el) {
+          if (!el.classList.contains('clip-card') || el.classList.contains('in-tl') || el.classList.contains('ignored')) return false;
+          /* Tracks 1,2 only accept wide clips */
+          if (trackIdx > 0 && !el.classList.contains('wide')) return false;
+          return true;
+        }},
+        sort: false,
+        draggable: '.no-sort-dummy',
+        animation: 0,
+        onAdd: function(evt) {
+          var el = evt.item;
+          el.style.display = 'none';
+          var id = parseInt(el.dataset.id);
+          var clip = allClips.find(function(c){return c.id===id});
+          el.remove();
+          if (clip) {
+            var startTime = Math.max(0, Math.round(lastInsertX / CELL_W * 2) / 2);
+            addVideoItem(clip, startTime, trackIdx);
+          }
+        },
+      });
 
-  /* Insertion bar for video track */
-  var insertBar = document.getElementById('vt-insert-bar');
-  vt.addEventListener('dragover', function(e) {
-    var rect = vt.getBoundingClientRect();
-    var mouseX = e.clientX - rect.left + vt.parentElement.parentElement.scrollLeft;
-    /* Snap to 0.5s grid */
-    var snapped = Math.max(0, Math.round(mouseX / (CELL_W / 2)) * (CELL_W / 2));
-    lastInsertX = snapped;
-    insertBar.style.left = snapped + 'px';
-    insertBar.style.display = 'block';
+      /* Insertion bar */
+      var insertBar = vt.querySelector('.vt-insert-bar');
+      vt.addEventListener('dragover', function(e) {
+        var rect = vt.getBoundingClientRect();
+        var mouseX = e.clientX - rect.left + vt.parentElement.parentElement.scrollLeft;
+        var snapped = Math.max(0, Math.round(mouseX / (CELL_W / 2)) * (CELL_W / 2));
+        lastInsertX = snapped;
+        insertBar.style.left = snapped + 'px';
+        insertBar.style.display = 'block';
+      });
+      vt.addEventListener('dragleave', function(e) {
+        if (!vt.contains(e.relatedTarget)) insertBar.style.display = 'none';
+      });
+      vt.addEventListener('drop', function() { insertBar.style.display = 'none'; });
+    })(t);
+  }
+  document.addEventListener('dragend', function() {
+    document.querySelectorAll('.vt-insert-bar').forEach(function(b) { b.style.display = 'none'; });
   });
-  vt.addEventListener('dragleave', function(e) {
-    if (!vt.contains(e.relatedTarget)) insertBar.style.display = 'none';
-  });
-  vt.addEventListener('drop', function() { insertBar.style.display = 'none'; });
-  document.addEventListener('dragend', function() { insertBar.style.display = 'none'; });
 
   /* Sound track: click to add music */
   document.getElementById('sound-track').addEventListener('click', function(e) {
@@ -2610,7 +2675,7 @@ function buildTimeline() {
   for (var i = 0; i < sorted.length; i++) {
     var vi = sorted[i];
     var c = vi.clip;
-    var entry = {type:'clip', start_time:vi.startTime, wide:!!c.wide, stack_order:vi.stackOrder||0, volume:vi.volume||5,
+    var entry = {type:'clip', start_time:vi.startTime, track:vi.track||0, wide:!!c.wide, stack_order:vi.stackOrder||0, volume:vi.volume||5,
       trans_in:vi.trans_in||null, trans_out:vi.trans_out||null};
     if (c.id !== undefined) entry.id = c.id;
     else { entry.video_file = c.video_file; entry.start = c.start; entry.end = c.end; }
@@ -2782,16 +2847,19 @@ function loadNewTimeline(data) {
     var clip = null;
     if (item.id !== undefined) clip = allClips.find(function(c){return c.id===item.id});
     var dur = clip ? clip.duration : (item.end - item.start);
+    var itemTrack = item.track || 0;
     videoItems.push({
       clip: clip ? {id:clip.id, video_file:clip.video_file, start:clip.start, end:clip.end, filename:clip.filename, wide:clip.wide}
                   : {video_file:item.video_file, start:item.start, end:item.end, filename:(item.video_file||'').split('/').pop()},
       duration: dur,
       startTime: item.start_time !== undefined ? item.start_time : getVideoDuration(),
+      track: itemTrack,
       trans_in: item.trans_in || (videoItems.length > 0 ? (pendTrans || null) : null),
       trans_out: item.trans_out || null,
       volume: item.volume || 5,
       stackOrder: item.stack_order || 0,
     });
+    if (itemTrack > 0 && itemTrack >= tlTrackCount) setTrackCount(itemTrack + 1);
     pendTrans = null;
   }
   var st = data.sound_track || [];

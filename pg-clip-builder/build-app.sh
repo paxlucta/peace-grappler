@@ -21,7 +21,7 @@ osacompile -o "${APP}" -e '
 on run
     set bundlePath to POSIX path of (path to me)
     set launcherPath to bundlePath & "Contents/MacOS/_launcher"
-    do shell script "bash " & quoted form of launcherPath & " &> /dev/null &"
+    do shell script "bash " & quoted form of launcherPath & " >> /dev/null 2>&1"
 end run
 '
 
@@ -126,17 +126,39 @@ lsof -ti:5555 | xargs kill -9 2>/dev/null || true
 sleep 0.3
 
 echo "Starting PeaceGrappler at $(date)" > "$LOG"
-nohup python src/app.py >> "$LOG" 2>&1 &
+python src/app.py --no-reload >> "$LOG" 2>&1 &
+APP_PID=$!
 
+# Wait for server to be ready
 for i in $(seq 1 30); do
     if curl -s http://localhost:5555 > /dev/null 2>&1; then
-        open http://localhost:5555
-        exit 0
+        break
     fi
     sleep 0.5
 done
 
-osascript -e 'display dialog "PeaceGrappler failed to start." with title "PeaceGrappler" buttons {"OK"} with icon caution' 2>/dev/null
+if ! curl -s http://localhost:5555 > /dev/null 2>&1; then
+    osascript -e 'display dialog "PeaceGrappler failed to start." with title "PeaceGrappler" buttons {"OK"} with icon caution' 2>/dev/null
+    kill $APP_PID 2>/dev/null
+    exit 1
+fi
+
+# Open Chrome in app mode, fall back to default browser
+CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+PG_CHROME_DIR="$DATA_DIR/.chrome-app"
+if [ -x "$CHROME" ]; then
+    "$CHROME" --app=http://localhost:5555 --user-data-dir="$PG_CHROME_DIR" --window-size=1400,900 &
+    BROWSER_PID=$!
+else
+    open http://localhost:5555
+    BROWSER_PID=""
+fi
+
+# Wait for browser to close, then stop the server
+if [ -n "$BROWSER_PID" ]; then
+    wait $BROWSER_PID 2>/dev/null
+    kill $APP_PID 2>/dev/null
+fi
 LAUNCHER
 chmod +x "${MACOS}/_launcher"
 

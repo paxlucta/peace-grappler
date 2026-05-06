@@ -649,7 +649,7 @@ def main():
         print(f"Starting PeaceGrappler at http://localhost:{port}")
         if use_reloader:
             print("Auto-reload enabled — watching for file changes")
-        webbrowser.open(f"http://localhost:{port}")
+            webbrowser.open(f"http://localhost:{port}")
 
     app.run(host="0.0.0.0", port=port, debug=debug,
             use_reloader=use_reloader)
