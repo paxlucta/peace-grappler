@@ -838,8 +838,37 @@ def add_text_overlay(video_path, text, out_path, position="bottom",
         return False
 
 
-def _find_system_font():
-    """Find a usable TrueType font on the system."""
+def _find_system_font(fontfamily=None):
+    """Find a usable TrueType font on the system.
+
+    If fontfamily is given, look for it in assets/fonts first, then
+    system font directories.
+    """
+    if fontfamily:
+        # Check assets/fonts
+        fonts_dir = ASSETS_DIR / "fonts"
+        if fonts_dir.is_dir():
+            for ext in (".ttf", ".otf", ".ttc"):
+                p = fonts_dir / (fontfamily + ext)
+                if p.exists():
+                    return str(p)
+            # Case-insensitive fallback
+            for f in fonts_dir.iterdir():
+                if f.stem.lower() == fontfamily.lower() and f.suffix.lower() in (".ttf", ".otf", ".ttc"):
+                    return str(f)
+        # Check system fonts by name
+        system_dirs = [
+            "/System/Library/Fonts",
+            "/System/Library/Fonts/Supplemental",
+            "/Library/Fonts",
+        ]
+        for d in system_dirs:
+            dp = Path(d)
+            if dp.is_dir():
+                for f in dp.iterdir():
+                    if f.stem.lower() == fontfamily.lower() and f.suffix.lower() in (".ttf", ".otf", ".ttc"):
+                        return str(f)
+
     candidates = [
         "/System/Library/Fonts/Helvetica.ttc",
         "/System/Library/Fonts/HelveticaNeue.ttc",
@@ -891,7 +920,7 @@ def _wrap_text(text, font, max_width, draw):
 def _render_text_image(text, width, height, fontsize, fontcolor, bold,
                        box_opacity, x_frac, y_frac, position,
                        italic=False, bgcolor="#000000",
-                       w_frac=None, h_frac=None):
+                       w_frac=None, h_frac=None, fontfamily=None):
     """Render text onto a transparent RGBA image using Pillow.
 
     WYSIWYG: when w_frac/h_frac are provided, text is auto-sized to fill
@@ -902,7 +931,7 @@ def _render_text_image(text, width, height, fontsize, fontcolor, bold,
     img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
-    font_path = _find_system_font()
+    font_path = _find_system_font(fontfamily)
     color = _parse_color(fontcolor)
 
     if w_frac and h_frac and x_frac is not None and y_frac is not None:
@@ -1056,6 +1085,7 @@ def add_multiple_text_overlays(video_path, overlays, out_path):
         w_frac = ov.get("w_frac")
         h_frac = ov.get("h_frac")
         position = ov.get("position", "bottom")
+        fontfamily = ov.get("fontfamily")
         trans_in = ov.get("trans_in", "fade")
         trans_out = ov.get("trans_out", "fade")
 
@@ -1064,7 +1094,8 @@ def add_multiple_text_overlays(video_path, overlays, out_path):
             img = _render_text_image(text, W, H, fs, fc, bold, bo,
                                      x_frac, y_frac, position,
                                      italic=italic, bgcolor=bgcolor,
-                                     w_frac=w_frac, h_frac=h_frac)
+                                     w_frac=w_frac, h_frac=h_frac,
+                                     fontfamily=fontfamily)
             png_path = os.path.join(tmp_dir, f"_txt_{idx}.png")
             img.save(png_path)
         except Exception as exc:

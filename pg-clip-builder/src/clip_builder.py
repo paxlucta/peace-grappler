@@ -240,6 +240,31 @@ def api_transitions():
     return jsonify(TRANSITIONS)
 
 
+@clip_builder_bp.route("/api/fonts")
+def api_fonts():
+    """Return available fonts: defaults + any .ttf/.otf in assets/fonts."""
+    fonts = [
+        {"name": "Helvetica", "file": None},
+        {"name": "Arial", "file": None},
+        {"name": "Geneva", "file": None},
+    ]
+    fonts_dir = ASSETS_DIR / "fonts"
+    if fonts_dir.is_dir():
+        for f in sorted(fonts_dir.iterdir()):
+            if f.suffix.lower() in (".ttf", ".otf", ".ttc"):
+                fonts.append({"name": f.stem, "file": f.name})
+    return jsonify(fonts)
+
+
+@clip_builder_bp.route("/api/font/<path:filename>")
+def api_font_file(filename):
+    """Serve a font file from assets/fonts for CSS @font-face."""
+    font_path = ASSETS_DIR / "fonts" / filename
+    if font_path.is_file():
+        return send_file(str(font_path))
+    return "", 404
+
+
 @clip_builder_bp.route("/api/load-video", methods=["POST"])
 def api_load_video():
     """Look up a generated video by filename and return its saved timeline."""
@@ -921,6 +946,8 @@ def _generate_multitrack(data):
                     if "w_frac" in t and "h_frac" in t:
                         ov["w_frac"] = t["w_frac"]
                         ov["h_frac"] = t["h_frac"]
+                    if t.get("fontfamily"):
+                        ov["fontfamily"] = t["fontfamily"]
                     if t.get("bold"):
                         ov["bold"] = True
                     if t.get("italic"):
@@ -1116,6 +1143,7 @@ footer{
   background:#0d0d0d;min-height:40px;
 }
 #video-track{min-height:70px;border-bottom:none;overflow:hidden}
+#video-track > .clip-card{display:none !important}
 #sound-track{background:#0c0e0c;z-index:2}
 #text-track{background:#0c0c0e;z-index:2}
 .track-empty{
@@ -1290,6 +1318,17 @@ footer{
 .controls{display:flex;align-items:center;gap:12px;margin-top:6px}
 .tl-check{font-size:12px;color:#888;cursor:pointer;display:flex;align-items:center;gap:4px;user-select:none}
 .tl-check input{accent-color:#e53935;cursor:pointer}
+.tl-mode-toggle{display:flex;align-items:center;gap:6px;font-size:12px;color:#888;user-select:none}
+.tl-mode-toggle .toggle-track{
+  width:36px;height:18px;border-radius:9px;background:#333;cursor:pointer;
+  position:relative;transition:background .2s;flex-shrink:0;
+}
+.tl-mode-toggle .toggle-track.active{background:#e53935}
+.tl-mode-toggle .toggle-knob{
+  width:14px;height:14px;border-radius:50%;background:#fff;
+  position:absolute;top:2px;left:2px;transition:left .2s;
+}
+.tl-mode-toggle .toggle-track.active .toggle-knob{left:20px}
 #gen-btn{
   background:#e53935;color:#fff;border:none;padding:8px 20px;font-weight:600;
   border-radius:6px;margin-left:auto;transition:background .2s;
@@ -1364,6 +1403,11 @@ footer{
   padding:10px 16px;background:#222;border-bottom:1px solid #333;
   flex-wrap:wrap;
 }
+.te-font-select{
+  background:#111;color:#fff;border:1px solid #444;border-radius:6px;
+  padding:4px 8px;font-size:12px;cursor:pointer;max-width:140px;
+}
+.te-font-select:focus{outline:none;border-color:#e53935}
 .te-toolbar input[type="text"]{
   flex:1;min-width:180px;background:#111;color:#fff;border:1px solid #444;
   border-radius:6px;padding:6px 10px;font-size:14px;
@@ -1481,6 +1525,13 @@ footer{
   <div class="controls">
     <label class="tl-check"><input type="checkbox" id="include-intro" checked/> Include Intro Video</label>
     <label class="tl-check"><input type="checkbox" id="include-outro" checked/> Include Outro Video</label>
+    <div class="tl-mode-toggle">
+      <span>Free</span>
+      <div class="toggle-track active" id="tl-mode-toggle" onclick="toggleTimelineMode()">
+        <div class="toggle-knob"></div>
+      </div>
+      <span>Sequential</span>
+    </div>
     <button id="gen-btn" onclick="generateVideo()">Generate Video</button>
   </div>
 </footer>
@@ -1548,6 +1599,8 @@ footer{
     <div class="te-toolbar">
       <button class="te-btn te-add-btn" onclick="teAddBox()" title="Add text box">+</button>
       <div class="te-sep"></div>
+      <select id="te-font" class="te-font-select" onchange="teFontChanged()"></select>
+      <div class="te-sep"></div>
       <label class="te-label">Text</label>
       <input type="color" id="te-fontcolor" value="#ffffff"/>
       <div class="te-sep"></div>
@@ -1591,6 +1644,7 @@ var soundItems = [];    /* [{id, name, volume, startTime, duration, el}] */
 var textItems = [];     /* [{id, text, startTime, endTime, position, fontsize, el}] */
 var selectedTransition = 'fade';
 var nextBlkId = 0;
+var tlSequential = true; /* true = sequential mode (clips packed), false = free-form */
 
 async function init() {
   var tags = await fetch('/api/tags').then(function(r){return r.json()});
@@ -1603,6 +1657,25 @@ async function init() {
 
   allClips = await fetch('/api/clips').then(function(r){return r.json()});
   renderGrid();
+
+  /* Load fonts for text editor */
+  var fontData = await fetch('/api/fonts').then(function(r){return r.json()});
+  var fontSel = document.getElementById('te-font');
+  var defOpt = document.createElement('option');
+  defOpt.value = ''; defOpt.textContent = 'Default';
+  fontSel.appendChild(defOpt);
+  for (var fi = 0; fi < fontData.length; fi++) {
+    var fo = document.createElement('option');
+    fo.value = fontData[fi].name; fo.textContent = fontData[fi].name;
+    if (fontData[fi].file) fo.style.fontFamily = '"' + fontData[fi].name + '"';
+    fontSel.appendChild(fo);
+    /* Register custom fonts via CSS @font-face */
+    if (fontData[fi].file) {
+      var style = document.createElement('style');
+      style.textContent = '@font-face { font-family: "' + fontData[fi].name + '"; src: url("/api/font/' + fontData[fi].file + '"); }';
+      document.head.appendChild(style);
+    }
+  }
 
   musicList = await fetch('/api/music').then(function(r){return r.json()});
   musicColorMap['No Music'] = NO_MUSIC_COLOR;
@@ -1936,12 +2009,21 @@ function makeVideoDraggable(el, data, idx) {
       /* Snap to 0.5s grid */
       newStart = Math.round(newStart * 2) / 2;
       var vidIdx = videoItems.indexOf(data);
-      data.startTime = newStart;
-      /* Handle vertical reorder for wide videos */
-      if (data.clip.wide && vidIdx >= 0) {
-        reorderWideStack(vidIdx, e2.clientY - startY);
+      if (tlSequential) {
+        /* In sequential mode, reorder by drop position */
+        data.startTime = newStart;
+        var isWide = data.clip.wide;
+        var peers = videoItems.filter(function(v) { return v.clip.wide === isWide; });
+        peers.sort(function(a, b) { return a.startTime - b.startTime; });
+        packTimeline();
+      } else {
+        data.startTime = newStart;
+        /* Handle vertical reorder for wide videos */
+        if (data.clip.wide && vidIdx >= 0) {
+          reorderWideStack(vidIdx, e2.clientY - startY);
+        }
+        if (vidIdx >= 0) resolveVideoOverlaps(vidIdx);
       }
-      if (vidIdx >= 0) resolveVideoOverlaps(vidIdx);
       syncTl();
     }
     document.addEventListener('mousemove', onMove);
@@ -2053,6 +2135,33 @@ function sweepNonWideOverlaps() {
   }
 }
 
+function toggleTimelineMode() {
+  tlSequential = !tlSequential;
+  var tog = document.getElementById('tl-mode-toggle');
+  tog.classList.toggle('active', tlSequential);
+  if (tlSequential) packTimeline();
+  syncTl();
+}
+
+function packTimeline() {
+  /* Pack all non-wide clips sequentially with no gaps, preserving order */
+  var nonWide = videoItems.filter(function(v) { return !v.clip.wide; });
+  nonWide.sort(function(a, b) { return a.startTime - b.startTime; });
+  var cursor = 0;
+  for (var i = 0; i < nonWide.length; i++) {
+    nonWide[i].startTime = cursor;
+    cursor += nonWide[i].duration;
+  }
+  /* Pack wide clips similarly among themselves */
+  var wide = videoItems.filter(function(v) { return v.clip.wide; });
+  wide.sort(function(a, b) { return a.startTime - b.startTime; });
+  cursor = 0;
+  for (var i = 0; i < wide.length; i++) {
+    wide[i].startTime = cursor;
+    cursor += wide[i].duration;
+  }
+}
+
 /* Drag and resize for sound/text blocks */
 function makeDraggable(el, data, trackType) {
   var startX, startLeft, startW, resizing = false;
@@ -2139,18 +2248,26 @@ function addVideoItem(clip, startTime) {
     volume: 5,
     stackOrder: 0,
   });
-  resolveVideoOverlaps(videoItems.length - 1);
+  if (tlSequential) {
+    packTimeline();
+  } else {
+    resolveVideoOverlaps(videoItems.length - 1);
+  }
   syncTl();
 }
 
 function removeVideoItem(idx) {
   var removed = videoItems[idx];
-  var gap = removed.duration;
-  var threshold = removed.startTime;
   videoItems.splice(idx, 1);
-  for (var i = 0; i < videoItems.length; i++) {
-    if (videoItems[i].startTime >= threshold + gap) {
-      videoItems[i].startTime -= gap;
+  if (tlSequential) {
+    packTimeline();
+  } else {
+    var gap = removed.duration;
+    var threshold = removed.startTime;
+    for (var i = 0; i < videoItems.length; i++) {
+      if (videoItems[i].startTime >= threshold + gap) {
+        videoItems[i].startTime -= gap;
+      }
     }
   }
   syncTl();
@@ -2213,6 +2330,7 @@ function setupTracks() {
     animation: 0,
     onAdd: function(evt) {
       var el = evt.item;
+      el.style.display = 'none';
       var id = parseInt(el.dataset.id);
       var clip = allClips.find(function(c){return c.id===id});
       el.remove();
@@ -2512,6 +2630,7 @@ function buildTimeline() {
               fontsize:bx.fontsize||42, fontcolor:bx.fontcolor||'white',
               box_opacity:bx.box_opacity !== undefined ? bx.box_opacity : 0.5,
               trans_in:tg.trans_in||'fade', trans_out:tg.trans_out||'fade'};
+      if (bx.fontfamily) o.fontfamily = bx.fontfamily;
       if (bx.x_frac !== undefined) { o.x_frac = bx.x_frac; o.y_frac = bx.y_frac; }
       if (bx.w_frac) { o.w_frac = bx.w_frac; o.h_frac = bx.h_frac; }
       if (bx.bold) o.bold = true;
@@ -2848,6 +2967,7 @@ function openTextEditor(existingItem, startTime, endTime) {
       var eb = existingItem.boxes[bi];
       boxOpts.push({
         text: eb.text || '',
+        fontfamily: eb.fontfamily || null,
         fontsize: eb.fontsize || 42,
         fontcolor: eb.fontcolor && eb.fontcolor !== 'white' ? eb.fontcolor : '#ffffff',
         bold: eb.bold || false,
@@ -2863,6 +2983,7 @@ function openTextEditor(existingItem, startTime, endTime) {
   } else if (existingItem && existingItem.text) {
     boxOpts.push({
       text: existingItem.text,
+      fontfamily: existingItem.fontfamily || null,
       fontsize: existingItem.fontsize || 42,
       fontcolor: existingItem.fontcolor && existingItem.fontcolor !== 'white' ? existingItem.fontcolor : '#ffffff',
       bold: existingItem.bold || false,
@@ -2894,6 +3015,7 @@ function teCreateBox(opts) {
   var box = {
     id: ++teNextBoxId,
     text: opts.text || '',
+    fontfamily: opts.fontfamily || null,
     fontsize: opts.fontsize || 42,
     fontcolor: opts.fontcolor || '#ffffff',
     bold: opts.bold || false,
@@ -2965,6 +3087,7 @@ function teSelectBox(box) {
     b.el.classList.toggle('te-selected', b.id === box.id);
   });
   /* Load box props into toolbar */
+  document.getElementById('te-font').value = box.fontfamily || '';
   document.getElementById('te-fontcolor').value = box.fontcolor;
   document.getElementById('te-bold-btn').classList.toggle('active', box.bold);
   document.getElementById('te-italic-btn').classList.toggle('active', box.italic);
@@ -2979,6 +3102,14 @@ function teToolbarChanged() {
   box.bold = document.getElementById('te-bold-btn').classList.contains('active');
   box.italic = document.getElementById('te-italic-btn').classList.contains('active');
   box.bgcolor = document.getElementById('te-bgcolor').value;
+  teRenderBox(box);
+}
+
+function teFontChanged() {
+  var box = teState.selectedBox;
+  if (!box) return;
+  var val = document.getElementById('te-font').value;
+  box.fontfamily = val || null;
   teRenderBox(box);
 }
 
@@ -3008,6 +3139,7 @@ function teRenderBox(box) {
   span.textContent = text;
 
   el.style.color = box.fontcolor;
+  el.style.fontFamily = box.fontfamily ? '"' + box.fontfamily + '", sans-serif' : 'sans-serif';
   el.style.fontWeight = box.bold ? '700' : '400';
   el.style.fontStyle = box.italic ? 'italic' : 'normal';
 
@@ -3209,7 +3341,7 @@ function applyTextEditor() {
   var boxData = validBoxes.map(function(b) {
     var el = b.el;
     return {
-      text: b.text.trim(), fontsize: b.fontsize, fontcolor: b.fontcolor,
+      text: b.text.trim(), fontfamily: b.fontfamily, fontsize: b.fontsize, fontcolor: b.fontcolor,
       bold: b.bold, italic: b.italic, bgcolor: b.bgcolor, box_opacity: b.box_opacity,
       x_frac: Math.max(0.02, Math.min(0.98, b.x_frac)),
       y_frac: Math.max(0.02, Math.min(0.98, b.y_frac)),
