@@ -24,5 +24,4 @@ data/*.db-shm
 node_modules/
 src/drive_client.json
 data/drive_token.json
-data/drive_client_secret.json
 data/drive_config.json

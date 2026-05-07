@@ -39,7 +39,6 @@ MMA highlight reel builder with AI-powered video analysis, scene tagging, and au
 |------|------|-------------|
 | **Builder** | `/builder` | Drag-and-drop timeline editor — assemble clips, add music, transitions, and generate videos |
 | **Analyze** | `/analyze` | Scan and AI-tag video scenes using Claude (activity, setting, camera, energy tags) |
-| **Generate** | `/generate` | Auto-generate montages by selecting tags, duration, and music |
 | **Library** | `/library` | Browse and play all generated videos, filter by tags, sort by date/duration |
 | **AI Wizard** | `/wizard` | Autonomous Instagram Reels generator — AI researches best practices and makes all creative decisions |
 

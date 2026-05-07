@@ -259,10 +259,9 @@ DRIVE_PAGE = """<!doctype html>
 <nav>
   <a href="/builder">Builder</a>
   <a href="/analyze">Analyze</a>
-  <a href="/generate">Generate</a>
   <a href="/library">Library</a>
   <a href="/wizard">AI Wizard</a>
-  <a href="/rate">Rate</a>
+  <a href="/rate">Scenes</a>
 </nav>
 </header>
 
