@@ -17,6 +17,7 @@ from analyzer import analyzer_bp
 from library import library_bp
 from wizard import wizard_bp
 from rating import rating_bp
+from drive_routes import drive_bp
 
 app = Flask(__name__)
 app.register_blueprint(clip_builder_bp)
@@ -25,6 +26,7 @@ app.register_blueprint(analyzer_bp)
 app.register_blueprint(library_bp)
 app.register_blueprint(wizard_bp)
 app.register_blueprint(rating_bp)
+app.register_blueprint(drive_bp)
 
 ROOT_DIR = Path(__file__).parent.parent
 
@@ -249,6 +251,13 @@ main,.content,table{animation:pgFadeIn 0.35s ease-out}
           scenesLink.appendChild(badge);
         }
       });
+    }
+    if (!nav.querySelector('a[href="/drive"]')) {
+      var driveLink = document.createElement('a');
+      driveLink.href = '/drive';
+      driveLink.textContent = 'Drive';
+      if (location.pathname === '/drive') driveLink.className = 'active';
+      nav.appendChild(driveLink);
     }
     var btn = document.createElement('button');
     btn.className = 'update-btn';
@@ -562,10 +571,48 @@ def _start_video_watcher():
     from video import VIDEO_DIR, VIDEO_EXTENSIONS
     from db import register_video, get_all_videos, get_analyzed_tags
 
-    SCAN_INTERVAL = 30  # seconds between scans
+    SCAN_INTERVAL = 30  # seconds between local scans
+    DRIVE_PULL_INTERVAL = 300  # seconds between Drive pulls (every 5 minutes)
     _known_files = set()
+    _last_drive_pull = [0.0]  # mutable so the inner func can update it
+
+    def _maybe_pull_drive():
+        """Pull from the Drive inbox folder if connected and configured."""
+        import time as _t
+        if _t.time() - _last_drive_pull[0] < DRIVE_PULL_INTERVAL:
+            return
+        try:
+            import drive
+            from db import register_video as _rv
+            from db import get_video_by_drive_file_id, set_video_drive_info
+            cfg = drive.get_config()
+            if not (cfg["app_configured"] and cfg["has_token"]
+                    and cfg["inbox_folder_id"]):
+                return
+            _last_drive_pull[0] = _t.time()
+            items = drive.list_inbox_videos()
+            existing_local = {p.name for p in VIDEO_DIR.iterdir() if p.is_file()}
+            for it in items:
+                fid, name = it["id"], it["name"]
+                if get_video_by_drive_file_id(fid) or name in existing_local:
+                    continue
+                dest = VIDEO_DIR / name
+                print(f"[watcher] Drive pull: downloading {name}...")
+                try:
+                    drive.download_file(fid, dest)
+                    vid_id = _rv(dest)
+                    set_video_drive_info(
+                        vid_id, fid,
+                        f"https://drive.google.com/file/d/{fid}/view",
+                    )
+                    print(f"[watcher] Drive pull: registered {name}")
+                except Exception as exc:
+                    print(f"[watcher] Drive pull failed for {name}: {exc}")
+        except Exception as exc:
+            print(f"[watcher] Drive pull error: {exc}")
 
     def _scan_and_analyze():
+        _maybe_pull_drive()
         VIDEO_DIR.mkdir(parents=True, exist_ok=True)
         current_files = set()
         for root, _, files in os.walk(VIDEO_DIR):

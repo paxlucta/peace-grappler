@@ -669,6 +669,7 @@ td{font-size:13px}
 
 <div class="controls">
   <button class="primary" onclick="scanVideos()">Scan for New Videos</button>
+  <button onclick="pullFromDrive()" id="drive-pull-btn">Pull from Drive</button>
   <button class="primary" id="analyze-all-btn" onclick="analyzeAll()" style="display:none">Analyze All</button>
   <span id="scan-status" style="font-size:13px;color:#888"></span>
 </div>
@@ -708,6 +709,39 @@ async function scanVideos() {
   } catch(e) {
     document.getElementById('scan-status').textContent = 'Scan failed: ' + e.message;
   }
+}
+
+async function pullFromDrive() {
+  var btn = document.getElementById('drive-pull-btn');
+  var st = document.getElementById('scan-status');
+  // Pre-flight: check Drive is configured
+  var sc = await (await fetch('/drive/api/status')).json();
+  if (!sc.has_token) {
+    if (confirm('Google Drive is not connected. Open Drive settings?')) {
+      window.location = '/drive';
+    }
+    return;
+  }
+  if (!sc.inbox_folder_id) {
+    if (confirm('No Drive inbox folder configured. Open Drive settings?')) {
+      window.location = '/drive';
+    }
+    return;
+  }
+  btn.disabled = true;
+  st.textContent = 'Pulling from Drive...';
+  var r = await fetch('/drive/api/pull', {method:'POST'});
+  if (r.status === 409) { st.textContent = 'Pull already running'; btn.disabled = false; return; }
+  var poll = async function() {
+    var s = await (await fetch('/drive/api/pull/status')).json();
+    var last = (s.log && s.log.length) ? s.log[s.log.length - 1] : 'Working...';
+    st.textContent = last;
+    if (window.pgLog && s.log && s.log.length) { window.pgLog('[drive] ' + last); }
+    if (!s.done) { setTimeout(poll, 800); return; }
+    btn.disabled = false;
+    if (s.ok) { await scanVideos(); } else { st.textContent = 'Pull failed: ' + last; }
+  };
+  poll();
 }
 
 function renderList() {

@@ -99,6 +99,14 @@ def get_db():
     except sqlite3.OperationalError:
         conn.execute("ALTER TABLE generated_videos ADD COLUMN caption TEXT DEFAULT ''")
         conn.commit()
+    # Migrate: Drive integration columns
+    for table in ("videos", "generated_videos"):
+        for col in ("drive_file_id", "drive_link"):
+            try:
+                conn.execute(f"SELECT {col} FROM {table} LIMIT 0")
+            except sqlite3.OperationalError:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT")
+                conn.commit()
     conn.commit()
     return conn
 
@@ -471,6 +479,52 @@ def get_generated_video(path):
         conn.close()
 
 
+def set_video_drive_info(video_id, drive_file_id, drive_link):
+    """Record Drive source for an inbox-pulled video."""
+    conn = get_db()
+    try:
+        conn.execute(
+            "UPDATE videos SET drive_file_id=?, drive_link=? WHERE id=?",
+            (drive_file_id, drive_link, video_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_video_by_drive_file_id(drive_file_id):
+    conn = get_db()
+    try:
+        return conn.execute(
+            "SELECT * FROM videos WHERE drive_file_id=?", (drive_file_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+
+
+def set_generated_video_drive_info(video_id, drive_file_id, drive_link):
+    """Record Drive upload info for a generated video."""
+    conn = get_db()
+    try:
+        conn.execute(
+            "UPDATE generated_videos SET drive_file_id=?, drive_link=? WHERE id=?",
+            (drive_file_id, drive_link, video_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_generated_video_by_id(video_id):
+    conn = get_db()
+    try:
+        return conn.execute(
+            "SELECT * FROM generated_videos WHERE id=?", (video_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+
+
 def get_all_generated_videos():
     """Return all generated videos, newest first."""
     import json
@@ -486,6 +540,8 @@ def get_all_generated_videos():
             "timeline": json.loads(r["timeline_json"]),
             "caption": r["caption"] or "",
             "generated_at": r["generated_at"],
+            "drive_file_id": r["drive_file_id"] if "drive_file_id" in r.keys() else None,
+            "drive_link": r["drive_link"] if "drive_link" in r.keys() else None,
         } for r in rows]
     finally:
         conn.close()
