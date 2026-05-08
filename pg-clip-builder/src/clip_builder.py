@@ -20,10 +20,10 @@ from db import (
 from video import (
     ASSETS_DIR, AUDIO_EXTENSIONS, OUTPUT_DIR, THUMB_DIR, TRANSITIONS,
     VIDEO_EXTENSIONS, XFADE_DUR,
-    add_multiple_text_overlays, build_music_track, concatenate_clips,
-    extract_subclip, extract_wide_subclip, find_asset, generate_placeholder,
-    get_video_duration, has_audio_stream, is_wide_video, normalize_clip,
-    overlay_music, overlay_music_track, pad_clip_to_duration,
+    add_multiple_text_overlays, build_music_track, composite_layered_segment,
+    concatenate_clips, extract_subclip, extract_wide_subclip, find_asset,
+    generate_placeholder, get_video_duration, has_audio_stream, is_wide_video,
+    normalize_clip, overlay_music, overlay_music_track, pad_clip_to_duration,
     process_split_section, process_track, stack_wide_videos,
 )
 
@@ -263,6 +263,104 @@ def api_font_file(filename):
     if font_path.is_file():
         return send_file(str(font_path))
     return "", 404
+
+
+@clip_builder_bp.route("/api/text-presets", methods=["GET"])
+def api_text_presets_list():
+    from db import list_text_presets
+    return jsonify(list_text_presets())
+
+
+@clip_builder_bp.route("/api/text-presets", methods=["POST"])
+def api_text_presets_save():
+    """Save a text overlay preset. Body: {name?, boxes: [...]}.
+
+    Persists every box (text + style + position + size). The thumbnail is
+    composed server-side using the same Pillow renderer as the actual video
+    pipeline so the gallery preview matches output.
+    """
+    import io
+    import json as _json
+    from PIL import Image
+    from db import save_text_preset
+    from video import _render_text_image
+
+    data = request.get_json(force=True) or {}
+    boxes = data.get("boxes")
+    if boxes is None:
+        # Legacy single-box body — wrap it.
+        boxes = [data.get("box")] if data.get("box") else []
+    name = (data.get("name") or "").strip()
+
+    # Render thumbnail at the editor's aspect ratio (1080x1920) but small.
+    THUMB_W, THUMB_H = 270, 480
+    out = Image.new("RGBA", (THUMB_W, THUMB_H), (10, 10, 12, 255))
+    for box in boxes:
+        if not box or not box.get("text"):
+            continue
+        try:
+            layer = _render_text_image(
+                box["text"], THUMB_W, THUMB_H,
+                max(8, int(box.get("fontsize", 42) * THUMB_W / 1080)),
+                box.get("fontcolor", "white"),
+                bool(box.get("bold")),
+                float(box.get("box_opacity", 0.5)),
+                box.get("x_frac"), box.get("y_frac"),
+                box.get("position", "center"),
+                italic=bool(box.get("italic")),
+                bgcolor=box.get("bgcolor", "#000000"),
+                w_frac=box.get("w_frac"),
+                h_frac=box.get("h_frac"),
+                fontfamily=box.get("fontfamily"),
+            )
+            out = Image.alpha_composite(out, layer)
+        except Exception as exc:
+            print(f"[text-preset] thumbnail render failed for one box: {exc}")
+
+    buf = io.BytesIO()
+    out.convert("RGB").save(buf, format="JPEG", quality=78)
+    preset_id = save_text_preset(name, _json.dumps({"boxes": boxes}),
+                                  buf.getvalue())
+    return jsonify({"ok": True, "id": preset_id})
+
+
+@clip_builder_bp.route("/api/text-presets/<int:preset_id>", methods=["GET"])
+def api_text_presets_get(preset_id):
+    import json as _json
+    from db import get_text_preset
+    p = get_text_preset(preset_id)
+    if not p:
+        return jsonify({"error": "Not found"}), 404
+    payload = _json.loads(p["data_json"])
+    # Normalize legacy single-box payloads into {boxes: [...]} so the client
+    # can rely on a single shape.
+    if isinstance(payload, dict) and "boxes" in payload:
+        boxes = payload.get("boxes") or []
+    elif isinstance(payload, list):
+        boxes = payload
+    else:
+        boxes = [payload] if payload else []
+    return jsonify({
+        "id": p["id"], "name": p["name"], "created_at": p["created_at"],
+        "boxes": boxes,
+    })
+
+
+@clip_builder_bp.route("/api/text-presets/<int:preset_id>", methods=["DELETE"])
+def api_text_presets_delete(preset_id):
+    from db import delete_text_preset
+    delete_text_preset(preset_id)
+    return jsonify({"ok": True})
+
+
+@clip_builder_bp.route("/api/text-presets/<int:preset_id>/thumb")
+def api_text_presets_thumb(preset_id):
+    import io
+    from db import get_text_preset_thumbnail
+    blob = get_text_preset_thumbnail(preset_id)
+    if not blob:
+        return "", 404
+    return send_file(io.BytesIO(blob), mimetype="image/jpeg")
 
 
 @clip_builder_bp.route("/api/load-video", methods=["POST"])
@@ -647,6 +745,38 @@ def api_generate():
     })
 
 
+def _build_layered_segments(clips):
+    """Slice the timeline at every clip boundary so each segment has a
+    constant active set of clips. Used by the layered (z-order) compositor.
+
+    Returns list of {"start": float, "end": float, "clips": [...]}.
+    Within a segment, every listed clip spans the full interval.
+    """
+    if not clips:
+        return []
+    boundaries = set()
+    for c in clips:
+        boundaries.add(round(c["start_time"], 3))
+        boundaries.add(round(c["start_time"] + c["duration"], 3))
+    boundaries = sorted(boundaries)
+
+    segments = []
+    for i in range(len(boundaries) - 1):
+        seg_start = boundaries[i]
+        seg_end = boundaries[i + 1]
+        if seg_end - seg_start < 0.05:
+            continue
+        active = []
+        for c in clips:
+            cs = c["start_time"]
+            ce = cs + c["duration"]
+            if cs <= seg_start + 1e-3 and ce >= seg_end - 1e-3:
+                active.append(c)
+        if active:
+            segments.append({"start": seg_start, "end": seg_end, "clips": active})
+    return segments
+
+
 def _build_time_segments(clips):
     """Group clips into non-overlapping time segments.
 
@@ -727,7 +857,34 @@ def _generate_multitrack(data):
             clip_data["stack_order"] = item.get("stack_order", 0)
             clip_data["trans_in"] = item.get("trans_in")
             clip_data["trans_out"] = item.get("trans_out")
+            clip_data["muted"] = bool(item.get("muted", False))
+            clip_data["position"] = item.get("position")  # 'top'/'center'/'bottom'/None
+            clip_data["volume"] = item.get("volume", 5)
             clips.append(clip_data)
+
+    # Track-level settings (mute + default wide-clip position).
+    # Defaults match the UI: layer 0=top, 1=center, 2=bottom.
+    track_settings_raw = data.get("track_settings") or []
+    default_positions = ["top", "center", "bottom"]
+    track_settings = []
+    for i in range(3):
+        s = track_settings_raw[i] if i < len(track_settings_raw) else {}
+        track_settings.append({
+            "muted": bool(s.get("muted", False)),
+            "default_position": s.get("default_position") or default_positions[i],
+        })
+
+    # Resolve effective position for each wide clip (per-clip override beats
+    # layer default). Saved on the clip so Phase 2 compositing can read it.
+    for c in clips:
+        if c.get("wide"):
+            c["effective_position"] = (
+                c.get("position")
+                or track_settings[c.get("track", 0)]["default_position"]
+            )
+        # Layer mute overrides per-clip mute.
+        if track_settings[c.get("track", 0)]["muted"]:
+            c["muted"] = True
 
     if not clips:
         return jsonify({"error": "No valid clips in video track"}), 400
@@ -762,8 +919,9 @@ def _generate_multitrack(data):
     include_outro = data.get("include_outro", True)
 
     with tempfile.TemporaryDirectory() as tmp:
-        # Build time segments and fill gaps with black placeholders
-        segments = _build_time_segments(clips)
+        # Slice timeline at every clip boundary so each segment has a
+        # constant active set; layered compositor handles z-order/slot logic.
+        segments = _build_layered_segments(clips)
 
         # Insert black placeholders for gaps between segments
         full_segments = []
@@ -791,64 +949,40 @@ def _generate_multitrack(data):
 
         for si, seg in enumerate(full_segments):
             seg_clips = seg["clips"]
+            seg_start = seg["start"]
+            seg_dur = seg["end"] - seg_start
 
             # Empty segment = gap → black placeholder
             if not seg_clips:
-                gap_dur = seg["end"] - seg["start"]
                 gap_path = os.path.join(tmp, f"gap{si:03d}.mp4")
-                if generate_placeholder(gap_path, gap_dur, "black"):
+                if generate_placeholder(gap_path, seg_dur, "black"):
                     clip_paths.append(gap_path)
                     if len(clip_paths) > 1:
                         all_transitions.append(None)
                 continue
 
-            wide_clips = [c for c in seg_clips if c["wide"]]
-            non_wide_clips = [c for c in seg_clips if not c["wide"]]
+            # Build placement records for layered compositing.
+            placements = []
+            for c in seg_clips:
+                clip_offset = seg_start - c["start_time"]
+                placements.append({
+                    "source_path": c["video_file"],
+                    "source_start": c["start"] + clip_offset,
+                    "source_dur": seg_dur,
+                    "is_wide": bool(c.get("wide")),
+                    "layer": int(c.get("track", 0)),
+                    "position": c.get("effective_position", "top"),
+                    "muted": bool(c.get("muted")),
+                    "stack_order": int(c.get("stack_order", 0)),
+                })
 
-            if len(wide_clips) >= 2:
-                # Stack wide videos vertically, padding each to segment duration
-                seg_start = seg["start"]
-                seg_dur = seg["end"] - seg_start
-                wide_clips.sort(key=lambda c: c["stack_order"])
-                wide_paths = []
-                for wi, wc in enumerate(wide_clips):
-                    raw = os.path.join(tmp, f"seg{si:03d}_wraw{wi}.mp4")
-                    if not extract_wide_subclip(wc["video_file"], wc["start"],
-                                                wc["duration"], raw):
-                        continue
-                    # Pad to align within the segment
-                    offset = wc["start_time"] - seg_start
-                    if offset > 0.05 or (wc["start_time"] + wc["duration"]) < seg["end"] - 0.05:
-                        padded = os.path.join(tmp, f"seg{si:03d}_wpad{wi}.mp4")
-                        if pad_clip_to_duration(raw, offset, seg_dur, padded):
-                            wide_paths.append(padded)
-                        else:
-                            wide_paths.append(raw)
-                    else:
-                        wide_paths.append(raw)
-                if wide_paths:
-                    stacked = os.path.join(tmp, f"seg{si:03d}_stacked.mp4")
-                    if stack_wide_videos(wide_paths, stacked):
-                        clip_paths.append(stacked)
-                        trans = wide_clips[0].get("trans_in")
-                        if len(clip_paths) > 1:
-                            all_transitions.append(trans)
-            elif len(wide_clips) == 1:
-                wc = wide_clips[0]
-                wp = os.path.join(tmp, f"seg{si:03d}_clip.mp4")
-                if extract_subclip(wc["video_file"], wc["start"],
-                                   wc["duration"], wp):
-                    clip_paths.append(wp)
-                    if len(clip_paths) > 1:
-                        all_transitions.append(wc.get("trans_in"))
-
-            for ni, nc in enumerate(non_wide_clips):
-                np = os.path.join(tmp, f"seg{si:03d}_nw{ni}.mp4")
-                if extract_subclip(nc["video_file"], nc["start"],
-                                   nc["duration"], np):
-                    clip_paths.append(np)
-                    if len(clip_paths) > 1:
-                        all_transitions.append(nc.get("trans_in"))
+            seg_out = os.path.join(tmp, f"seg{si:03d}_layered.mp4")
+            if composite_layered_segment(placements, seg_dur, seg_out):
+                clip_paths.append(seg_out)
+                if len(clip_paths) > 1:
+                    # Use trans_in from the lowest-layer / first-listed clip.
+                    trans_in = seg_clips[0].get("trans_in")
+                    all_transitions.append(trans_in)
 
         outro_added = False
         if include_outro:
@@ -970,11 +1104,18 @@ def _generate_multitrack(data):
 
     final_dur = get_video_duration(str(out_file))
 
-    # Save to DB
+    # Save the COMPLETE editable state, not just the rendered tracks. Loading
+    # the video back into the builder must reproduce every per-clip flag,
+    # layer setting, and editor toggle so the user can keep editing.
     save_timeline = {
         "video_track": video_track,
         "sound_track": sound_track,
         "text_overlays": text_overlays,
+        "track_settings": data.get("track_settings"),
+        "track_count": data.get("track_count"),
+        "track_sequential": data.get("track_sequential"),
+        "include_intro": data.get("include_intro", True),
+        "include_outro": data.get("include_outro", True),
     }
     save_generated_video(str(out_file), round(final_dur, 1), save_timeline)
 
@@ -1113,13 +1254,13 @@ footer{
 }
 #tl-grid{
   display:grid;
-  grid-template-columns:50px 1fr;
+  grid-template-columns:90px 1fr;
   grid-auto-rows:auto;
   min-width:100%;
 }
 /* Time ruler */
 #time-ruler{
-  grid-column:1/-1;height:20px;position:sticky;top:0;
+  grid-column:2;height:20px;position:sticky;top:0;
   background:#111;border-bottom:1px solid #2a2a2a;z-index:5;
   display:flex;align-items:flex-end;
 }
@@ -1138,6 +1279,57 @@ footer{
   display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
   padding:2px 4px;user-select:none;
 }
+/* Layer header — name + mute + hamburger position picker + free/seq mode */
+.track-header{
+  background:#111;border-right:1px solid #2a2a2a;
+  display:flex;flex-direction:column;align-items:stretch;justify-content:center;
+  gap:4px;padding:4px 6px;user-select:none;
+}
+.track-header .th-name{
+  font-size:9px;color:#888;font-weight:800;letter-spacing:1.2px;
+  text-align:center;text-transform:uppercase;
+}
+.track-header.muted .th-name{color:#5a3030;text-decoration:line-through}
+.track-header .th-row{display:flex;gap:3px;align-items:center;justify-content:center}
+.track-header .th-btn{
+  width:18px;height:18px;border-radius:3px;border:1px solid #2a2a2a;
+  background:#181818;color:#888;cursor:pointer;font-size:10px;line-height:1;
+  display:inline-flex;align-items:center;justify-content:center;padding:0;
+}
+.track-header .th-btn:hover{border-color:#444;color:#ddd}
+.track-header .th-btn.active{background:#3a1818;border-color:#e53935;color:#ff6b6b}
+.track-header .th-btn svg{display:block}
+
+/* Hamburger picker: 3 stacked stripes representing top/center/bottom slot */
+.th-pos{
+  display:inline-flex;flex-direction:column;gap:1px;
+  width:18px;height:18px;border-radius:3px;border:1px solid #2a2a2a;
+  background:#181818;cursor:pointer;padding:2px;box-sizing:border-box;
+}
+.th-pos .th-stripe{
+  flex:1;background:#3a3a3a;border-radius:1px;transition:background .15s;
+}
+.th-pos .th-stripe.sel{background:#e53935}
+.th-pos:hover{border-color:#444}
+.th-pos:hover .th-stripe:not(.sel){background:#555}
+
+/* Compact Free/Seq toggle inside the track header */
+.th-mode{
+  display:flex;align-items:center;justify-content:center;gap:4px;
+  font-size:8px;color:#888;letter-spacing:.5px;
+}
+.th-mode .th-mode-lbl{font-weight:700}
+.th-mode .th-mode-lbl.on{color:#ddd}
+.th-mode .th-tog{
+  position:relative;width:22px;height:11px;border-radius:6px;
+  background:#2a2a2a;cursor:pointer;flex-shrink:0;
+}
+.th-mode .th-tog.active{background:#e53935}
+.th-mode .th-tog .th-knob{
+  position:absolute;top:1px;left:1px;width:9px;height:9px;border-radius:50%;
+  background:#fff;transition:left .15s;
+}
+.th-mode .th-tog.active .th-knob{left:12px}
 /* Tracks */
 .track{
   position:relative;border-bottom:1px solid #1a1a1a;
@@ -1151,6 +1343,11 @@ footer{
 .video-track-2{background:#14140f}
 .video-track-row{display:none}
 .video-track-row.active{display:contents}
+/* Highlighted while a clip is dragged over it from another layer */
+.video-track.drop-target{
+  box-shadow:inset 0 0 0 2px #e53935;
+  background:#1a0a0a;
+}
 #sound-track{background:#0c0e0c;z-index:2}
 #text-track{background:#0c0c0e;z-index:2}
 .vt-group{display:flex;gap:2px;margin-left:4px}
@@ -1213,7 +1410,8 @@ footer{
   margin-left:4px;
 }
 .vblock .blk-rm:hover{opacity:1}
-.vblock .blk-label{right:24px}
+/* X delete is no longer inline — reset duration label to corner. */
+.vblock .blk-label{right:4px}
 .vblock .vblk-vol{
   position:absolute;bottom:4px;left:4px;z-index:1;
   display:flex;gap:1px;align-items:flex-end;height:14px;
@@ -1242,11 +1440,94 @@ footer{
   width:8px;height:5px;background:rgba(255,255,255,.8);border-radius:1px;
 }
 
+/* Block status icons (read-only — full editor opens via click).
+ * Sits at the bottom-left of the block; each icon gets the same black
+ * pill background as the duration label. */
+.vblk-icons{
+  position:absolute;bottom:4px;left:4px;z-index:2;
+  display:flex;gap:3px;align-items:center;pointer-events:none;
+}
+.vblk-icons .ic{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:18px;height:18px;border-radius:3px;
+  background:rgba(0,0,0,.7);color:#fff;
+}
+.vblk-icons .ic svg{width:13px;height:13px;display:block}
+.vblk-icons .ic.ic-mute{color:#ff8888}
+.vblk-icons .ic-pos{
+  flex-direction:column;gap:1.5px;padding:3px;box-sizing:border-box;
+}
+.vblk-icons .ic-pos .ic-pos-stripe{
+  flex:1;width:100%;background:#888;border-radius:1px;min-height:1.5px;
+}
+.vblk-icons .ic-pos .ic-pos-stripe.sel{background:#e53935}
+
+/* Scene editor popover */
+.scene-editor{
+  position:fixed;z-index:1000;background:#1c1c20;border:1px solid #333;
+  border-radius:10px;padding:14px 16px;min-width:240px;max-width:280px;
+  box-shadow:0 10px 30px rgba(0,0,0,.6);
+  display:none;color:#ddd;font-size:13px;
+}
+.scene-editor.active{display:block;animation:seFadeIn .12s ease-out}
+@keyframes seFadeIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+.scene-editor .se-row{
+  display:flex;align-items:center;justify-content:space-between;
+  gap:10px;margin:8px 0;
+}
+.scene-editor .se-label{
+  font-size:10px;font-weight:700;color:#888;letter-spacing:1px;
+  text-transform:uppercase;flex-shrink:0;
+}
+.scene-editor .se-title{
+  font-size:11px;font-weight:700;color:#fff;letter-spacing:1px;
+  text-transform:uppercase;margin:0 0 8px 0;display:flex;
+  justify-content:space-between;align-items:center;
+}
+.scene-editor .se-close{
+  background:none;border:none;color:#888;font-size:18px;
+  line-height:1;cursor:pointer;padding:0 4px;
+}
+.scene-editor .se-close:hover{color:#fff}
+.scene-editor .se-pos-group{display:flex;gap:4px}
+.scene-editor .se-pos-btn{
+  background:#26262c;border:1px solid #3a3a44;color:#bbb;
+  padding:6px 10px;border-radius:5px;font-size:11px;font-weight:600;
+  cursor:pointer;letter-spacing:.5px;
+}
+.scene-editor .se-pos-btn:hover{border-color:#555;color:#fff}
+.scene-editor .se-pos-btn.sel{background:#e53935;border-color:#e53935;color:#fff}
+.scene-editor .se-pos-btn.sel-default{border-color:#5a3a3a;color:#ffb0b0}
+.scene-editor .se-trans{
+  background:#26262c;border:1px solid #3a3a44;color:#ddd;
+  padding:6px 12px;border-radius:5px;cursor:pointer;font-size:12px;
+  font-family:inherit;min-width:90px;text-align:left;
+}
+.scene-editor .se-trans:hover{border-color:#555}
+.scene-editor .se-trans .se-trans-clear{
+  float:right;color:#888;font-size:11px;margin-left:6px;
+}
+.scene-editor .se-mute-btn{
+  background:#26262c;border:1px solid #3a3a44;color:#bbb;
+  padding:6px 14px;border-radius:5px;font-size:11px;font-weight:600;
+  cursor:pointer;display:inline-flex;align-items:center;gap:6px;
+}
+.scene-editor .se-mute-btn.muted{background:#3a1818;border-color:#e53935;color:#ff8888}
+.scene-editor .se-mute-btn:hover{border-color:#555}
+.scene-editor .se-mute-btn svg{width:12px;height:12px}
+.scene-editor .se-delete{
+  width:100%;margin-top:10px;padding:8px;background:#2a1414;
+  border:1px solid #5a2020;border-radius:5px;color:#ff8888;
+  font-weight:600;font-size:12px;cursor:pointer;letter-spacing:.5px;
+  text-transform:uppercase;
+}
+.scene-editor .se-delete:hover{background:#3a1818;border-color:#e53935;color:#fff}
+
 /* Sound blocks */
 .sblock{border:1px solid rgba(255,255,255,.15);color:#fff}
 .sblock .blk-vol{
   display:flex;gap:2px;align-items:flex-end;height:18px;
-  margin-left:auto;flex-shrink:0;
+  margin-left:auto;margin-right:24px;flex-shrink:0;
 }
 .sblock .blk-vol .vb{
   width:6px;border-radius:1px;cursor:pointer;opacity:.35;
@@ -1323,32 +1604,30 @@ footer{
 .tl-item .wide-badge{top:2px;left:2px;width:14px;height:10px}
 .tl-item .wide-badge::after{top:1.5px;left:2.5px;width:7px;height:4px}
 
-#clear-btn{
-  background:none;color:#666;border:1px solid #444;padding:3px 10px;
-  font-size:11px;border-radius:4px;transition:color .15s,border-color .15s;
-}
-#clear-btn:hover{color:#e53935;border-color:#e53935}
-
 .controls{display:flex;align-items:center;gap:12px;margin-top:6px}
-.tl-check{font-size:12px;color:#888;cursor:pointer;display:flex;align-items:center;gap:4px;user-select:none}
+.incl-label{
+  font-size:11px;color:#666;font-weight:700;letter-spacing:1px;
+  text-transform:uppercase;
+}
+.tl-check{font-size:12px;color:#aaa;cursor:pointer;display:flex;align-items:center;gap:5px;user-select:none}
 .tl-check input{accent-color:#e53935;cursor:pointer}
-.tl-mode-toggle{display:flex;align-items:center;gap:6px;font-size:12px;color:#888;user-select:none}
-.tl-mode-toggle .toggle-track{
-  width:36px;height:18px;border-radius:9px;background:#333;cursor:pointer;
-  position:relative;transition:background .2s;flex-shrink:0;
+
+/* Shared action buttons (Load / Clear / Generate). Same height = 34px. */
+.ctl-actions{display:flex;align-items:center;gap:8px;margin-left:auto}
+.action-btn{
+  height:34px;padding:0 14px;display:inline-flex;align-items:center;gap:6px;
+  background:#1a1a24;border:1px solid #2e2e3e;color:#ccc;border-radius:6px;
+  font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;
+  transition:background .15s,border-color .15s,color .15s;
 }
-.tl-mode-toggle .toggle-track.active{background:#e53935}
-.tl-mode-toggle .toggle-knob{
-  width:14px;height:14px;border-radius:50%;background:#fff;
-  position:absolute;top:2px;left:2px;transition:left .2s;
+.action-btn svg{width:14px;height:14px;display:block}
+.action-btn:hover{background:#22222e;border-color:#444;color:#fff}
+.action-btn.primary{
+  background:#e53935;border-color:#e53935;color:#fff;padding:0 18px;
 }
-.tl-mode-toggle .toggle-track.active .toggle-knob{left:20px}
-#gen-btn{
-  background:#e53935;color:#fff;border:none;padding:8px 20px;font-weight:600;
-  border-radius:6px;margin-left:auto;transition:background .2s;
-}
-#gen-btn:hover{background:#c62828}
-#gen-btn:disabled{background:#555;cursor:not-allowed}
+.action-btn.primary:hover{background:#c62828;border-color:#c62828}
+.action-btn:disabled{background:#333;border-color:#333;color:#888;cursor:not-allowed}
+.action-btn.primary:disabled{background:#555;border-color:#555}
 
 /* -- Overlays -- */
 .overlay{
@@ -1491,6 +1770,54 @@ footer{
 .te-cancel:hover{background:#444}
 .te-apply{background:#e53935;color:#fff;border:none;border-radius:6px;padding:8px 24px;font-size:13px;font-weight:600;cursor:pointer}
 .te-apply:hover{background:#c62828}
+.te-save{
+  background:#1a3a1a;color:#9be09b;border:1px solid #2e6b2e;
+  border-radius:6px;padding:8px 18px;font-size:13px;font-weight:600;
+  cursor:pointer;display:inline-flex;align-items:center;gap:6px;
+}
+.te-save:hover{background:#225522;border-color:#3e8a3e;color:#fff}
+.te-save svg{width:14px;height:14px}
+.te-gallery{
+  background:#1a1a24;color:#ccc;border:1px solid #2e2e3e;
+  border-radius:6px;padding:8px 14px;font-size:13px;font-weight:600;
+  cursor:pointer;display:inline-flex;align-items:center;gap:6px;
+}
+.te-gallery:hover{background:#22222e;border-color:#444;color:#fff}
+.te-gallery svg{width:14px;height:14px}
+.te-footer-spacer{flex:1}
+
+/* Gallery grid */
+.tg-grid{
+  display:grid;gap:12px;
+  grid-template-columns:repeat(auto-fill,minmax(140px,1fr));
+  max-height:60vh;overflow-y:auto;
+}
+.tg-item{
+  position:relative;border:1px solid #2a2a32;border-radius:8px;
+  overflow:hidden;cursor:pointer;background:#0a0a0e;
+  transition:border-color .15s,transform .15s;
+}
+.tg-item:hover{border-color:#e53935;transform:translateY(-2px)}
+.tg-item img{
+  width:100%;height:auto;display:block;aspect-ratio:9/16;object-fit:cover;
+}
+.tg-item .tg-name{
+  position:absolute;left:0;right:0;bottom:0;
+  padding:6px 8px;font-size:11px;color:#fff;
+  background:linear-gradient(transparent,rgba(0,0,0,.85));
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.tg-item .tg-del{
+  position:absolute;top:6px;right:6px;
+  width:24px;height:24px;border-radius:4px;
+  background:rgba(0,0,0,.7);color:#fff;border:none;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;padding:0;
+  opacity:0;transition:opacity .15s,background .15s;
+}
+.tg-item:hover .tg-del{opacity:1}
+.tg-item .tg-del:hover{background:#e53935}
+.tg-item .tg-del svg{width:14px;height:14px}
+.tg-empty{padding:30px;text-align:center;color:#666;font-size:13px}
 </style>
 </head>
 <body>
@@ -1520,9 +1847,7 @@ footer{
 <footer>
   <div class="tl-hdr">
     <span class="lbl">TIMELINE</span>
-    <button onclick="triggerLoad()">Load</button>
     <input type="file" id="load-input" accept=".json,.mp4,.mov,.avi,.mkv,.webm,.m4v" style="display:none" onchange="handleLoadFile(event)">
-    <button id="clear-btn" onclick="clearTimeline()">Clear</button>
     <span class="tot" id="tl-total">0 clips &mdash; 0.0s</span>
   </div>
   <div id="multi-timeline">
@@ -1532,42 +1857,32 @@ footer{
       <div id="sound-track" class="track"><span class="track-empty">click to add music</span></div>
       <div class="track-label">TXT</div>
       <div id="text-track" class="track"><span class="track-empty">click to add text overlay</span></div>
-      <div class="track-label">VID</div>
-      <div id="video-track-0" class="track video-track video-track-0"><span class="track-empty">drag clips here</span><div class="vt-insert-bar"></div></div>
-      <div class="video-track-row" id="vt-row-1"><div class="track-label">II</div><div id="video-track-1" class="track video-track video-track-1"><span class="track-empty">wide clips only</span><div class="vt-insert-bar"></div></div></div>
-      <div class="video-track-row" id="vt-row-2"><div class="track-label">III</div><div id="video-track-2" class="track video-track video-track-2"><span class="track-empty">wide clips only</span><div class="vt-insert-bar"></div></div></div>
+      <div class="track-header" id="track-header-0" data-track="0"></div>
+      <div id="video-track-0" class="track video-track video-track-0"><span class="track-empty">drag any clip here</span><div class="vt-insert-bar"></div></div>
+      <div class="video-track-row" id="vt-row-1"><div class="track-header" id="track-header-1" data-track="1"></div><div id="video-track-1" class="track video-track video-track-1"><span class="track-empty">drag any clip here</span><div class="vt-insert-bar"></div></div></div>
+      <div class="video-track-row" id="vt-row-2"><div class="track-header" id="track-header-2" data-track="2"></div><div id="video-track-2" class="track video-track video-track-2"><span class="track-empty">drag any clip here</span><div class="vt-insert-bar"></div></div></div>
     </div>
   </div>
   <div class="controls">
-    <label class="tl-check"><input type="checkbox" id="include-intro" checked/> Include Intro Video</label>
-    <label class="tl-check"><input type="checkbox" id="include-outro" checked/> Include Outro Video</label>
-    <span style="font-size:12px;color:#888">Video Timelines</span>
+    <span class="incl-label">Include</span>
+    <label class="tl-check"><input type="checkbox" id="include-intro" checked/> Intro Video</label>
+    <label class="tl-check"><input type="checkbox" id="include-outro" checked/> Outro Video</label>
+    <span style="font-size:12px;color:#888;margin-left:6px">Video Timelines</span>
     <div class="vt-group"><button class="vt-group-btn active" onclick="setTrackCount(1)">I</button><button class="vt-group-btn" onclick="setTrackCount(2)">II</button><button class="vt-group-btn" onclick="setTrackCount(3)">III</button></div>
-    <div class="tl-mode-toggle">
-      <span style="color:#aaa">I</span>
-      <span>Free</span>
-      <div class="toggle-track active" id="tl-mode-toggle-0" onclick="toggleTimelineMode(0)">
-        <div class="toggle-knob"></div>
-      </div>
-      <span>Seq</span>
+    <div class="ctl-actions">
+      <button class="action-btn" onclick="triggerLoad()" title="Load timeline">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+        <span>Load</span>
+      </button>
+      <button class="action-btn" id="clear-btn" onclick="clearTimeline()" title="Clear timeline">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+        <span>Clear</span>
+      </button>
+      <button class="action-btn primary" id="gen-btn" onclick="generateVideo()" title="Generate video">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        <span>Generate Video</span>
+      </button>
     </div>
-    <div class="tl-mode-toggle" id="tl-mode-wrap-1" style="display:none">
-      <span style="color:#aaa">II</span>
-      <span>Free</span>
-      <div class="toggle-track active" id="tl-mode-toggle-1" onclick="toggleTimelineMode(1)">
-        <div class="toggle-knob"></div>
-      </div>
-      <span>Seq</span>
-    </div>
-    <div class="tl-mode-toggle" id="tl-mode-wrap-2" style="display:none">
-      <span style="color:#aaa">III</span>
-      <span>Free</span>
-      <div class="toggle-track active" id="tl-mode-toggle-2" onclick="toggleTimelineMode(2)">
-        <div class="toggle-knob"></div>
-      </div>
-      <span>Seq</span>
-    </div>
-    <button id="gen-btn" onclick="generateVideo()">Generate Video</button>
   </div>
 </footer>
 
@@ -1607,6 +1922,9 @@ footer{
     <button onclick="cancelLoad()">Cancel</button>
   </div>
 </div>
+
+<!-- Per-scene editor popover (anchored next to the clicked block) -->
+<div class="scene-editor" id="scene-editor"></div>
 
 <div class="overlay" id="trans-picker-modal">
   <div class="modal" style="max-width:480px">
@@ -1650,8 +1968,34 @@ footer{
       <div id="te-canvas"></div>
     </div>
     <div class="te-footer">
+      <button class="te-gallery" onclick="openTextGallery()" title="Open saved overlays gallery">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M22 16V4c0-1.1-.9-2-2-2H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0-2-.9 2-2zM11 12l2.03 2.71L16 11l4 5H8l3-4zM2 6v14c0 1.1.9 2 2 2h14v-2H4V6H2z"/></svg>
+        <span>Gallery</span>
+      </button>
+      <div class="te-footer-spacer"></div>
       <button class="te-cancel" onclick="closeTextEditor()">Cancel</button>
       <button class="te-apply" onclick="applyTextEditor()">Apply</button>
+      <button class="te-save" onclick="saveTextOverlay()" title="Save to gallery">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/></svg>
+        <span>Save</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Text overlay gallery modal -->
+<div class="overlay" id="text-gallery-modal">
+  <div class="modal" style="max-width:760px;width:90vw">
+    <h2 style="color:#e53935;margin-top:0">Text Overlay Gallery</h2>
+    <p style="color:#888;font-size:12px;margin:0 0 14px 0">
+      Click a preset to load its style into the editor. Use the trash icon to remove one.
+    </p>
+    <div id="tg-grid" class="tg-grid"></div>
+    <div id="tg-empty" class="tg-empty" style="display:none">
+      No saved overlays yet. Configure one in the editor and click Save.
+    </div>
+    <div style="margin-top:14px;text-align:right">
+      <button class="te-cancel" onclick="closeTextGallery()">Close</button>
     </div>
   </div>
 </div>
@@ -1681,6 +2025,71 @@ var selectedTransition = 'fade';
 var nextBlkId = 0;
 var tlTrackCount = 1;
 var tlSequential = [true, true, true]; /* per-track: true = sequential, false = free-form */
+
+/* Layer settings — persisted in timeline JSON.
+ * default_position drives where wide clips on this layer render in the
+ * 1080x1920 frame: top slot, center slot, bottom slot. Layer 1 → top,
+ * 2 → center, 3 → bottom. muted = mute the entire layer's audio.
+ */
+var trackSettings = [
+  {muted:false, default_position:'top'},
+  {muted:false, default_position:'center'},
+  {muted:false, default_position:'bottom'},
+];
+
+function toggleTrackMute(t) {
+  trackSettings[t].muted = !trackSettings[t].muted;
+  renderTrackHeaders();
+}
+function setTrackPosition(t, pos) {
+  trackSettings[t].default_position = pos;
+  renderTrackHeaders();
+  renderVideoTrack(); /* clip-level "uses default" badges may need redraw */
+}
+function renderTrackHeaders() {
+  for (var t = 0; t < 3; t++) {
+    (function(t){
+    var hdr = document.getElementById('track-header-' + t);
+    if (!hdr) return;
+    var s = trackSettings[t];
+    hdr.classList.toggle('muted', !!s.muted);
+    var label = ['Video I','Video II','Video III'][t];
+    var muteIcon = s.muted
+      ? '<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.796 8.796 0 0 0 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3 3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06a8.99 8.99 0 0 0 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4 9.91 6.09 12 8.18V4z"/></svg>'
+      : '<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>';
+    var stripes = ['top','center','bottom'].map(function(p) {
+      return '<div class="th-stripe' + (s.default_position === p ? ' sel' : '') + '" data-pos="' + p + '"></div>';
+    }).join('');
+    var seqOn = !!tlSequential[t];
+    hdr.innerHTML =
+      '<div class="th-name">' + label + '</div>'
+      + '<div class="th-row">'
+      +   '<button class="th-btn' + (s.muted ? ' active' : '') + '" '
+      +           'title="Mute layer" data-act="mute">' + muteIcon + '</button>'
+      +   '<div class="th-pos" title="Default vertical position for wide clips on this layer">' + stripes + '</div>'
+      + '</div>'
+      + '<div class="th-mode" title="Free: clips can overlap. Seq: clips snap end-to-end.">'
+      +   '<span class="th-mode-lbl' + (!seqOn ? ' on' : '') + '">FREE</span>'
+      +   '<div class="th-tog' + (seqOn ? ' active' : '') + '" id="tl-mode-toggle-' + t + '" data-act="mode">'
+      +     '<div class="th-knob"></div>'
+      +   '</div>'
+      +   '<span class="th-mode-lbl' + (seqOn ? ' on' : '') + '">SEQ</span>'
+      + '</div>';
+    hdr.querySelector('[data-act="mute"]').onclick = function() { toggleTrackMute(t); };
+    hdr.querySelector('[data-act="mode"]').onclick = function(e) {
+      e.stopPropagation();
+      toggleTimelineMode(t);
+      renderTrackHeaders(); /* refresh on/off label colors */
+    };
+    hdr.querySelectorAll('.th-stripe').forEach(function(el) {
+      el.onclick = function(e) {
+        e.stopPropagation();
+        setTrackPosition(t, this.dataset.pos);
+      };
+    });
+    })(t);
+  }
+}
 
 async function init() {
   var tags = await fetch('/api/tags').then(function(r){return r.json()});
@@ -1719,6 +2128,7 @@ async function init() {
     musicColorMap[musicList[i].name] = MUSIC_COLORS[i % MUSIC_COLORS.length];
   }
   setupTracks();
+  renderTrackHeaders();
 
   /* Auto-load timeline from ?load=filename query param */
   var params = new URLSearchParams(window.location.search);
@@ -1806,16 +2216,16 @@ function renderRuler() {
   var dur = Math.max(getVideoDuration(), 10);
   var w = Math.ceil(dur) * CELL_W;
   ruler.innerHTML = '';
-  ruler.style.width = (50 + w) + 'px';
+  ruler.style.width = w + 'px';
   for (var s = 0; s <= Math.ceil(dur); s++) {
     var tick = document.createElement('div');
     tick.className = 'ruler-tick' + (s % 5 === 0 ? ' major' : '');
-    tick.style.left = (50 + s * CELL_W) + 'px';
+    tick.style.left = (s * CELL_W) + 'px';
     ruler.appendChild(tick);
     if (s % 5 === 0) {
       var lbl = document.createElement('span');
       lbl.className = 'ruler-label';
-      lbl.style.left = (50 + s * CELL_W) + 'px';
+      lbl.style.left = (s * CELL_W) + 'px';
       lbl.textContent = s + 's';
       ruler.appendChild(lbl);
     }
@@ -1891,30 +2301,46 @@ function renderVideoTrack() {
         blk.style.height = rowH + '%';
       }
       var thumbUrl = vi.clip.id !== undefined ? '/api/thumbnail/' + vi.clip.id : '';
-      var vol = vi.volume !== undefined ? vi.volume : 5;
-      var vBars = '';
-      var vH = [3,5,7,9,12];
-      for (var vv = 0; vv < 5; vv++) {
-        vBars += '<div class="vv' + (vv < vol ? ' active' : '') + '" data-lv="' + (vv+1) + '" data-vidx="' + idx + '"'
-          + ' style="height:' + vH[vv] + 'px" onclick="event.stopPropagation();setVideoVol(this)"></div>';
+      var muted = !!vi.muted;
+      var effPos = vi.position || trackSettings[t].default_position;
+
+      /* Status icons (read-only — click anywhere on the block to edit) */
+      var icons = '';
+      // Mute indicator
+      if (muted) {
+        icons += '<span class="ic ic-mute" title="Muted">'
+          + '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zM4.27 3 3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06a8.99 8.99 0 0 0 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4 9.91 6.09 12 8.18V4z"/></svg>'
+          + '</span>';
       }
+      // Slot indicator for wides
+      if (vi.clip.wide) {
+        var posStripes = ['top','center','bottom'].map(function(p) {
+          return '<div class="ic-pos-stripe' + (effPos === p ? ' sel' : '') + '"></div>';
+        }).join('');
+        icons += '<span class="ic ic-pos" title="Slot: ' + effPos
+          + (vi.position ? '' : ' (layer default)') + '">' + posStripes + '</span>';
+      }
+      // Transition pills (read-only icons; click on block opens editor)
       var transIn = vi.trans_in || '';
       var transOut = vi.trans_out || '';
+      var transBadges = '';
+      if (transIn) {
+        transBadges += '<span class="ic ic-trans" title="In: ' + transIn + '">'
+          + '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 12l8-8v5h8v6h-8v5z"/></svg>'
+          + '</span>';
+      }
+      if (transOut) {
+        transBadges += '<span class="ic ic-trans" title="Out: ' + transOut + '">'
+          + '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 12l-8-8v5H4v6h8v5z"/></svg>'
+          + '</span>';
+      }
+
       blk.innerHTML = (thumbUrl ? '<img class="vblock-thumb" src="' + thumbUrl + '"/>' : '')
         + '<span class="blk-label">' + vi.duration.toFixed(1) + 's</span>'
-        + '<div class="vblk-vol">' + vBars + '</div>'
         + (vi.clip.wide ? '<span class="vblock-wide"></span>' : '')
-        + '<span class="vtrans vt-in" data-vidx="' + idx + '" data-dir="in">' + (transIn || '+') + '</span>'
-        + '<span class="vtrans vt-out" data-vidx="' + idx + '" data-dir="out">' + (transOut || '+') + '</span>'
-        + '<button class="blk-rm" onclick="event.stopPropagation();removeVideoItem(' + idx + ')">&times;</button>';
+        + '<div class="vblk-icons">' + icons + transBadges + '</div>';
       blk.dataset.idx = idx;
       vi._el = blk;
-      blk.querySelectorAll('.vtrans').forEach(function(pill) {
-        pill.addEventListener('click', function(e) {
-          e.stopPropagation();
-          openVideoTransPicker(parseInt(this.dataset.vidx), this.dataset.dir);
-        });
-      });
       makeVideoDraggable(blk, vi, idx);
       track.appendChild(blk);
     }
@@ -1961,7 +2387,7 @@ function renderSoundTrack() {
     }
     blk.innerHTML = '<span class="blk-label">' + si.name + '</span>'
       + '<div class="blk-vol">' + volBars + '</div>'
-      + '<button class="blk-rm" style="position:relative;flex-shrink:0" onclick="event.stopPropagation();removeSoundItem(' + si.id + ')">&times;</button>'
+      + '<button class="blk-rm" onclick="event.stopPropagation();removeSoundItem(' + si.id + ')">&times;</button>'
       + '<div class="resize-handle"></div>';
     blk.dataset.blkId = si.id;
     si.el = blk;
@@ -2036,6 +2462,23 @@ function renderTextTrack() {
 }
 
 /* ─── Video drag and overlap resolution ─── */
+function _trackUnderPoint(x, y) {
+  var els = document.elementsFromPoint(x, y) || [];
+  for (var i = 0; i < els.length; i++) {
+    var vt = els[i].closest && els[i].closest('.video-track');
+    if (vt && vt.id && vt.id.indexOf('video-track-') === 0) {
+      return parseInt(vt.id.slice('video-track-'.length), 10);
+    }
+  }
+  return null;
+}
+
+function _clearDropHighlight() {
+  document.querySelectorAll('.video-track.drop-target').forEach(function(vt) {
+    vt.classList.remove('drop-target');
+  });
+}
+
 function makeVideoDraggable(el, data, idx) {
   var startX, startLeft, startY, startTopPx, moved;
   el.addEventListener('mousedown', function(e) {
@@ -2051,6 +2494,13 @@ function makeVideoDraggable(el, data, idx) {
       if (!moved) return;
       var dx = e2.clientX - startX;
       el.style.left = Math.max(0, startLeft + dx) + 'px';
+      /* Highlight the layer the cursor is currently over (if different) */
+      var hover = _trackUnderPoint(e2.clientX, e2.clientY);
+      _clearDropHighlight();
+      if (hover !== null && hover < tlTrackCount && hover !== (data.track || 0)) {
+        var tgt = document.getElementById('video-track-' + hover);
+        if (tgt) tgt.classList.add('drop-target');
+      }
       /* Vertical drag for wide videos to reorder stack */
       if (data.clip.wide) {
         el.style.top = (startTopPx + (e2.clientY - startY)) + 'px';
@@ -2059,24 +2509,38 @@ function makeVideoDraggable(el, data, idx) {
     function onUp(e2) {
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
-      if (!moved) return;
+      _clearDropHighlight();
+      if (!moved) {
+        // Treat as click → open scene editor anchored to this block
+        openSceneEditor(data, el);
+        return;
+      }
       var newStart = Math.max(0, parseFloat(el.style.left) / CELL_W);
       /* Snap to 0.5s grid */
       newStart = Math.round(newStart * 2) / 2;
+
+      /* Detect target layer from drop position */
+      var oldTrack = data.track || 0;
+      var newTrack = _trackUnderPoint(e2.clientX, e2.clientY);
+      if (newTrack === null || newTrack >= tlTrackCount) newTrack = oldTrack;
+      var movedTrack = (newTrack !== oldTrack);
+      if (movedTrack) data.track = newTrack;
+
       var vidIdx = videoItems.indexOf(data);
       var t = data.track || 0;
+      data.startTime = newStart;
+
       if (tlSequential[t]) {
-        /* In sequential mode, reorder by drop position */
-        data.startTime = newStart;
         packTimeline(t);
       } else {
-        data.startTime = newStart;
-        /* Handle vertical reorder for wide videos */
-        if (data.clip.wide && vidIdx >= 0) {
+        if (data.clip.wide && vidIdx >= 0 && !movedTrack) {
           reorderWideStack(vidIdx, e2.clientY - startY);
         }
         if (vidIdx >= 0) resolveVideoOverlaps(vidIdx);
       }
+      /* If we moved out of the old track, clean it up too */
+      if (movedTrack && tlSequential[oldTrack]) packTimeline(oldTrack);
+
       syncTl();
     }
     document.addEventListener('mousemove', onMove);
@@ -2179,13 +2643,10 @@ function setTrackCount(n) {
   });
   for (var t = 1; t <= 2; t++) {
     var row = document.getElementById('vt-row-' + t);
-    var wrap = document.getElementById('tl-mode-wrap-' + t);
     if (t < n) {
       row.classList.add('active');
-      wrap.style.display = '';
     } else {
       row.classList.remove('active');
-      wrap.style.display = 'none';
       /* Move items from hidden tracks to track 0 */
       videoItems.forEach(function(vi) { if (vi.track === t) vi.track = 0; });
     }
@@ -2285,6 +2746,187 @@ function setVideoVol(barEl) {
   });
 }
 
+function toggleClipMute(idx) {
+  if (idx < 0 || idx >= videoItems.length) return;
+  videoItems[idx].muted = !videoItems[idx].muted;
+  renderVideoTrack();
+}
+
+function setClipPosition(idx, pos) {
+  if (idx < 0 || idx >= videoItems.length) return;
+  var vi = videoItems[idx];
+  if (!vi.clip.wide) return;
+  var trackDefault = trackSettings[vi.track || 0].default_position;
+  // Toggle off the override when user picks the layer's default — keeps the
+  // model "uses default" rather than "explicitly set to default".
+  if (pos === trackDefault) {
+    vi.position = null;
+  } else {
+    vi.position = pos;
+  }
+  renderVideoTrack();
+}
+
+/* ── Scene editor popover ────────────────────────────────────────────── */
+
+var _seData = null;     /* the videoItem currently being edited */
+var _seAnchor = null;   /* the block element it's anchored to */
+
+function openSceneEditor(data, anchorEl) {
+  _seData = data;
+  _seAnchor = anchorEl;
+  var ed = document.getElementById('scene-editor');
+  ed.innerHTML = _seBuildHTML(data);
+  ed.classList.add('active');
+  _sePosition(ed, anchorEl);
+  _seWireEvents(ed);
+}
+
+function closeSceneEditor() {
+  _seData = null;
+  _seAnchor = null;
+  document.getElementById('scene-editor').classList.remove('active');
+}
+
+function _seBuildHTML(vi) {
+  var t = vi.track || 0;
+  var trackDefault = trackSettings[t].default_position;
+  var effPos = vi.position || trackDefault;
+  var muted = !!vi.muted;
+  var transIn = vi.trans_in || '';
+  var transOut = vi.trans_out || '';
+  var name = (vi.clip && vi.clip.filename) ? vi.clip.filename : 'Scene';
+  // Truncate long names
+  if (name.length > 28) name = name.slice(0, 25) + '...';
+
+  var html = ''
+    + '<div class="se-title">'
+    +   '<span>' + name + '</span>'
+    +   '<button class="se-close" data-act="close" title="Close">&times;</button>'
+    + '</div>';
+
+  if (vi.clip && vi.clip.wide) {
+    var posBtns = ['top','center','bottom'].map(function(p){
+      var sel = (effPos === p);
+      var isOverride = (vi.position && p === effPos);
+      var cls = 'se-pos-btn' + (sel ? ' sel' : '')
+              + (sel && !isOverride ? ' sel-default' : '');
+      return '<button class="' + cls + '" data-act="pos" data-pos="' + p + '">'
+           + p.charAt(0).toUpperCase() + p.slice(1) + '</button>';
+    }).join('');
+    html += ''
+      + '<div class="se-row">'
+      +   '<span class="se-label">Position</span>'
+      +   '<div class="se-pos-group">' + posBtns + '</div>'
+      + '</div>';
+  }
+
+  var muteIcon = muted
+    ? '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zM4.27 3 3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06a8.99 8.99 0 0 0 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4 9.91 6.09 12 8.18V4z"/></svg>'
+    : '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>';
+  html += ''
+    + '<div class="se-row">'
+    +   '<span class="se-label">Sound</span>'
+    +   '<button class="se-mute-btn' + (muted ? ' muted' : '') + '" data-act="mute">'
+    +     muteIcon + '<span>' + (muted ? 'Muted' : 'On') + '</span>'
+    +   '</button>'
+    + '</div>'
+    + '<div class="se-row">'
+    +   '<span class="se-label">Trans In</span>'
+    +   '<button class="se-trans" data-act="trans-in">'
+    +     (transIn || '<span style="color:#666">None</span>')
+    +     (transIn ? '<span class="se-trans-clear" data-act="clear-in">×</span>' : '')
+    +   '</button>'
+    + '</div>'
+    + '<div class="se-row">'
+    +   '<span class="se-label">Trans Out</span>'
+    +   '<button class="se-trans" data-act="trans-out">'
+    +     (transOut || '<span style="color:#666">None</span>')
+    +     (transOut ? '<span class="se-trans-clear" data-act="clear-out">×</span>' : '')
+    +   '</button>'
+    + '</div>'
+    + '<button class="se-delete" data-act="delete">Delete Scene</button>';
+  return html;
+}
+
+function _sePosition(ed, anchorEl) {
+  /* Place to the right of the block when there's room, else to the left. */
+  var ar = anchorEl.getBoundingClientRect();
+  ed.style.visibility = 'hidden';
+  ed.style.left = '0px';
+  ed.style.top = '0px';
+  // Force layout to read width/height
+  var er = ed.getBoundingClientRect();
+  var pad = 8;
+  var leftSpace = ar.left;
+  var rightSpace = window.innerWidth - ar.right;
+  var x;
+  if (rightSpace >= er.width + pad + 10) {
+    x = ar.right + pad;
+  } else if (leftSpace >= er.width + pad + 10) {
+    x = ar.left - er.width - pad;
+  } else {
+    x = Math.max(8, Math.min(window.innerWidth - er.width - 8, ar.left));
+  }
+  var y = ar.top;
+  // Clamp to viewport
+  y = Math.max(8, Math.min(window.innerHeight - er.height - 8, y));
+  ed.style.left = x + 'px';
+  ed.style.top = y + 'px';
+  ed.style.visibility = 'visible';
+}
+
+function _seWireEvents(ed) {
+  ed.querySelectorAll('[data-act]').forEach(function(el) {
+    el.addEventListener('click', function(e) {
+      e.stopPropagation();
+      if (!_seData) return;
+      var act = this.dataset.act;
+      var idx = videoItems.indexOf(_seData);
+      if (idx < 0 && act !== 'close') return;
+      if (act === 'close') { closeSceneEditor(); }
+      else if (act === 'pos') { setClipPosition(idx, this.dataset.pos); _seRefresh(); }
+      else if (act === 'mute') { toggleClipMute(idx); _seRefresh(); }
+      else if (act === 'trans-in') { closeSceneEditor(); openVideoTransPicker(idx, 'in'); }
+      else if (act === 'trans-out') { closeSceneEditor(); openVideoTransPicker(idx, 'out'); }
+      else if (act === 'clear-in') { _seData.trans_in = null; renderVideoTrack(); _seRefresh(); }
+      else if (act === 'clear-out') { _seData.trans_out = null; renderVideoTrack(); _seRefresh(); }
+      else if (act === 'delete') {
+        closeSceneEditor();
+        removeVideoItem(idx);
+      }
+    });
+  });
+}
+
+function _seRefresh() {
+  if (!_seData || !_seAnchor) return;
+  // Re-render the timeline so the icon row updates, then locate the new
+  // block element for this clip and re-anchor.
+  var ed = document.getElementById('scene-editor');
+  ed.innerHTML = _seBuildHTML(_seData);
+  // The render replaces blocks — find the fresh element by clip identity.
+  var fresh = _seData._el;
+  if (fresh && document.body.contains(fresh)) {
+    _seAnchor = fresh;
+  }
+  _sePosition(ed, _seAnchor);
+  _seWireEvents(ed);
+}
+
+/* Dismiss popover on outside click / escape */
+document.addEventListener('mousedown', function(e) {
+  var ed = document.getElementById('scene-editor');
+  if (!ed || !ed.classList.contains('active')) return;
+  if (ed.contains(e.target)) return;
+  // Don't close if the click landed on a vblock (it'll re-open via mouseup).
+  if (e.target.closest('.vblock')) return;
+  closeSceneEditor();
+});
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeSceneEditor();
+});
+
 function addVideoItem(clip, startTime, trackIdx) {
   /* Prevent adding the same scene twice */
   if (clip.id !== undefined && getTlClipIds().indexOf(clip.id) >= 0) return;
@@ -2383,8 +3025,7 @@ function setupTracks() {
       new Sortable(vt, {
         group: {name:'timeline', pull:false, put:function(to, from, el) {
           if (!el.classList.contains('clip-card') || el.classList.contains('in-tl') || el.classList.contains('ignored')) return false;
-          /* Tracks 1,2 only accept wide clips */
-          if (trackIdx > 0 && !el.classList.contains('wide')) return false;
+          // Any clip can land on any layer.
           return true;
         }},
         sort: false,
@@ -2676,6 +3317,7 @@ function buildTimeline() {
     var vi = sorted[i];
     var c = vi.clip;
     var entry = {type:'clip', start_time:vi.startTime, track:vi.track||0, wide:!!c.wide, stack_order:vi.stackOrder||0, volume:vi.volume||5,
+      muted:!!vi.muted, position:vi.position||null,
       trans_in:vi.trans_in||null, trans_out:vi.trans_out||null};
     if (c.id !== undefined) entry.id = c.id;
     else { entry.video_file = c.video_file; entry.start = c.start; entry.end = c.end; }
@@ -2705,6 +3347,11 @@ function buildTimeline() {
     }
   }
   return {video_track:vt, sound_track:st, text_overlays:tt,
+    track_settings: trackSettings.map(function(s){
+      return {muted: !!s.muted, default_position: s.default_position};
+    }),
+    track_count: tlTrackCount,
+    track_sequential: tlSequential.slice(),
     include_intro: document.getElementById('include-intro').checked,
     include_outro: document.getElementById('include-outro').checked};
 }
@@ -2857,11 +3504,50 @@ function loadNewTimeline(data) {
       trans_in: item.trans_in || (videoItems.length > 0 ? (pendTrans || null) : null),
       trans_out: item.trans_out || null,
       volume: item.volume || 5,
+      muted: !!item.muted,
+      position: item.position || null,
       stackOrder: item.stack_order || 0,
     });
     if (itemTrack > 0 && itemTrack >= tlTrackCount) setTrackCount(itemTrack + 1);
     pendTrans = null;
   }
+  /* Track-level settings: layer mute + default wide-clip position */
+  if (Array.isArray(data.track_settings)) {
+    var defaults = ['top','center','bottom'];
+    for (var ts = 0; ts < 3; ts++) {
+      var src = data.track_settings[ts] || {};
+      trackSettings[ts] = {
+        muted: !!src.muted,
+        default_position: src.default_position || defaults[ts],
+      };
+    }
+  }
+  /* Per-layer Free/Seq mode */
+  if (Array.isArray(data.track_sequential)) {
+    for (var sq = 0; sq < 3; sq++) {
+      tlSequential[sq] = data.track_sequential[sq] !== false;
+    }
+  }
+  /* Visible layer count (also expand if any clip lives on a higher layer) */
+  var maxClipTrack = 0;
+  for (var ci = 0; ci < videoItems.length; ci++) {
+    if ((videoItems[ci].track || 0) > maxClipTrack) maxClipTrack = videoItems[ci].track;
+  }
+  var desiredCount = Math.max(
+    data.track_count || 1,
+    maxClipTrack + 1,
+  );
+  if (desiredCount !== tlTrackCount) setTrackCount(desiredCount);
+  /* Intro/outro toggles */
+  if (typeof data.include_intro === 'boolean') {
+    var ii = document.getElementById('include-intro');
+    if (ii) ii.checked = !!data.include_intro;
+  }
+  if (typeof data.include_outro === 'boolean') {
+    var io = document.getElementById('include-outro');
+    if (io) io.checked = !!data.include_outro;
+  }
+  renderTrackHeaders();
   var st = data.sound_track || [];
   for (var j = 0; j < st.length; j++) {
     soundItems.push({id:++nextBlkId, name:st[j].name, volume:st[j].volume||3,
@@ -3430,6 +4116,136 @@ function closeTextEditor() {
   document.getElementById('text-editor-modal').classList.remove('active');
   document.getElementById('te-canvas').innerHTML = '';
   teState = {editId: null, startTime: 0, endTime: 3, boxes: [], selectedBox: null, dragging: false};
+}
+
+/* ── Text overlay presets (save / gallery) ─────────────────────────── */
+
+function _teAllBoxesData() {
+  // Serialize every non-empty box in the editor (preserves position, size,
+  // colors, font, bold/italic, bg, opacity).
+  var canvas = document.getElementById('te-canvas');
+  var cW = canvas.offsetWidth || 360;
+  var cH = canvas.offsetHeight || 640;
+  return teState.boxes
+    .filter(function(b){ return b && b.text && b.text.trim(); })
+    .map(function(b) {
+      var el = b.el;
+      return {
+        text: b.text.trim(),
+        fontfamily: b.fontfamily, fontsize: b.fontsize, fontcolor: b.fontcolor,
+        bold: !!b.bold, italic: !!b.italic, bgcolor: b.bgcolor,
+        box_opacity: b.box_opacity,
+        x_frac: Math.max(0.02, Math.min(0.98, b.x_frac)),
+        y_frac: Math.max(0.02, Math.min(0.98, b.y_frac)),
+        w_frac: (el ? el.offsetWidth : 200) / cW,
+        h_frac: (el ? el.offsetHeight : 60) / cH,
+      };
+    });
+}
+
+async function saveTextOverlay() {
+  var boxes = _teAllBoxesData();
+  if (!boxes.length) {
+    alert('Add some text before saving.');
+    return;
+  }
+  var defaultName = boxes.map(function(b){return b.text}).join(' / ').slice(0, 40);
+  var name = prompt('Name this overlay (optional):', defaultName);
+  if (name === null) return;  // user cancelled
+  var btn = document.querySelector('.te-save');
+  if (btn) btn.disabled = true;
+  try {
+    var r = await fetch('/api/text-presets', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: name, boxes: boxes}),
+    });
+    var d = await r.json();
+    if (!d.ok) throw new Error('Save failed');
+    if (window.pgLog) {
+      window.pgLog('[text-preset] saved "' + (name||'untitled') + '" — '
+        + boxes.length + ' box' + (boxes.length === 1 ? '' : 'es'), 'ok');
+    }
+  } catch (e) {
+    alert('Save failed: ' + e.message);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function openTextGallery() {
+  document.getElementById('text-gallery-modal').classList.add('active');
+  await _refreshTextGallery();
+}
+
+function closeTextGallery() {
+  document.getElementById('text-gallery-modal').classList.remove('active');
+}
+
+async function _refreshTextGallery() {
+  var grid = document.getElementById('tg-grid');
+  var empty = document.getElementById('tg-empty');
+  grid.innerHTML = '<div style="color:#666;padding:20px;text-align:center">Loading...</div>';
+  try {
+    var presets = await (await fetch('/api/text-presets')).json();
+    if (!presets.length) {
+      grid.innerHTML = '';
+      empty.style.display = '';
+      return;
+    }
+    empty.style.display = 'none';
+    grid.innerHTML = '';
+    presets.forEach(function(p) {
+      var item = document.createElement('div');
+      item.className = 'tg-item';
+      var name = p.name || '(untitled)';
+      var safeName = name.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      item.innerHTML = ''
+        + '<img src="/api/text-presets/' + p.id + '/thumb" alt="' + safeName + '"/>'
+        + '<div class="tg-name">' + safeName + '</div>'
+        + '<button class="tg-del" title="Delete preset" data-pid="' + p.id + '">'
+        +   '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>'
+        + '</button>';
+      item.addEventListener('click', function(e) {
+        if (e.target.closest('.tg-del')) return;
+        loadTextPreset(p.id);
+      });
+      item.querySelector('.tg-del').addEventListener('click', function(e) {
+        e.stopPropagation();
+        deleteTextPreset(p.id, p.name);
+      });
+      grid.appendChild(item);
+    });
+  } catch (e) {
+    grid.innerHTML = '<div style="color:#ef4444;padding:20px">Failed to load: ' + e.message + '</div>';
+  }
+}
+
+async function loadTextPreset(pid) {
+  try {
+    var p = await (await fetch('/api/text-presets/' + pid)).json();
+    // Accept both shapes: {boxes:[...]} (new) or {box:{...}} (legacy).
+    var boxes = Array.isArray(p.boxes) ? p.boxes : (p.box ? [p.box] : []);
+    if (!boxes.length) return;
+    closeTextGallery();
+    var canvas = document.getElementById('te-canvas');
+    canvas.innerHTML = '';
+    teState.boxes = [];
+    teState.selectedBox = null;
+    boxes.forEach(function(b){ teCreateBox(b); });
+    if (teState.boxes.length) teSelectBox(teState.boxes[0]);
+  } catch (e) {
+    alert('Load failed: ' + e.message);
+  }
+}
+
+async function deleteTextPreset(pid, name) {
+  if (!confirm('Delete overlay "' + (name || 'untitled') + '"?')) return;
+  try {
+    await fetch('/api/text-presets/' + pid, {method:'DELETE'});
+    await _refreshTextGallery();
+  } catch (e) {
+    alert('Delete failed: ' + e.message);
+  }
 }
 
 init();

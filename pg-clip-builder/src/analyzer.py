@@ -16,8 +16,9 @@ from pathlib import Path
 from flask import Blueprint, Response, jsonify, request
 
 from db import (
-    get_all_videos, get_analyzed_tags, get_db, get_video_by_id,
-    register_video, save_analysis,
+    add_scene_tag, get_all_videos, get_analyzed_tags, get_db,
+    get_tag_vote_signature, get_video_by_id, register_video, save_analysis,
+    set_scene_excluded,
 )
 from video import VIDEO_DIR, VIDEO_EXTENSIONS, get_video_dimensions, get_video_duration
 
@@ -53,12 +54,20 @@ TAGS = {
     "energy": [
         "high-energy", "medium-energy", "low-energy",
     ],
+    "quality": [
+        "low-quality",
+    ],
 }
 
 ALL_TAGS = []
 for group in TAGS.values():
     ALL_TAGS.extend(group)
 ALL_TAG_SET = set(ALL_TAGS)
+
+# System-applied marker tag — NOT in Claude's vocabulary. Set by post-analysis
+# auto-hide and by the vote-learning pass. Scenes carrying this tag are also
+# excluded=True. Removed when a user up-votes the scene.
+AUTO_HIDDEN_TAG = "auto-hidden"
 
 # ── server-side analysis state ────────────────────────────────────────────────
 
@@ -268,6 +277,12 @@ RULES:
 - A broad tag like "cage" can span the entire video if applicable
 - For "moments": include dialog/speech (with English translation if not English),
   key events, visible on-screen text, and any notable points useful for montage editing
+- Apply "low-quality" to ranges that are unusable for a highlight reel:
+  badly out-of-focus, motion-blurred to the point of being unreadable,
+  black/blank/transition frames, severe shaky-cam, accidental footage
+  (filmer's feet, lens cap), or visually broken (compression artifacts).
+  Do NOT apply "low-quality" just because the action is calm or boring --
+  only when the FOOTAGE itself is unusable.
 - Return ONLY the JSON object, no markdown fences, no explanation
 """
 
@@ -487,10 +502,117 @@ def _analyze_one(video_id, force):
         else:
             emit_progress("Video is up to date, nothing to analyze")
 
+        # Post-analysis: auto-hide low-quality scenes flagged by Claude.
+        try:
+            n = auto_hide_low_quality_scenes(video_id=video_id)
+            if n:
+                emit_progress(f"Auto-hid {n} low-quality scene(s)")
+        except Exception as e:
+            emit_progress(f"Auto-hide skipped: {e}")
+
         return True
     except Exception as e:
         emit_progress(f"Error: {e}")
         return False
+
+
+# ── Auto-hide ────────────────────────────────────────────────────────────────
+
+def auto_hide_low_quality_scenes(video_id=None):
+    """Mark every scene tagged 'low-quality' as auto-hidden + excluded.
+
+    If *video_id* is given, scope to that video. Returns count of scenes hidden.
+    """
+    conn = get_db()
+    try:
+        sql = (
+            "SELECT s.id FROM scenes s "
+            "JOIN scene_tags t ON t.scene_id = s.id "
+            "WHERE t.tag = 'low-quality'"
+        )
+        params = ()
+        if video_id is not None:
+            sql += " AND s.video_id = ?"
+            params = (video_id,)
+        rows = conn.execute(sql, params).fetchall()
+    finally:
+        conn.close()
+
+    hidden = 0
+    for r in rows:
+        sid = r["id"]
+        add_scene_tag(sid, AUTO_HIDDEN_TAG)
+        set_scene_excluded(sid, True)
+        hidden += 1
+    return hidden
+
+
+def auto_hide_from_votes(down_threshold=0.7, min_tag_votes=2,
+                         min_scene_score=0.6):
+    """Use manual votes to predict bad scenes and auto-hide them.
+
+    Algorithm:
+      1. From manually graded scenes (excluding system-hidden ones), build a
+         per-tag down-vote signature: each tag gets a `down_rate` in [0,1]
+         and a vote count.
+      2. "Blacklist" tags = those with `down_rate >= down_threshold` and at
+         least `min_tag_votes` total votes.
+      3. For every unrated, non-excluded scene that carries at least one
+         blacklist tag: compute its predicted-down score (mean of down_rate
+         over its blacklist tags). If it crosses `min_scene_score`, hide it.
+
+    Returns dict: {hidden, blacklist_tags, scanned}.
+    """
+    sig = get_tag_vote_signature(
+        min_votes=min_tag_votes, exclude_tag=AUTO_HIDDEN_TAG,
+    )
+    blacklist = {
+        tag: c["down_rate"] for tag, c in sig.items()
+        if c["down_rate"] >= down_threshold
+    }
+    if not blacklist:
+        return {"hidden": 0, "blacklist_tags": [], "scanned": 0}
+
+    conn = get_db()
+    try:
+        # Candidate scenes: not already excluded, no manual grade yet.
+        rows = conn.execute(
+            """SELECT s.id FROM scenes s
+               WHERE s.excluded = 0
+                 AND NOT EXISTS (
+                     SELECT 1 FROM grades g WHERE g.scene_id = s.id
+                 )"""
+        ).fetchall()
+        scanned = len(rows)
+
+        hidden = 0
+        for r in rows:
+            sid = r["id"]
+            tags = [
+                t["tag"] for t in conn.execute(
+                    "SELECT tag FROM scene_tags WHERE scene_id=?", (sid,)
+                ).fetchall()
+            ]
+            matched = [blacklist[t] for t in tags if t in blacklist]
+            if not matched:
+                continue
+            score = sum(matched) / len(matched)
+            if score >= min_scene_score:
+                add_scene_tag(sid, AUTO_HIDDEN_TAG)
+                set_scene_excluded(sid, True)
+                hidden += 1
+    finally:
+        conn.close()
+
+    return {
+        "hidden": hidden,
+        "scanned": scanned,
+        "blacklist_tags": [
+            {"tag": t, "down_rate": round(r, 2)}
+            for t, r in sorted(blacklist.items(),
+                               key=lambda x: -x[1])
+        ],
+    }
 
 
 def _worker_loop():
@@ -566,6 +688,19 @@ def run_all_analysis():
         return jsonify({"status": "nothing", "count": 0})
     _start_worker(items)
     return jsonify({"status": "started", "count": len(items)})
+
+
+@analyzer_bp.route("/analyze/auto-hide", methods=["POST"])
+def auto_hide():
+    """Run both auto-hide passes: low-quality (already applied at analysis
+    time, but idempotent) + vote-learning."""
+    lq = auto_hide_low_quality_scenes()
+    votes = auto_hide_from_votes()
+    return jsonify({
+        "low_quality_hidden": lq,
+        "vote_learning": votes,
+        "total_hidden": lq + votes["hidden"],
+    })
 
 
 @analyzer_bp.route("/analyze/state")
@@ -669,10 +804,22 @@ td{font-size:13px}
 
 <div class="controls">
   <button class="primary" onclick="scanVideos()">Scan for New Videos</button>
-  <button onclick="pullFromDrive()" id="drive-pull-btn">Pull from Drive</button>
+  <button onclick="pullFromDrive()" id="drive-pull-btn" style="display:none">Pull from Drive</button>
+  <button onclick="autoHide()" id="auto-hide-btn"
+          title="Hide low-quality scenes and ones similar to your down-voted scenes">
+    Auto Hide
+  </button>
   <button class="primary" id="analyze-all-btn" onclick="analyzeAll()" style="display:none">Analyze All</button>
   <span id="scan-status" style="font-size:13px;color:#888"></span>
 </div>
+<script>
+(function(){
+  if (window.PG_FEATURES && window.PG_FEATURES.drive) {
+    var b = document.getElementById('drive-pull-btn');
+    if (b) b.style.display = '';
+  }
+})();
+</script>
 
 <table>
   <thead>
@@ -708,6 +855,32 @@ async function scanVideos() {
     renderList();
   } catch(e) {
     document.getElementById('scan-status').textContent = 'Scan failed: ' + e.message;
+  }
+}
+
+async function autoHide() {
+  var btn = document.getElementById('auto-hide-btn');
+  var st = document.getElementById('scan-status');
+  btn.disabled = true;
+  st.textContent = 'Auto-hiding...';
+  try {
+    var r = await fetch('/analyze/auto-hide', {method:'POST'});
+    var d = await r.json();
+    var v = d.vote_learning || {};
+    var blackTags = (v.blacklist_tags || []).map(function(b){
+      return b.tag + '(' + Math.round(b.down_rate * 100) + '%)';
+    }).join(', ');
+    var msg = 'Hidden ' + d.total_hidden + ' scene(s)'
+      + ' — ' + d.low_quality_hidden + ' low-quality, '
+      + (v.hidden || 0) + ' from votes'
+      + (v.scanned ? ' (scanned ' + v.scanned + ')' : '')
+      + (blackTags ? '. Down-vote tags: ' + blackTags : '');
+    st.textContent = msg;
+    if (window.pgLog) window.pgLog('[auto-hide] ' + msg, 'ok');
+  } catch (e) {
+    st.textContent = 'Auto-hide failed: ' + e.message;
+  } finally {
+    btn.disabled = false;
   }
 }
 

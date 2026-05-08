@@ -53,7 +53,7 @@ def api_scenes():
 @rating_bp.route("/rate/api/grade", methods=["POST"])
 def api_grade():
     """Thumbs up (keep) or thumbs down (exclude)."""
-    from db import set_scene_excluded
+    from db import remove_scene_tag, set_scene_excluded
     data = request.json or {}
     scene_id = data.get("scene_id")
     action = data.get("action")  # "up" or "down"
@@ -62,6 +62,9 @@ def api_grade():
     if action == "up":
         save_grade(scene_id, 5)
         set_scene_excluded(scene_id, False)
+        # An up-vote overrides any prior auto-hide so it can be used again
+        # AND so the vote-learning pass sees a clean training signal.
+        remove_scene_tag(scene_id, "auto-hidden")
     else:
         save_grade(scene_id, 1)
         set_scene_excluded(scene_id, True)
@@ -324,7 +327,12 @@ function getFiltered() {
     return allScenes.filter(function(s) { return s.excluded; });
   }
   if (activeTag) {
-    return allScenes.filter(function(s) { return s.tags.indexOf(activeTag) >= 0 && !s.excluded; });
+    // For "hidden-by-design" tags (auto-hidden), show the excluded scenes
+    // they refer to — otherwise the chip would always be empty.
+    var includeExcluded = (activeTag === 'auto-hidden');
+    return allScenes.filter(function(s) {
+      return s.tags.indexOf(activeTag) >= 0 && (includeExcluded || !s.excluded);
+    });
   }
   return allScenes.filter(function(s) { return !s.excluded; });
 }

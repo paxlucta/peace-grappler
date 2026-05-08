@@ -493,6 +493,133 @@ def overlay_music_track(video_path, music_track_path, out_path, segments=None):
         return False
 
 
+def composite_layered_segment(placements, seg_dur, out_path):
+    """Composite a single 1080x1920 segment from layered clips.
+
+    *placements*: list of dicts, one per clip active during this segment:
+        - source_path  (str): path to the source video file
+        - source_start (float): offset into the source where this segment reads
+        - source_dur   (float): how long to read (== segment duration)
+        - is_wide      (bool): wide source → renders into a 1080x640 slot
+        - layer        (int 0..2): z-order (0 = bottom, 2 = top)
+        - position     (str): 'top' | 'center' | 'bottom' — slot for wide clips
+        - muted        (bool): if true, this clip's audio is dropped
+        - stack_order  (int, optional): tiebreaker within a layer
+
+    Compositing rules:
+      - Black 1080x1920 base canvas.
+      - Clips are sorted by (layer asc, stack_order asc, list order). Each is
+        overlaid on the running canvas. Non-wide covers full frame. Wide
+        covers only its slot row (top y=0, center y=640, bottom y=1280).
+        Higher layer ⇒ drawn on top ⇒ wins z-order.
+      - Audio: every unmuted clip with an audio stream gets mixed via amix.
+        If no clip has audio (or all muted), the segment is silent.
+
+    Returns True on success.
+    """
+    if not placements:
+        return generate_placeholder(out_path, seg_dur, "black")
+
+    SLOT_Y = {"top": 0, "center": 640, "bottom": 1280}
+    SLOT_H = 640
+    W, H = 1080, 1920
+
+    # Stable ordering: layer asc, then stack_order asc, then insertion order.
+    placements = sorted(
+        enumerate(placements),
+        key=lambda e: (e[1]["layer"], e[1].get("stack_order", 0), e[0]),
+    )
+    placements = [p for _i, p in placements]
+
+    cmd = ["ffmpeg", "-y"]
+    # Input 0 — black base canvas (video).
+    cmd += ["-f", "lavfi",
+            "-i", f"color=c=black:s={W}x{H}:d={seg_dur:.3f}:r=30"]
+    # Input 1 — silent audio fallback (used when every clip is muted/silent).
+    cmd += ["-f", "lavfi",
+            "-i", f"anullsrc=r=44100:cl=stereo:d={seg_dur:.3f}"]
+
+    # Inputs 2..N — clip sources (with input-side seek + duration).
+    for p in placements:
+        cmd += ["-ss", f"{max(0.0, p['source_start']):.3f}",
+                "-t", f"{p['source_dur']:.3f}",
+                "-i", str(p["source_path"])]
+
+    # Build filter graph.
+    filters = []
+
+    # Per-clip video processing: scale + pad to slot size, normalize PTS.
+    for i, p in enumerate(placements):
+        src_idx = i + 2
+        target_h = SLOT_H if p["is_wide"] else H
+        filters.append(
+            f"[{src_idx}:v]setpts=PTS-STARTPTS,"
+            f"scale={W}:{target_h}:force_original_aspect_ratio=decrease,"
+            f"pad={W}:{target_h}:(ow-iw)/2:(oh-ih)/2:color=black,"
+            f"setsar=1,fps=30[v{i}]"
+        )
+
+    # Overlay chain — bottom layer first, top layer last.
+    prev_label = "[0:v]"
+    for i, p in enumerate(placements):
+        is_last = (i == len(placements) - 1)
+        out_label = "[vout]" if is_last else f"[ov{i}]"
+        if p["is_wide"]:
+            y = SLOT_Y.get(p.get("position") or "top", 0)
+        else:
+            y = 0
+        filters.append(
+            f"{prev_label}[v{i}]overlay=x=0:y={y}:shortest=0{out_label}"
+        )
+        prev_label = out_label
+
+    # Audio mixing — only unmuted clips that actually have an audio stream.
+    audio_labels = []
+    for i, p in enumerate(placements):
+        if p.get("muted"):
+            continue
+        if not has_audio_stream(p["source_path"]):
+            continue
+        src_idx = i + 2
+        filters.append(f"[{src_idx}:a]asetpts=PTS-STARTPTS[a{i}]")
+        audio_labels.append(f"[a{i}]")
+
+    if not audio_labels:
+        # Route silence input through a labeled noop so -map can reference it.
+        filters.append("[1:a]asetpts=PTS-STARTPTS[asilent]")
+        audio_src = "[asilent]"
+    elif len(audio_labels) == 1:
+        audio_src = audio_labels[0]
+    else:
+        joined = "".join(audio_labels)
+        filters.append(
+            f"{joined}amix=inputs={len(audio_labels)}:duration=longest:"
+            f"dropout_transition=0[amix]"
+        )
+        audio_src = "[amix]"
+
+    cmd += [
+        "-filter_complex", ";".join(filters),
+        "-map", "[vout]", "-map", audio_src,
+        "-t", f"{seg_dur:.3f}",
+        "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+        "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "128k",
+        "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+        out_path,
+    ]
+
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=300)
+        if r.returncode != 0:
+            err = r.stderr.decode("utf-8", errors="replace")[-1200:]
+            print(f"[composite-layered] ffmpeg failed: {err}")
+            return False
+        return os.path.exists(out_path)
+    except Exception as exc:
+        print(f"[composite-layered] Exception: {exc}")
+        return False
+
+
 def stack_split_videos(top_path, bottom_path, out_path):
     """Stack two videos vertically in 1080x1920 frame.
 

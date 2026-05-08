@@ -82,6 +82,14 @@ CREATE TABLE IF NOT EXISTS wizard_feedback (
     feedback TEXT NOT NULL,
     created_at TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS text_overlay_presets (
+    id INTEGER PRIMARY KEY,
+    name TEXT,
+    data_json TEXT NOT NULL,
+    thumbnail BLOB,
+    created_at TEXT DEFAULT (datetime('now'))
+);
 """
 
 
@@ -349,6 +357,86 @@ def set_scene_excluded(scene_id, excluded):
         conn.close()
 
 
+def add_scene_tag(scene_id, tag):
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO scene_tags (scene_id, tag) VALUES (?, ?)",
+            (scene_id, tag),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def remove_scene_tag(scene_id, tag):
+    conn = get_db()
+    try:
+        conn.execute(
+            "DELETE FROM scene_tags WHERE scene_id=? AND tag=?",
+            (scene_id, tag),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_tag_vote_signature(min_votes=2, exclude_tag="auto-hidden"):
+    """Compute per-tag up/down vote counts from manually graded scenes.
+
+    A scene is "down" if its average grade < 3 AND it does not carry the
+    *exclude_tag* (so we don't learn from system-hidden scenes). "up" if
+    average grade >= 3.
+
+    Returns dict: tag -> {"up": int, "down": int, "down_rate": float}
+    Only includes tags with at least *min_votes* total votes.
+    """
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            """SELECT g.scene_id,
+                      AVG(g.score) AS avg_score,
+                      EXISTS (
+                          SELECT 1 FROM scene_tags t
+                          WHERE t.scene_id = g.scene_id AND t.tag = ?
+                      ) AS is_auto_hidden
+               FROM grades g
+               GROUP BY g.scene_id""",
+            (exclude_tag,),
+        ).fetchall()
+
+        sig = {}
+        for r in rows:
+            scene_id = r["scene_id"]
+            avg = r["avg_score"]
+            is_down = avg < 3
+            if is_down and r["is_auto_hidden"]:
+                continue  # don't learn from system-hidden scenes
+            tags = conn.execute(
+                "SELECT tag FROM scene_tags WHERE scene_id=?", (scene_id,)
+            ).fetchall()
+            for t in tags:
+                tag = t["tag"]
+                if tag == exclude_tag:
+                    continue
+                slot = sig.setdefault(tag, {"up": 0, "down": 0})
+                if is_down:
+                    slot["down"] += 1
+                else:
+                    slot["up"] += 1
+
+        result = {}
+        for tag, c in sig.items():
+            total = c["up"] + c["down"]
+            if total < min_votes:
+                continue
+            c["down_rate"] = c["down"] / total
+            result[tag] = c
+        return result
+    finally:
+        conn.close()
+
+
 def get_scene_grades():
     """Return grade info for weighted selection.
     Returns dict: scene_id -> {"total_score": int, "times_graded": int}
@@ -521,6 +609,81 @@ def get_generated_video_by_id(video_id):
         return conn.execute(
             "SELECT * FROM generated_videos WHERE id=?", (video_id,)
         ).fetchone()
+    finally:
+        conn.close()
+
+
+def save_text_preset(name, data_json, thumbnail_bytes):
+    """Persist a text overlay preset. Returns the new row id."""
+    conn = get_db()
+    try:
+        cur = conn.execute(
+            "INSERT INTO text_overlay_presets (name, data_json, thumbnail) "
+            "VALUES (?, ?, ?)",
+            (name or "", data_json, thumbnail_bytes),
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def list_text_presets():
+    """Return list of {id, name, created_at} (no thumbnails)."""
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT id, name, created_at FROM text_overlay_presets "
+            "ORDER BY created_at DESC"
+        ).fetchall()
+        return [
+            {"id": r["id"], "name": r["name"] or "", "created_at": r["created_at"]}
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
+def get_text_preset(preset_id):
+    """Return the full preset dict including data_json. None if missing."""
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT id, name, data_json, created_at "
+            "FROM text_overlay_presets WHERE id=?", (preset_id,),
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "name": row["name"] or "",
+            "data_json": row["data_json"],
+            "created_at": row["created_at"],
+        }
+    finally:
+        conn.close()
+
+
+def get_text_preset_thumbnail(preset_id):
+    """Return the thumbnail BLOB (bytes) or None."""
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT thumbnail FROM text_overlay_presets WHERE id=?",
+            (preset_id,),
+        ).fetchone()
+        return row["thumbnail"] if row else None
+    finally:
+        conn.close()
+
+
+def delete_text_preset(preset_id):
+    conn = get_db()
+    try:
+        conn.execute(
+            "DELETE FROM text_overlay_presets WHERE id=?", (preset_id,),
+        )
+        conn.commit()
     finally:
         conn.close()
 

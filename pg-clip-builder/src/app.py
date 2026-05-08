@@ -17,7 +17,7 @@ from analyzer import analyzer_bp
 from library import library_bp
 from wizard import wizard_bp
 from rating import rating_bp
-from drive_routes import drive_bp
+import features
 
 app = Flask(__name__)
 app.register_blueprint(clip_builder_bp)
@@ -26,7 +26,9 @@ app.register_blueprint(analyzer_bp)
 app.register_blueprint(library_bp)
 app.register_blueprint(wizard_bp)
 app.register_blueprint(rating_bp)
-app.register_blueprint(drive_bp)
+if features.DRIVE_ENABLED:
+    from drive_routes import drive_bp
+    app.register_blueprint(drive_bp)
 
 ROOT_DIR = Path(__file__).parent.parent
 
@@ -34,6 +36,9 @@ ROOT_DIR = Path(__file__).parent.parent
 _SERVER_ID = str(time.time())
 
 _INJECTED_SCRIPT = """
+<script>
+window.PG_FEATURES = {drive: """ + ("true" if features.DRIVE_ENABLED else "false") + """};
+</script>
 <style>
 /* -- Design System -- */
 @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap');
@@ -252,7 +257,8 @@ main,.content,table{animation:pgFadeIn 0.35s ease-out}
         }
       });
     }
-    if (!nav.querySelector('a[href="/drive"]')) {
+    if (window.PG_FEATURES && window.PG_FEATURES.drive
+        && !nav.querySelector('a[href="/drive"]')) {
       var driveLink = document.createElement('a');
       driveLink.href = '/drive';
       driveLink.textContent = 'Drive';
@@ -578,6 +584,8 @@ def _start_video_watcher():
 
     def _maybe_pull_drive():
         """Pull from the Drive inbox folder if connected and configured."""
+        if not features.DRIVE_ENABLED:
+            return
         import time as _t
         if _t.time() - _last_drive_pull[0] < DRIVE_PULL_INTERVAL:
             return

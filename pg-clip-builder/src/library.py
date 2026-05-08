@@ -586,14 +586,16 @@ function playVideo(id, filename) {
   html += '<button class="pd-btn" onclick="emailFromLibrary(' + v.id + ',\'' + escHtml(v.filename) + '\')">'
     + '<svg viewBox="0 0 24 24"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/></svg>'
     + 'Email</button>';
-  if (v.drive_link) {
-    html += '<a class="pd-btn" href="' + v.drive_link + '" target="_blank" rel="noopener">'
-      + '<svg viewBox="0 0 24 24"><path d="M7.71 3.5L1.15 15l3.42 6h7.85L8.85 14H22l-3.42-6h-7.86z" fill="#4285F4"/></svg>'
-      + 'Open in Drive</a>';
-  } else {
-    html += '<button class="pd-btn" id="drive-up-' + v.id + '" onclick="uploadToDrive(' + v.id + ')">'
-      + '<svg viewBox="0 0 24 24"><path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/></svg>'
-      + 'Upload to Drive</button>';
+  if (window.PG_FEATURES && window.PG_FEATURES.drive) {
+    if (v.drive_link) {
+      html += '<a class="pd-btn" href="' + v.drive_link + '" target="_blank" rel="noopener">'
+        + '<svg viewBox="0 0 24 24"><path d="M7.71 3.5L1.15 15l3.42 6h7.85L8.85 14H22l-3.42-6h-7.86z" fill="#4285F4"/></svg>'
+        + 'Open in Drive</a>';
+    } else {
+      html += '<button class="pd-btn" id="drive-up-' + v.id + '" onclick="uploadToDrive(' + v.id + ')">'
+        + '<svg viewBox="0 0 24 24"><path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/></svg>'
+        + 'Upload to Drive</button>';
+    }
   }
   html += '<button class="pd-btn del-btn" onclick="deleteVideo(' + v.id + ')">'
     + '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>'
