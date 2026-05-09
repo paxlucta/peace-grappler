@@ -24,40 +24,16 @@ from video import VIDEO_DIR, VIDEO_EXTENSIONS, get_video_dimensions, get_video_d
 
 analyzer_bp = Blueprint("analyzer", __name__)
 
-CLAUDE_BIN = shutil.which("claude") or "/opt/homebrew/bin/claude"
+import ai_cli
+import app_config
 
 # ── master tag list ──────────────────────────────────────────────────────────
-
-TAGS = {
-    "activity": [
-        "grappling", "striking", "punching", "kicking", "takedown", "submission",
-        "ground-and-pound", "clinch", "sprawl", "guard-pass", "sweep", "mount",
-        "back-control", "arm-bar", "choke", "triangle", "knee-bar", "leg-lock",
-        "wrestling", "judo-throw", "elbow", "knee-strike",
-        "training", "sparring", "drilling", "pad-work", "bag-work", "warm-up",
-        "stretching", "conditioning", "weightlifting", "running",
-        "interview", "press-conference", "weigh-in", "face-off",
-        "walkout", "entrance", "celebration", "corner-advice",
-        "crowd", "audience-reaction", "referee", "judges",
-        "promo", "graphic", "text-overlay", "logo", "intro", "outro",
-        "behind-the-scenes", "travel", "eating", "lifestyle",
-        "slow-motion", "replay", "highlight-reel", "talking", "posing", "photo",
-    ],
-    "setting": [
-        "octagon", "cage", "ring", "gym", "outdoor", "beach", "street", "hotel",
-        "arena", "backstage", "locker-room", "studio",
-    ],
-    "camera": [
-        "close-up", "medium-shot", "wide-shot", "overhead", "pov", "handheld",
-        "steady", "tracking", "slow-pan",
-    ],
-    "energy": [
-        "high-energy", "medium-energy", "low-energy",
-    ],
-    "quality": [
-        "low-quality",
-    ],
-}
+#
+# Sourced from app_config so users can replace the schema for non-MMA
+# domains (cooking, skateboarding, weddings, …). Read at module load —
+# restart the app after editing the schema in /settings for changes to take
+# effect.
+TAGS = app_config.get_tag_schema()
 
 ALL_TAGS = []
 for group in TAGS.values():
@@ -137,90 +113,18 @@ def extract_frames(video_path, duration):
     return frames
 
 
-# ── Claude CLI ───────────────────────────────────────────────────────────────
+# ── AI CLI dispatch (delegates to ai_cli; provider chosen on /settings) ─────
 
 def call_claude(frames, prompt_text):
-    """Send frames + prompt to Claude, return raw text response."""
-    content = []
-    for jpeg_bytes, label in frames:
-        content.append({"type": "text", "text": f"[Frame at {label}]"})
-        content.append({
-            "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": "image/jpeg",
-                "data": base64.b64encode(jpeg_bytes).decode(),
-            },
-        })
-    content.append({"type": "text", "text": prompt_text})
+    """Send frames + prompt to the active AI CLI, return raw text response.
 
-    message = json.dumps({
-        "type": "user",
-        "message": {"role": "user", "content": content},
-    })
-
-    max_retries = 2
-    for attempt in range(max_retries + 1):
-        try:
-            result = subprocess.run(
-                [CLAUDE_BIN, "--print",
-                 "--input-format", "stream-json",
-                 "--output-format", "stream-json",
-                 "--verbose",
-                 "--model", "claude-haiku-4-5-20251001"],
-                input=message, capture_output=True, text=True, timeout=120,
-            )
-
-            raw = result.stdout.strip()
-            stderr = result.stderr.strip() if result.stderr else ""
-
-            # Check for auth / CLI errors
-            if result.returncode != 0 and not raw:
-                err_msg = stderr[:200] if stderr else "unknown error"
-                if "auth" in err_msg.lower() or "login" in err_msg.lower() or "api key" in err_msg.lower():
-                    emit_progress("Claude CLI not authenticated. Run 'claude' in Terminal to sign in.")
-                    return None
-                emit_progress(f"Claude CLI error: {err_msg}")
-                if attempt < max_retries:
-                    emit_progress(f"Retrying ({attempt + 1}/{max_retries})...")
-                    time.sleep(5)
-                    continue
-                return None
-
-            text_content = ""
-            for line in raw.splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    msg = json.loads(line)
-                    if msg.get("type") == "assistant":
-                        c = msg.get("message", {}).get("content", "")
-                        if isinstance(c, list):
-                            t = " ".join(
-                                b.get("text", "") for b in c
-                                if b.get("type") == "text" and b.get("text", "").strip()
-                            )
-                            if t.strip():
-                                text_content = t
-                        elif isinstance(c, str) and c.strip():
-                            text_content = c
-                except json.JSONDecodeError:
-                    continue
-
-            if text_content:
-                return text_content
-
-            if attempt < max_retries:
-                emit_progress(f"Empty response, retrying ({attempt + 1}/{max_retries})...")
-                time.sleep(5)
-        except Exception as e:
-            if attempt < max_retries:
-                emit_progress(f"Attempt failed ({e}), retrying ({attempt + 1}/{max_retries})...")
-                time.sleep(5)
-            else:
-                raise
-    return None
+    Function name retained for callers; the underlying provider is chosen on
+    the /settings page (claude / codex / gemini).
+    """
+    return ai_cli.call_ai(
+        prompt_text, task="analysis", frames=frames,
+        timeout=120, on_log=emit_progress,
+    )
 
 
 def parse_json_response(raw):
@@ -246,7 +150,7 @@ def parse_json_response(raw):
 # ── prompts ──────────────────────────────────────────────────────────────────
 
 FULL_ANALYSIS_PROMPT = """\
-You are analyzing frames from an MMA / combat sports video.
+You are analyzing frames from a {domain} video.
 Video duration: {duration:.1f}s. Frames are shown at their timestamps.
 
 Your job: produce a TAG-CENTRIC analysis. For each tag that applies to this
@@ -287,7 +191,7 @@ RULES:
 """
 
 INCREMENTAL_TAG_PROMPT = """\
-You are analyzing frames from an MMA / combat sports video.
+You are analyzing frames from a {domain} video.
 Video duration: {duration:.1f}s. Frames are shown at their timestamps.
 
 This video has already been analyzed for some tags. Now I need you to check
@@ -330,7 +234,10 @@ def analyze_full(video_path, duration):
     for group_name, tags in TAGS.items():
         tag_list += f"  {group_name.upper()}: {', '.join(tags)}\n"
 
-    prompt = FULL_ANALYSIS_PROMPT.format(duration=duration, tag_list=tag_list)
+    prompt = FULL_ANALYSIS_PROMPT.format(
+        duration=duration, tag_list=tag_list,
+        domain=app_config.get_config()["content_domain"],
+    )
 
     try:
         raw = call_claude(frames, prompt)
@@ -386,6 +293,7 @@ def analyze_incremental(video_path, duration, new_tags):
     prompt = INCREMENTAL_TAG_PROMPT.format(
         duration=duration,
         new_tags=", ".join(sorted(new_tags)),
+        domain=app_config.get_config()["content_domain"],
     )
 
     try:
@@ -452,6 +360,8 @@ def scan_videos():
             "analyzed_tag_count": len(analyzed_tags),
             "total_tag_count": len(ALL_TAG_SET),
             "needs_update": len(new_tags) > 0,
+            "analyzer_provider": v["analyzer_provider"]
+                if "analyzer_provider" in v.keys() else None,
         })
 
     return jsonify({"registered": registered, "videos": result})
@@ -479,6 +389,9 @@ def _analyze_one(video_id, force):
         analyzed_tags = get_analyzed_tags(video_id)
         new_tags = ALL_TAG_SET - analyzed_tags
 
+        # Capture which AI produced this analysis so the UI can attribute it.
+        provider = ai_cli.get_provider_for_task("analysis")
+
         if force or not analyzed_tags:
             emit_progress(f"Full analysis of {video['filename']} ({duration:.1f}s)...")
             result = analyze_full(video_path, duration)
@@ -486,17 +399,19 @@ def _analyze_one(video_id, force):
                 emit_progress("Analysis failed")
                 return False
             save_analysis(video_id, result["tags"], result["moments"],
-                          list(ALL_TAG_SET))
+                          list(ALL_TAG_SET), provider=provider)
             emit_progress(f"Saved {len(result['tags'])} tags")
 
         elif new_tags:
             emit_progress(f"Incremental analysis ({len(new_tags)} new tags)...")
             new_tag_results = analyze_incremental(video_path, duration, new_tags)
             if new_tag_results:
-                save_analysis(video_id, new_tag_results, [], list(new_tags))
+                save_analysis(video_id, new_tag_results, [], list(new_tags),
+                              provider=provider)
                 emit_progress(f"Saved {len(new_tag_results)} new tags")
             else:
-                save_analysis(video_id, {}, [], list(new_tags))
+                save_analysis(video_id, {}, [], list(new_tags),
+                              provider=provider)
                 emit_progress("No new tags found")
 
         else:
@@ -737,7 +652,7 @@ ANALYZE_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PeaceGrappler - Video Analysis</title>
+<title>ClipBuilder - Video Analysis</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{
@@ -792,7 +707,7 @@ td{font-size:13px}
 <body>
 
 <header>
-  <h1>Peace<span>Grappler</span></h1>
+  <h1>Clip<span>Builder</span></h1>
   <nav>
     <a href="/wizard">AI Wizard</a>
     <a href="/builder">Builder</a>
@@ -940,11 +855,13 @@ function renderList() {
     if (v.wide) dims += ' (wide)';
     var btnLabel = v.analyzed_at ? (v.needs_update ? 'Update' : 'Re-analyze') : 'Analyze';
     var force = !!(v.analyzed_at && !v.needs_update);
+    var providerBadge = (window.pgAiBadge && v.analyzer_provider)
+      ? ' ' + window.pgAiBadge(v.analyzer_provider, {size:13}) : '';
     tbody.innerHTML += '<tr>'
       + '<td>' + v.filename + '</td>'
       + '<td>' + v.duration + 's</td>'
       + '<td>' + dims + '</td>'
-      + '<td><span class="status-badge ' + statusClass + '">' + status + '</span></td>'
+      + '<td><span class="status-badge ' + statusClass + '">' + status + '</span>' + providerBadge + '</td>'
       + '<td><button onclick="analyzeVideo(' + v.id + ',' + force + ')" '
       + (analyzing ? 'disabled' : '') + '>' + btnLabel + '</button></td>'
       + '</tr>';

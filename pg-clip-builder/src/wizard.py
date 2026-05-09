@@ -31,7 +31,7 @@ from video import (
 
 wizard_bp = Blueprint("wizard", __name__)
 
-CLAUDE_BIN = shutil.which("claude") or "/opt/homebrew/bin/claude"
+import ai_cli  # noqa: E402  — provider-agnostic dispatcher
 
 MODELS = [
     {"id": "claude-opus-4-6", "name": "Claude Opus 4.6 (most capable)"},
@@ -184,57 +184,22 @@ def _get_wizard_history(limit=20):
         conn.close()
 
 
-# ── Claude CLI helpers ───────────────────────────────────────────────────────
+# ── AI CLI helpers (delegates to ai_cli; provider chosen on /settings) ──────
 
-def _call_claude(prompt_text, model, timeout=300):
-    """Call Claude CLI and return the text response."""
-    message = json.dumps({
-        "type": "user",
-        "message": {"role": "user", "content": prompt_text},
-    })
+def _call_claude(prompt_text, model, timeout=300, task="wizard"):
+    """Call the AI CLI configured for *task* and return its text response.
 
-    result = subprocess.run(
-        [CLAUDE_BIN, "--print",
-         "--input-format", "stream-json",
-         "--output-format", "stream-json",
-         "--verbose",
-         "--model", model],
-        input=message, capture_output=True, text=True, timeout=timeout,
+    *task* defaults to "wizard" (research + reel composition). Caption
+    generation passes "captions" so users can route short copywriting to a
+    different provider if they want.
+
+    *model* is preserved as the requested override; if the active provider
+    expects a different model identifier and the call fails, switch provider
+    on /settings or update the per-provider model there.
+    """
+    return ai_cli.call_ai(
+        prompt_text, task=task, model=model, timeout=timeout, on_log=emit,
     )
-
-    raw = result.stdout.strip()
-    stderr = result.stderr.strip() if result.stderr else ""
-
-    if result.returncode != 0 and not raw:
-        err_msg = stderr[:200] if stderr else "unknown error"
-        if "auth" in err_msg.lower() or "login" in err_msg.lower() or "api key" in err_msg.lower():
-            emit("Claude CLI not authenticated. Open Terminal and run 'claude' to sign in.")
-        else:
-            emit(f"Claude CLI error: {err_msg}")
-        return None
-
-    text_content = ""
-    for line in raw.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            msg = json.loads(line)
-            if msg.get("type") == "assistant":
-                c = msg.get("message", {}).get("content", "")
-                if isinstance(c, list):
-                    t = " ".join(
-                        b.get("text", "") for b in c
-                        if b.get("type") == "text" and b.get("text", "").strip()
-                    )
-                    if t.strip():
-                        text_content = t
-                elif isinstance(c, str) and c.strip():
-                    text_content = c
-        except json.JSONDecodeError:
-            continue
-
-    return text_content
 
 
 def _parse_json(raw):
@@ -269,32 +234,32 @@ def _find_music_files():
 
 RESEARCH_PROMPT = """\
 You are an expert social media strategist specializing in Instagram Reels \
-for combat sports and MMA content.
+for {domain} content.
 
 Based on your knowledge of the current Instagram Reels algorithm and best \
 practices (2025-2026), provide detailed, actionable recommendations for \
-creating MMA highlight reels that MAXIMIZE engagement (views, likes, \
+creating {domain} highlight reels that MAXIMIZE engagement (views, likes, \
 shares, saves, and follows).
 
 Consider: optimal video duration, pacing, hook strategy (first 1-3s), \
-content structure, music usage, transition style, and what makes MMA \
+content structure, music usage, transition style, and what makes {domain} \
 content go viral on Reels.
 
 Return a JSON object with EXACTLY this structure:
-{
-  "ideal_duration_range": {"min": <seconds>, "max": <seconds>},
+{{
+  "ideal_duration_range": {{"min": <seconds>, "max": <seconds>}},
   "optimal_duration": <seconds>,
   "aspect_ratio": "9:16",
   "hook_strategy": "<detailed strategy for first 1-3 seconds>",
   "pacing_cuts_per_minute": <number>,
   "content_structure": ["<phase1>", "<phase2>", ...],
   "music_strategy": "<how to use music for maximum engagement>",
-  "transition_strategy": "<recommended transition approach for MMA content>",
+  "transition_strategy": "<recommended transition approach for {domain} content>",
   "engagement_tips": ["<tip1>", "<tip2>", ...],
   "avoid": ["<thing to avoid 1>", ...],
-  "opening_types": ["<best hook types for MMA>", ...],
+  "opening_types": ["<best hook types for {domain}>", ...],
   "closing_strategy": "<how to end for max engagement>"
-}
+}}
 
 Return ONLY the JSON object. No explanation, no markdown fences.
 """
@@ -307,9 +272,13 @@ def _run_research(model):
         emit("Using cached Instagram Reels research (less than 7 days old)")
         return cached
 
-    emit("Researching Instagram Reels best practices with Claude...")
+    emit("Researching Instagram Reels best practices...")
     try:
-        raw = _call_claude(RESEARCH_PROMPT, model, timeout=120)
+        import app_config
+        raw = _call_claude(
+            RESEARCH_PROMPT.format(**app_config.domain_vars()),
+            model, timeout=120,
+        )
         if not raw:
             emit("Research returned empty — using defaults")
             return _default_research()
@@ -352,9 +321,9 @@ def _default_research():
 # ── Creative planning phase ─────────────────────────────────────────────────
 
 CREATIVE_PROMPT = """\
-You are an expert video editor creating an Instagram Reel for a combat \
-sports / MMA channel called PeaceGrappler. Your ONLY goal: MAXIMIZE \
-ENGAGEMENT (views, likes, shares, saves).
+You are an expert video editor creating an Instagram Reel for a {domain} \
+channel called {brand}. Your ONLY goal: MAXIMIZE ENGAGEMENT (views, \
+likes, shares, saves).
 
 ## Instagram Reels Research
 {research}
@@ -398,7 +367,7 @@ KEY PRINCIPLES:
 near beat positions. Viewers subconsciously feel beat-synced cuts as more professional.
 
 For each clip, specify a sub-range within the scene. Keep clips tight (1.5-5s each).
-Prefer scenes with high-energy tags (striking, takedown, submission, knockout, etc.)
+Prefer scenes tagged "high-energy" or with action/impact tags from the available list.
 
 Output a JSON object with EXACTLY this structure:
 {{
@@ -565,6 +534,7 @@ def _plan_video(model, research, scenes, music_files, feedback,
             "- Text overlays are DISABLED. Set \"text_overlay\" to null for all clips."
         )
 
+    import app_config
     prompt = CREATIVE_PROMPT.format(
         research=json.dumps(research, indent=2),
         scenes="\n".join(scene_lines),
@@ -578,6 +548,7 @@ def _plan_video(model, research, scenes, music_files, feedback,
         target_dur=optimal,
         dur_min=dur_range.get("min", 15),
         dur_max=dur_range.get("max", 30),
+        **app_config.domain_vars(),
     )
 
     label = "Claude is planning the video"
@@ -813,7 +784,10 @@ def _assemble_video(plan, music_files, video_num, total,
         })
 
     final_dur = get_video_duration(str(out_file))
-    save_generated_video(str(out_file), round(final_dur, 1), timeline)
+    save_generated_video(
+        str(out_file), round(final_dur, 1), timeline,
+        wizard_provider=ai_cli.get_provider_for_task("wizard"),
+    )
 
     return {
         "path": str(out_file),
@@ -826,8 +800,8 @@ def _assemble_video(plan, music_files, video_num, total,
 # ── Caption generation ──────────────────────────────────────────────────────
 
 CAPTION_PROMPT = """\
-You are a social media expert for a combat sports / MMA Instagram channel \
-called PeaceGrappler (@peacegrappler).
+You are a social media expert for a {domain} Instagram channel \
+called {brand} ({handle}).
 
 Generate an Instagram Reel caption + hashtags for a video with these details:
 - Duration: {duration}s
@@ -838,9 +812,9 @@ Generate an Instagram Reel caption + hashtags for a video with these details:
 Requirements:
 - Caption should be 1-3 punchy lines that drive engagement (likes, comments, saves, shares)
 - Include a hook or question to encourage comments
-- Add 5-10 relevant hashtags (mix of broad MMA + niche + trending)
+- Add 5-10 relevant hashtags (mix of broad {domain} hashtags + niche + trending)
 - Format: caption text first, then hashtags on a new line
-- Keep it authentic to MMA/combat sports culture
+- Keep it authentic to {domain} culture
 - Do NOT use emojis excessively (max 2-3)
 
 Return ONLY the caption text + hashtags, nothing else.
@@ -858,15 +832,18 @@ def _generate_caption(model, plan, duration):
 
     music_name = (plan.get("music") or {}).get("name", "none")
 
+    import app_config
+    dv = app_config.domain_vars()
     prompt = CAPTION_PROMPT.format(
         duration=duration,
-        rationale=plan.get("rationale", "MMA highlight reel"),
+        rationale=plan.get("rationale", f"{dv['domain']} highlight reel"),
         tags=", ".join(sorted(tags_used)),
         music=music_name,
+        **dv,
     )
 
     try:
-        raw = _call_claude(prompt, model, timeout=60)
+        raw = _call_claude(prompt, model, timeout=60, task="captions")
         return raw.strip() if raw else ""
     except Exception:
         return ""
@@ -1077,7 +1054,7 @@ def _generate(model, num_videos, num_variations=1, folders=None,
                             None,
                         )
                         if match:
-                            update_video_caption(match["id"], caption)
+                            update_video_caption(match["id"], caption, provider=ai_cli.get_provider_for_task("captions"))
                         result["caption"] = caption
                         emit("Caption generated!")
 
@@ -1223,7 +1200,7 @@ def _run_pipeline(model):
                     None,
                 )
                 if match:
-                    update_video_caption(match["id"], caption)
+                    update_video_caption(match["id"], caption, provider=ai_cli.get_provider_for_task("captions"))
 
             _pipeline_emit(f"Video complete: {result['filename']} ({result['duration']}s)")
             _pipeline_emit("DONE:ok")
@@ -1322,8 +1299,10 @@ def api_regenerate_caption(video_id):
         return jsonify({"error": "Video not found"}), 404
 
     # Build a minimal plan from timeline
+    import app_config
     timeline = video.get("timeline", [])
-    plan = {"clips": [], "music": {}, "rationale": "MMA highlight reel"}
+    plan = {"clips": [], "music": {},
+            "rationale": f"{app_config.get_config()['content_domain']} highlight reel"}
     for item in timeline:
         if item.get("type") == "clip":
             plan["clips"].append(item)
@@ -1332,7 +1311,7 @@ def api_regenerate_caption(video_id):
 
     caption = _generate_caption(model, plan, video["duration"])
     if caption:
-        update_video_caption(video_id, caption)
+        update_video_caption(video_id, caption, provider=ai_cli.get_provider_for_task("captions"))
         return jsonify({"status": "ok", "caption": caption})
     return jsonify({"error": "Caption generation failed"}), 500
 
@@ -1408,9 +1387,19 @@ def api_save_research():
 
 @wizard_bp.route("/wizard/api/refresh-research", methods=["POST"])
 def api_refresh_research():
-    """Force refresh the cached research."""
+    """Force refresh the cached research.
+
+    Body (all optional):
+      provider — claude/codex/gemini override (bypasses the task→provider map)
+      model    — override the provider's configured default model
+    """
+    import ai_cli
+    import app_config as _ac
+
     data = request.json or {}
-    model = data.get("model", "claude-sonnet-4-6")
+    provider_override = (data.get("provider") or "").strip() or None
+    model_override = (data.get("model") or "").strip() or None
+
     # Delete old cache
     conn = get_db()
     try:
@@ -1418,9 +1407,16 @@ def api_refresh_research():
         conn.commit()
     finally:
         conn.close()
-    # Run fresh
+
     try:
-        raw = _call_claude(RESEARCH_PROMPT, model, timeout=120)
+        raw = ai_cli.call_ai(
+            RESEARCH_PROMPT.format(**_ac.domain_vars()),
+            task="wizard",
+            provider=provider_override,
+            model=model_override,
+            timeout=180,
+            on_log=emit,
+        )
         if raw:
             result = _parse_json(raw)
             _save_research(result)
@@ -1444,7 +1440,9 @@ def api_email(video_id):
 
     data = request.json or {}
     to = data.get("to", "")
-    subject = data.get("subject", f"PeaceGrappler Video - {path.name}")
+    import app_config as _ac
+    subject = data.get("subject",
+                       f"{_ac.get_config()['brand_name']} Video - {path.name}")
     body = data.get("body", "")
 
     # macOS: use AppleScript to open Mail with attachment
@@ -1553,7 +1551,7 @@ WIZARD_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PeaceGrappler - AI Wizard</title>
+<title>ClipBuilder - AI Wizard</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{
@@ -1633,48 +1631,6 @@ button:disabled{opacity:.5;cursor:not-allowed}
 }
 .btn-primary:hover{background:#c62828}
 .btn-secondary{font-size:12px;padding:8px 14px}
-
-/* -- Research panel -- */
-.research-panel{
-  background:#141414;border:1px solid #2a2a2a;border-radius:10px;
-  margin-bottom:20px;overflow:hidden;
-}
-.research-toggle{
-  display:flex;align-items:center;justify-content:space-between;
-  padding:14px 20px;cursor:pointer;user-select:none;
-}
-.research-toggle:hover{background:#1a1a1a}
-.research-toggle h3{font-size:14px;color:#fff;font-weight:600}
-.research-toggle .arrow{
-  color:#888;font-size:12px;transition:transform .2s;
-}
-.research-toggle .arrow.open{transform:rotate(90deg)}
-.research-toggle .research-status{
-  font-size:11px;color:#666;margin-left:12px;font-weight:400;
-}
-.research-body{display:none;padding:0 20px 16px;border-top:1px solid #2a2a2a}
-.research-body.open{display:block}
-.research-fields{display:flex;flex-direction:column;gap:12px;margin-top:14px}
-.research-field label{
-  display:block;font-size:11px;color:#e53935;font-weight:600;
-  text-transform:uppercase;margin-bottom:4px;
-}
-.research-field input,
-.research-field textarea{
-  width:100%;background:#222;color:#e0e0e0;border:1px solid #444;
-  border-radius:6px;padding:8px 10px;font-size:13px;font-family:inherit;
-}
-.research-field input:focus,
-.research-field textarea:focus{outline:none;border-color:#e53935}
-.research-field textarea{
-  resize:vertical;
-}
-.research-field .hint{font-size:10px;color:#555;margin-top:2px}
-.research-actions{
-  display:flex;gap:10px;margin-top:14px;align-items:center;
-}
-.research-actions .save-status{font-size:12px;color:#4caf50}
-.research-empty{color:#555;font-size:13px;padding:14px 0}
 
 /* -- Progress -- */
 .progress{
@@ -1858,7 +1814,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
 <body>
 
 <header>
-  <h1>Peace<span>Grappler</span></h1>
+  <h1>Clip<span>Builder</span></h1>
   <nav>
     <a href="/wizard" class="active">AI Wizard</a>
     <a href="/builder">Builder</a>
@@ -1923,20 +1879,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
     </div>
   </div>
 
-  <div class="research-panel">
-    <div class="research-toggle" onclick="toggleResearch()">
-      <h3>Research Data <span class="research-status" id="research-status"></span></h3>
-      <span class="arrow" id="research-arrow">&#9654;</span>
-    </div>
-    <div class="research-body" id="research-body">
-      <div id="research-content"></div>
-      <div class="research-actions">
-        <button onclick="saveResearch()">Save Changes</button>
-        <button class="btn-secondary" onclick="refreshResearch()">Re-generate with AI</button>
-        <span class="save-status" id="research-save-status"></span>
-      </div>
-    </div>
-  </div>
+  <!-- Research data was moved to /settings (Strategy Research section). -->
 
   <!-- pipeline section hidden -->
   <div class="pipeline-section" style="display:none">
@@ -1995,7 +1938,6 @@ async function init() {
     sel.appendChild(o);
   }
 
-  loadResearch();
   loadExcluded();
   loadFolders();
   loadMusicFolders();
@@ -2487,8 +2429,10 @@ async function emailVideo(videoId, filename) {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
-        subject: 'PeaceGrappler Video - ' + filename,
-        body: 'Check out this video from PeaceGrappler!',
+        subject: ((window.PG_APP && window.PG_APP.brand) || 'Video')
+                 + ' Video - ' + filename,
+        body: 'Check out this video from '
+              + ((window.PG_APP && window.PG_APP.brand) || '') + '!',
       }),
     });
     var data = await res.json();
@@ -2504,173 +2448,6 @@ async function emailVideo(videoId, filename) {
 }
 
 // ── Research panel ──
-
-function toggleResearch() {
-  var body = document.getElementById('research-body');
-  var arrow = document.getElementById('research-arrow');
-  body.classList.toggle('open');
-  arrow.classList.toggle('open');
-}
-
-async function loadResearch() {
-  var res = await fetch('/wizard/api/research');
-  var data = await res.json();
-  currentResearch = data.research;
-  renderResearch();
-}
-
-// Field definitions for the research editor
-var RESEARCH_FIELDS = [
-  {key:'optimal_duration', label:'Optimal Duration (seconds)', type:'number'},
-  {key:'ideal_duration_range', label:'Duration Range', type:'range'},
-  {key:'aspect_ratio', label:'Aspect Ratio', type:'text'},
-  {key:'hook_strategy', label:'Hook Strategy (first 1-3s)', type:'textarea'},
-  {key:'pacing_cuts_per_minute', label:'Pacing (cuts per minute)', type:'number'},
-  {key:'content_structure', label:'Content Structure (phases)', type:'list'},
-  {key:'music_strategy', label:'Music Strategy', type:'textarea'},
-  {key:'transition_strategy', label:'Transition Strategy', type:'textarea'},
-  {key:'opening_types', label:'Best Opening Types', type:'list'},
-  {key:'closing_strategy', label:'Closing Strategy', type:'textarea'},
-  {key:'engagement_tips', label:'Engagement Tips', type:'list'},
-  {key:'avoid', label:'Things to Avoid', type:'list'},
-];
-
-function renderResearch() {
-  var container = document.getElementById('research-content');
-  var status = document.getElementById('research-status');
-
-  if (!currentResearch) {
-    container.innerHTML = '<div class="research-empty">No research data yet. Click "Re-generate with AI" or run a generation to create it.</div>';
-    status.textContent = '(empty)';
-    return;
-  }
-
-  status.textContent = '(loaded)';
-  var html = '<div class="research-fields">';
-
-  for (var i = 0; i < RESEARCH_FIELDS.length; i++) {
-    var f = RESEARCH_FIELDS[i];
-    var val = currentResearch[f.key];
-    html += '<div class="research-field">';
-    html += '<label>' + f.label + '</label>';
-
-    if (f.type === 'number') {
-      html += '<input type="number" id="rf-' + f.key + '" value="' + (val || 0) + '"/>';
-    } else if (f.type === 'text') {
-      html += '<input type="text" id="rf-' + f.key + '" value="' + escHtml(val || '') + '"/>';
-    } else if (f.type === 'textarea') {
-      var text = val || '';
-      html += '<textarea id="rf-' + f.key + '" rows="' + calcRows(text) + '">' + escHtml(text) + '</textarea>';
-    } else if (f.type === 'range') {
-      var min = val ? (val.min || 0) : 0;
-      var max = val ? (val.max || 0) : 0;
-      html += '<div style="display:flex;gap:8px;align-items:center">'
-        + '<input type="number" id="rf-' + f.key + '-min" value="' + min + '" style="width:80px"/> '
-        + '<span style="color:#666">to</span> '
-        + '<input type="number" id="rf-' + f.key + '-max" value="' + max + '" style="width:80px"/> '
-        + '<span style="color:#666">seconds</span></div>';
-    } else if (f.type === 'list') {
-      var items = Array.isArray(val) ? val.join('\n') : (val || '');
-      html += '<textarea id="rf-' + f.key + '" rows="' + calcRows(items) + '">' + escHtml(items) + '</textarea>';
-      html += '<div class="hint">One item per line</div>';
-    }
-
-    html += '</div>';
-  }
-
-  html += '</div>';
-  container.innerHTML = html;
-}
-
-function calcRows(text) {
-  if (!text) return 2;
-  var lines = text.split('\n');
-  var rows = 0;
-  for (var i = 0; i < lines.length; i++) {
-    rows += Math.max(1, Math.ceil((lines[i].length + 1) / 85));
-  }
-  return Math.max(rows, 2);
-}
-
-function collectResearch() {
-  var r = {};
-  for (var i = 0; i < RESEARCH_FIELDS.length; i++) {
-    var f = RESEARCH_FIELDS[i];
-    if (f.type === 'number') {
-      r[f.key] = parseFloat(document.getElementById('rf-' + f.key).value) || 0;
-    } else if (f.type === 'text' || f.type === 'textarea') {
-      r[f.key] = document.getElementById('rf-' + f.key).value;
-    } else if (f.type === 'range') {
-      r[f.key] = {
-        min: parseFloat(document.getElementById('rf-' + f.key + '-min').value) || 0,
-        max: parseFloat(document.getElementById('rf-' + f.key + '-max').value) || 0,
-      };
-    } else if (f.type === 'list') {
-      var raw = document.getElementById('rf-' + f.key).value;
-      r[f.key] = raw.split('\n').map(function(s){return s.trim()}).filter(function(s){return s});
-    }
-  }
-  // Preserve any extra keys from Claude that we don't have fields for
-  if (currentResearch) {
-    for (var key in currentResearch) {
-      if (!(key in r)) r[key] = currentResearch[key];
-    }
-  }
-  return r;
-}
-
-async function saveResearch() {
-  var research = collectResearch();
-  var status = document.getElementById('research-save-status');
-  status.textContent = 'Saving...';
-  status.style.color = '#888';
-
-  var res = await fetch('/wizard/api/research', {
-    method: 'PUT',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({research: research}),
-  });
-
-  if (res.ok) {
-    currentResearch = research;
-    status.textContent = 'Saved!';
-    status.style.color = '#4caf50';
-    document.getElementById('research-status').textContent = '(loaded)';
-  } else {
-    status.textContent = 'Failed to save';
-    status.style.color = '#ef5350';
-  }
-  setTimeout(function() { status.textContent = ''; }, 3000);
-}
-
-async function refreshResearch() {
-  var model = document.getElementById('model-select').value;
-  var status = document.getElementById('research-save-status');
-  status.textContent = 'Researching with AI...';
-  status.style.color = '#818cf8';
-
-  try {
-    var res = await fetch('/wizard/api/refresh-research', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({model: model}),
-    });
-    var data = await res.json();
-    if (data.status === 'ok') {
-      currentResearch = data.research;
-      renderResearch();
-      status.textContent = 'Research updated!';
-      status.style.color = '#4caf50';
-    } else {
-      status.textContent = 'Failed: ' + (data.message || 'unknown error');
-      status.style.color = '#ef5350';
-    }
-  } catch(e) {
-    status.textContent = 'Error: ' + e.message;
-    status.style.color = '#ef5350';
-  }
-  setTimeout(function() { status.textContent = ''; }, 4000);
-}
 
 
 function addLine(text, cls) {

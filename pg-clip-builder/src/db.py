@@ -1,12 +1,78 @@
-"""db.py — SQLite database schema and helpers for PeaceGrappler."""
+"""db.py — SQLite database schema and helpers.
+
+One database per brand profile so analyzing/generating in one brand never
+shows data from another. The path is resolved on each get_db() call from
+the active profile name in app_config — switching profiles in /settings
+takes effect on the next request, no restart needed for query routing.
+"""
 
 import hashlib
+import re
+import shutil
 import sqlite3
 import subprocess
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).parent.parent
-DB_PATH = ROOT_DIR / "data" / "pg.db"
+DATA_DIR = ROOT_DIR / "data"
+PROFILES_DB_DIR = DATA_DIR / "profiles_db"
+LEGACY_DB_PATH = DATA_DIR / "pg.db"
+
+# Backward-compat alias for any importer that still reads `db.DB_PATH`.
+DB_PATH = LEGACY_DB_PATH
+
+_FILENAME_SAFE = re.compile(r"[^A-Za-z0-9_\-. ]")
+
+
+def _profile_db_path(name):
+    safe = _FILENAME_SAFE.sub("_", (name or "").strip()) or "default"
+    return PROFILES_DB_DIR / (safe + ".db")
+
+
+def _active_db_path():
+    """Resolve the DB file for the currently-active brand profile.
+    Falls back to the legacy single-DB path if app_config can't be loaded."""
+    try:
+        import app_config
+        name = app_config.get_active_profile_name()
+        return _profile_db_path(name)
+    except Exception:
+        return LEGACY_DB_PATH
+
+
+def _migrate_legacy_pg_db():
+    """One-time: copy data/pg.db → profiles_db/PeaceGrappler.db so the
+    user's existing scenes/videos land in the original-brand profile.
+    Idempotent — only runs while PeaceGrappler.db doesn't exist yet."""
+    if not LEGACY_DB_PATH.exists():
+        return
+    pg = _profile_db_path("PeaceGrappler")
+    if pg.exists():
+        return
+    PROFILES_DB_DIR.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(LEGACY_DB_PATH, pg)
+    # WAL/SHM siblings if SQLite is mid-transaction state
+    for ext in ("-wal", "-shm"):
+        sib = LEGACY_DB_PATH.parent / (LEGACY_DB_PATH.name + ext)
+        if sib.exists():
+            try:
+                shutil.copy2(sib, pg.parent / (pg.name + ext))
+            except Exception:
+                pass
+    print(f"[db] Migrated legacy {LEGACY_DB_PATH.name} → {pg}")
+
+
+def delete_profile_db(name):
+    """Remove the SQLite file (plus WAL/SHM siblings) for *name*. Used by
+    app_config.delete_profile so trashing a profile doesn't leak data."""
+    p = _profile_db_path(name)
+    for ext in ("", "-wal", "-shm"):
+        target = p.parent / (p.name + ext)
+        if target.exists():
+            try:
+                target.unlink()
+            except Exception:
+                pass
 
 SCHEMA = """\
 CREATE TABLE IF NOT EXISTS videos (
@@ -94,9 +160,13 @@ CREATE TABLE IF NOT EXISTS text_overlay_presets (
 
 
 def get_db():
-    """Return a connection to the database, creating tables if needed."""
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH))
+    """Return a connection to the active brand profile's database, creating
+    tables if needed. Each profile gets its own SQLite file so switching
+    profiles fully isolates videos/scenes/grades/etc."""
+    _migrate_legacy_pg_db()
+    path = _active_db_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
@@ -110,6 +180,18 @@ def get_db():
     # Migrate: Drive integration columns
     for table in ("videos", "generated_videos"):
         for col in ("drive_file_id", "drive_link"):
+            try:
+                conn.execute(f"SELECT {col} FROM {table} LIMIT 0")
+            except sqlite3.OperationalError:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT")
+                conn.commit()
+    # Migrate: AI provider attribution (which AI generated which content)
+    _provider_columns = {
+        "videos":           ["analyzer_provider"],
+        "generated_videos": ["caption_provider", "wizard_provider"],
+    }
+    for table, cols in _provider_columns.items():
+        for col in cols:
             try:
                 conn.execute(f"SELECT {col} FROM {table} LIMIT 0")
             except sqlite3.OperationalError:
@@ -267,7 +349,8 @@ def get_all_scenes(include_ignored=False, include_excluded=False):
         conn.close()
 
 
-def save_analysis(video_id, tags_dict, moments_list, analyzed_tag_names):
+def save_analysis(video_id, tags_dict, moments_list, analyzed_tag_names,
+                  provider=None):
     """Save analysis results (tags, moments, analyzed_tag_names) to DB.
     tags_dict: {"tag_name": [{"start": 0.0, "end": 5.2}, ...], ...}
     moments_list: [{"at": 3.5, "note": "...", "dialog": "..."}, ...]
@@ -320,11 +403,18 @@ def save_analysis(video_id, tags_dict, moments_list, analyzed_tag_names):
                 (video_id, tag_name),
             )
 
-        # Mark video as analyzed
-        conn.execute(
-            "UPDATE videos SET analyzed_at = datetime('now') WHERE id=?",
-            (video_id,),
-        )
+        # Mark video as analyzed and record which provider produced the tags.
+        if provider:
+            conn.execute(
+                "UPDATE videos SET analyzed_at = datetime('now'), "
+                "analyzer_provider = ? WHERE id=?",
+                (provider, video_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE videos SET analyzed_at = datetime('now') WHERE id=?",
+                (video_id,),
+            )
 
         conn.commit()
     finally:
@@ -517,29 +607,49 @@ def get_scene_by_id(scene_id):
         conn.close()
 
 
-def save_generated_video(path, duration, timeline, caption=""):
-    """Save a generated video record with its timeline as JSON."""
+def save_generated_video(path, duration, timeline, caption="",
+                         caption_provider=None, wizard_provider=None):
+    """Save a generated video record with its timeline as JSON.
+
+    *caption_provider* / *wizard_provider* record which AI produced the caption
+    and the wizard plan (scene picks + narrative). They surface as small
+    badges in the library UI.
+    """
     import json
     conn = get_db()
     try:
         conn.execute(
-            "INSERT INTO generated_videos (path, duration, timeline_json, caption) "
-            "VALUES (?,?,?,?)",
-            (str(path), duration, json.dumps(timeline), caption),
+            "INSERT INTO generated_videos "
+            "(path, duration, timeline_json, caption, "
+            " caption_provider, wizard_provider) "
+            "VALUES (?,?,?,?,?,?)",
+            (str(path), duration, json.dumps(timeline), caption,
+             caption_provider, wizard_provider),
         )
         conn.commit()
     finally:
         conn.close()
 
 
-def update_video_caption(video_id, caption):
-    """Update the caption for a generated video."""
+def update_video_caption(video_id, caption, provider=None):
+    """Update the caption for a generated video.
+
+    *provider*: which AI generated this caption (e.g. 'claude'). Surfaces as
+    a small badge next to the caption in the library UI.
+    """
     conn = get_db()
     try:
-        conn.execute(
-            "UPDATE generated_videos SET caption=? WHERE id=?",
-            (caption, video_id),
-        )
+        if provider is not None:
+            conn.execute(
+                "UPDATE generated_videos SET caption=?, caption_provider=? "
+                "WHERE id=?",
+                (caption, provider, video_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE generated_videos SET caption=? WHERE id=?",
+                (caption, video_id),
+            )
         conn.commit()
     finally:
         conn.close()
@@ -696,6 +806,7 @@ def get_all_generated_videos():
         rows = conn.execute(
             "SELECT * FROM generated_videos ORDER BY generated_at DESC"
         ).fetchall()
+        keys_avail = set(rows[0].keys()) if rows else set()
         return [{
             "id": r["id"],
             "path": r["path"],
@@ -703,8 +814,10 @@ def get_all_generated_videos():
             "timeline": json.loads(r["timeline_json"]),
             "caption": r["caption"] or "",
             "generated_at": r["generated_at"],
-            "drive_file_id": r["drive_file_id"] if "drive_file_id" in r.keys() else None,
-            "drive_link": r["drive_link"] if "drive_link" in r.keys() else None,
+            "drive_file_id": r["drive_file_id"] if "drive_file_id" in keys_avail else None,
+            "drive_link": r["drive_link"] if "drive_link" in keys_avail else None,
+            "caption_provider": r["caption_provider"] if "caption_provider" in keys_avail else None,
+            "wizard_provider": r["wizard_provider"] if "wizard_provider" in keys_avail else None,
         } for r in rows]
     finally:
         conn.close()

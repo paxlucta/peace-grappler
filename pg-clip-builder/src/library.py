@@ -92,6 +92,8 @@ def library_videos():
                 "feedback": [r["feedback"] for r in fb_rows],
                 "drive_link": v.get("drive_link") or "",
                 "drive_file_id": v.get("drive_file_id") or "",
+                "caption_provider": v.get("caption_provider") or "",
+                "wizard_provider": v.get("wizard_provider") or "",
             })
         return jsonify(result)
     finally:
@@ -164,7 +166,7 @@ LIBRARY_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PeaceGrappler - Library</title>
+<title>ClipBuilder - Library</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{
@@ -340,7 +342,7 @@ select:focus{outline:none;border-color:#e53935}
 <body>
 
 <header>
-  <h1>Peace<span>Grappler</span></h1>
+  <h1>Clip<span>Builder</span></h1>
   <nav>
     <a href="/wizard">AI Wizard</a>
     <a href="/builder">Builder</a>
@@ -543,8 +545,10 @@ function playVideo(id, filename) {
   video.src = '/library/api/video/' + id;
 
   // Build detail panel
+  var wizBadge = (window.pgAiBadge && v.wizard_provider)
+    ? ' ' + window.pgAiBadge(v.wizard_provider, {size:13, title:'Reel composed by ' + v.wizard_provider}) : '';
   var html = '<div class="pd-filename">' + escHtml(v.filename) + '</div>'
-    + '<div class="pd-meta">' + formatDuration(v.duration) + ' &middot; ' + formatDate(v.generated_at) + '</div>';
+    + '<div class="pd-meta">' + formatDuration(v.duration) + ' &middot; ' + formatDate(v.generated_at) + wizBadge + '</div>';
 
   // Tags
   if (v.tags.length) {
@@ -556,7 +560,9 @@ function playVideo(id, filename) {
   }
 
   // Caption
-  html += '<div class="pd-section"><div class="pd-label">Caption</div>';
+  var capBadge = (window.pgAiBadge && v.caption_provider)
+    ? ' ' + window.pgAiBadge(v.caption_provider, {size:12, title:'Caption written by ' + v.caption_provider}) : '';
+  html += '<div class="pd-section"><div class="pd-label">Caption' + capBadge + '</div>';
   if (v.caption) {
     html += '<div class="pd-caption" id="pd-caption-text">' + escHtml(v.caption) + '</div>';
   } else {
@@ -706,7 +712,8 @@ async function emailFromLibrary(videoId, filename) {
   await fetch('/wizard/api/email/' + videoId, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({subject: 'PeaceGrappler Video - ' + filename}),
+    body: JSON.stringify({subject: ((window.PG_APP && window.PG_APP.brand) || 'Video')
+                                    + ' Video - ' + filename}),
   });
 }
 

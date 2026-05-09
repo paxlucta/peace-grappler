@@ -215,7 +215,7 @@ def drive_push_status(video_id):
 # ── Settings page ────────────────────────────────────────────────────────────
 
 DRIVE_PAGE = """<!doctype html>
-<html><head><meta charset="utf-8"><title>Google Drive — PeaceGrappler</title>
+<html><head><meta charset="utf-8"><title>Google Drive — ClipBuilder</title>
 <style>
   body{font-family:system-ui,-apple-system,sans-serif;background:#08080c;color:#eeeef2;margin:0}
   main{max-width:760px;margin:30px auto;padding:0 20px 80px}
@@ -255,13 +255,13 @@ DRIVE_PAGE = """<!doctype html>
 </style>
 </head>
 <body>
-<header><h1>Peace<span>Grappler</span></h1>
+<header><h1>Clip<span>Builder</span></h1>
 <nav>
-  <a href="/builder">Builder</a>
-  <a href="/analyze">Analyze</a>
-  <a href="/library">Library</a>
   <a href="/wizard">AI Wizard</a>
+  <a href="/builder">Builder</a>
+  <a href="/library">Library</a>
   <a href="/rate">Scenes</a>
+  <a href="/analyze">Analyze</a>
 </nav>
 </header>
 
@@ -360,16 +360,16 @@ DRIVE_PAGE = """<!doctype html>
       <ol>
         <li>Go to <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a> and create a project (or pick one).</li>
         <li><b>APIs &amp; Services → Library</b> → search "Google Drive API" → <b>Enable</b>.</li>
-        <li><b>APIs &amp; Services → OAuth consent screen</b>: choose <b>External</b>, fill in app name "PeaceGrappler", your support email, then <b>Save and continue</b>. On the "Test users" step, add your own Google email (and any other users who'll run the app).</li>
+        <li><b>APIs &amp; Services → OAuth consent screen</b>: choose <b>External</b>, fill in app name "ClipBuilder", your support email, then <b>Save and continue</b>. On the "Test users" step, add your own Google email (and any other users who'll run the app).</li>
         <li><b>APIs &amp; Services → Credentials → Create Credentials → OAuth client ID</b>:
           <ul>
             <li>Type: <b>Web application</b></li>
-            <li>Name: <b>PeaceGrappler Local</b></li>
+            <li>Name: <b>ClipBuilder Local</b></li>
             <li>Authorized redirect URI: <code class="path" id="redirect-uri"></code></li>
           </ul>
           Click <b>Create</b>, then <b>Download JSON</b>.
         </li>
-        <li>Save the downloaded file as <code class="path">src/drive_client.json</code> in your PeaceGrappler folder, then restart the app.</li>
+        <li>Save the downloaded file as <code class="path">src/drive_client.json</code> in your ClipBuilder folder, then restart the app.</li>
       </ol>
       <p class="muted" style="margin-top:14px">
         Once <code class="path">src/drive_client.json</code> exists, this page becomes

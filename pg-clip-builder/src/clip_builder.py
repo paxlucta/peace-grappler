@@ -1132,7 +1132,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PeaceGrappler Clip Builder</title>
+<title>ClipBuilder - Builder</title>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -1823,7 +1823,7 @@ footer{
 <body>
 
 <header>
-  <h1>Peace<span>Grappler</span></h1>
+  <h1>Clip<span>Builder</span></h1>
   <nav>
     <a href="/wizard">AI Wizard</a>
     <a href="/builder" class="active">Builder</a>

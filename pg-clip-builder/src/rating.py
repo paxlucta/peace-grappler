@@ -110,7 +110,7 @@ SCENES_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PeaceGrappler - Scenes</title>
+<title>ClipBuilder - Scenes</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{
@@ -239,7 +239,7 @@ nav a.active{color:#e53935;border-color:#e53935}
 <body>
 
 <header>
-  <h1>Peace<span>Grappler</span></h1>
+  <h1>Clip<span>Builder</span></h1>
   <nav>
     <a href="/wizard">AI Wizard</a>
     <a href="/builder">Builder</a>

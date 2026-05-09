@@ -8,10 +8,19 @@ from pathlib import Path
 
 ROOT_DIR = Path(__file__).parent.parent
 ASSETS_DIR = ROOT_DIR / "assets"
-OUTPUT_DIR = ROOT_DIR / "output"
 THUMB_DIR = ROOT_DIR / ".cache" / "thumbnails"
-VIDEO_DIR = ROOT_DIR / "videos"
 XFADE_DUR = 0.7
+
+# VIDEO_DIR (Analyze source) and OUTPUT_DIR (Library destination) are
+# user-configurable on /settings — read from the active brand profile here at
+# module load. Restart the app for folder changes to take effect.
+try:
+    import app_config as _ac
+    VIDEO_DIR = _ac.get_source_dir()
+    OUTPUT_DIR = _ac.get_output_dir()
+except Exception:
+    VIDEO_DIR = ROOT_DIR / "videos"
+    OUTPUT_DIR = ROOT_DIR / "output"
 
 TRANSITIONS = [
     "fade", "fadeblack", "fadewhite",
