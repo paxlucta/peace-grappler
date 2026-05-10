@@ -64,26 +64,28 @@ PROVIDER_DEFAULTS = {
         "label": "Claude Code",
         "supports_images": True,
         "homepage": "https://github.com/anthropics/claude-code",
-        # Common Anthropic model IDs the CLI accepts. Users can edit the
-        # active "Default model" field freely — this list only seeds the
-        # picker dropdown.
+        # Listed cheapest → priciest. The picker uses this order to default
+        # to the cheapest option, and pins the configured "Default model"
+        # at the top of its provider group.
         "models": [
-            "claude-opus-4-7",
+            "claude-haiku-4-5-20251001",   # cheapest
             "claude-sonnet-4-6",
-            "claude-haiku-4-5-20251001",
+            "claude-opus-4-7",
         ],
     },
     "codex": {
         "bin": "codex",
-        "model": "gpt-5",
+        "model": "gpt-5-mini",
         "label": "Codex CLI",
         "supports_images": False,
         "homepage": "https://github.com/openai/codex",
         "models": [
-            "gpt-5",
-            "gpt-5-codex",
+            "gpt-5-nano",                  # cheapest
             "gpt-5-mini",
+            "o3-mini",
+            "gpt-5-codex",
             "o3",
+            "gpt-5",
         ],
     },
     "gemini": {
@@ -93,11 +95,32 @@ PROVIDER_DEFAULTS = {
         "supports_images": True,  # via @file references in the prompt
         "homepage": "https://github.com/google-gemini/gemini-cli",
         "models": [
-            "gemini-2.5-pro",
+            "gemini-2.5-flash-lite",       # cheapest
             "gemini-2.5-flash",
+            "gemini-2.0-flash",
+            "gemini-2.5-pro",
         ],
     },
 }
+
+
+# Cross-provider cheapest ranking, used to pre-select the cheapest model
+# overall in the research dropdown. Lower index = cheaper.
+CHEAPEST_RANK = [
+    ("gemini", "gemini-2.5-flash-lite"),
+    ("gemini", "gemini-2.5-flash"),
+    ("gemini", "gemini-2.0-flash"),
+    ("codex",  "gpt-5-nano"),
+    ("codex",  "gpt-5-mini"),
+    ("claude", "claude-haiku-4-5-20251001"),
+    ("codex",  "o3-mini"),
+    ("claude", "claude-sonnet-4-6"),
+    ("codex",  "gpt-5-codex"),
+    ("codex",  "o3"),
+    ("codex",  "gpt-5"),
+    ("gemini", "gemini-2.5-pro"),
+    ("claude", "claude-opus-4-7"),
+]
 
 
 # ── Config ───────────────────────────────────────────────────────────────────
@@ -157,6 +180,9 @@ def get_config():
             t: {"label": TASK_LABELS[t], "description": TASK_DESCRIPTIONS[t]}
             for t in TASKS
         },
+        # Cross-provider cheapest ranking (cheapest first). UIs use this to
+        # default the model picker to the cheapest available option overall.
+        "cheapest_rank": [{"provider": p, "model": m} for p, m in CHEAPEST_RANK],
     }
 
 

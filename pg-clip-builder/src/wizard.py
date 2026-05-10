@@ -33,12 +33,6 @@ wizard_bp = Blueprint("wizard", __name__)
 
 import ai_cli  # noqa: E402  — provider-agnostic dispatcher
 
-MODELS = [
-    {"id": "claude-opus-4-6", "name": "Claude Opus 4.6 (most capable)"},
-    {"id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6 (balanced)"},
-    {"id": "claude-haiku-4-5-20251001", "name": "Claude Haiku 4.5 (fastest)"},
-]
-
 RESEARCH_TTL_DAYS = 7
 
 progress = queue.Queue()
@@ -50,8 +44,13 @@ def emit(msg):
 
 # ── DB helpers ───────────────────────────────────────────────────────────────
 
-def _get_cached_research():
-    """Return cached research if fresh enough, else None."""
+def _get_cached_research(include_provider=False):
+    """Return cached research if fresh enough, else None.
+
+    When *include_provider* is True, returns a dict
+    ``{research, provider, researched_at}`` instead of just the research
+    payload — used by /settings to render an attribution badge.
+    """
     conn = get_db()
     try:
         row = conn.execute(
@@ -59,23 +58,35 @@ def _get_cached_research():
             "ORDER BY researched_at DESC LIMIT 1"
         ).fetchone()
         if not row:
-            return None
+            return None if not include_provider else \
+                {"research": None, "provider": "", "researched_at": ""}
         researched = datetime.fromisoformat(row["researched_at"])
         if datetime.utcnow() - researched > timedelta(days=RESEARCH_TTL_DAYS):
+            if include_provider:
+                # Return stale data with a flag so the UI can still show
+                # the badge, but callers that drive AI behavior get None.
+                return {"research": None, "provider": row["provider"] or "",
+                        "researched_at": row["researched_at"]}
             return None
-        return json.loads(row["result_json"])
+        payload = json.loads(row["result_json"])
+        if include_provider:
+            return {"research": payload, "provider": row["provider"] or "",
+                    "researched_at": row["researched_at"]}
+        return payload
     except Exception:
-        return None
+        return None if not include_provider else \
+            {"research": None, "provider": "", "researched_at": ""}
     finally:
         conn.close()
 
 
-def _save_research(result):
+def _save_research(result, provider=None):
     conn = get_db()
     try:
         conn.execute(
-            "INSERT INTO wizard_research (topic, result_json) VALUES (?, ?)",
-            ("instagram_reels", json.dumps(result)),
+            "INSERT INTO wizard_research (topic, result_json, provider) "
+            "VALUES (?, ?, ?)",
+            ("instagram_reels", json.dumps(result), provider),
         )
         conn.commit()
     finally:
@@ -119,7 +130,8 @@ def _get_wizard_history(limit=20):
     try:
         rows = conn.execute(
             "SELECT gv.id, gv.path, gv.duration, gv.generated_at, "
-            "gv.timeline_json, gv.caption "
+            "gv.timeline_json, gv.caption, "
+            "gv.wizard_provider, gv.caption_provider "
             "FROM generated_videos gv ORDER BY gv.generated_at DESC LIMIT ?",
             (limit,),
         ).fetchall()
@@ -173,6 +185,8 @@ def _get_wizard_history(limit=20):
                 "generated_at": r["generated_at"],
                 "exists": Path(r["path"]).exists(),
                 "caption": r["caption"] or "",
+                "wizard_provider":  r["wizard_provider"] or "",
+                "caption_provider": r["caption_provider"] or "",
                 "feedback": [{"text": f["feedback"], "at": f["created_at"]}
                              for f in fb_rows],
                 "scenes": scenes_used,
@@ -186,19 +200,41 @@ def _get_wizard_history(limit=20):
 
 # ── AI CLI helpers (delegates to ai_cli; provider chosen on /settings) ──────
 
-def _call_claude(prompt_text, model, timeout=300, task="wizard"):
+# Thread-local provider override. The wizard's pipeline / generation
+# threads set _call_ctx.provider at the top; every nested _call_claude
+# inside that thread inherits it without needing to pass an extra arg
+# through every helper. Outside the wizard threads it stays None and the
+# task→provider mapping from /settings is used.
+_call_ctx = threading.local()
+
+
+def _active_provider_label(task="wizard"):
+    """Friendly label for the provider that will actually be used —
+    threadlocal override wins, otherwise the task→provider config. Used in
+    user-facing log lines so they read 'Gemini CLI is planning…' instead
+    of always saying 'Claude'."""
+    override = getattr(_call_ctx, "provider", None)
+    cfg = ai_cli.get_config()
+    name = override or cfg["tasks"].get(task, "claude")
+    return (cfg["providers"].get(name) or {}).get("label") or name
+
+
+def _call_claude(prompt_text, model, timeout=300, task="wizard",
+                 provider=None):
     """Call the AI CLI configured for *task* and return its text response.
 
     *task* defaults to "wizard" (research + reel composition). Caption
     generation passes "captions" so users can route short copywriting to a
     different provider if they want.
 
-    *model* is preserved as the requested override; if the active provider
-    expects a different model identifier and the call fails, switch provider
-    on /settings or update the per-provider model there.
+    *provider* (optional) bypasses the task→provider mapping for this one
+    call. If not given, picks up any provider override set on
+    ``_call_ctx`` by the surrounding wizard thread.
     """
+    p = provider or getattr(_call_ctx, "provider", None)
     return ai_cli.call_ai(
         prompt_text, task=task, model=model, timeout=timeout, on_log=emit,
+        provider=p,
     )
 
 
@@ -283,7 +319,7 @@ def _run_research(model):
             emit("Research returned empty — using defaults")
             return _default_research()
         result = _parse_json(raw)
-        _save_research(result)
+        _save_research(result, provider=ai_cli.get_provider_for_task("wizard"))
         emit("Research complete — cached for future runs")
         return result
     except Exception as e:
@@ -551,7 +587,7 @@ def _plan_video(model, research, scenes, music_files, feedback,
         **app_config.domain_vars(),
     )
 
-    label = "Claude is planning the video"
+    label = f"{_active_provider_label()} is planning the video"
     if variation_ctx and variation_ctx["total"] > 1:
         label += f" (variation {variation_ctx['num']}/{variation_ctx['total']})"
     emit(f"{label}...")
@@ -562,7 +598,7 @@ def _plan_video(model, research, scenes, music_files, feedback,
     try:
         plan = _parse_json(raw)
     except (json.JSONDecodeError, ValueError) as e:
-        emit(f"Failed to parse Claude's plan: {e}")
+        emit(f"Failed to parse {_active_provider_label()}'s plan: {e}")
         return None
 
     # Validate plan
@@ -928,8 +964,17 @@ def _auto_analyze_folders(model, folders):
 
 def _generate(model, num_videos, num_variations=1, folders=None,
               mute_source=False, enable_text_overlays=False,
-              music_folders=None, include_wide=True):
-    """Full wizard generation flow. Runs in a background thread."""
+              music_folders=None, include_wide=True, provider=None,
+              no_music=False):
+    """Full wizard generation flow. Runs in a background thread.
+
+    *no_music* — when True, the AI plans without a music track and the
+    assembly step skips the overlay. Useful for spoken / instructional
+    content where original audio carries the value.
+    """
+    # Stash the provider override so every nested _call_claude in this
+    # thread routes through the user's chosen provider.
+    _call_ctx.provider = provider
     try:
         # 0. Auto-analyze unanalyzed videos in selected folders
         if folders:
@@ -964,9 +1009,13 @@ def _generate(model, num_videos, num_variations=1, folders=None,
             emit("DONE:error")
             return
 
-        music_files = _find_music_files()
+        if no_music:
+            music_files = []
+            emit("No-music mode: original audio only.")
+        else:
+            music_files = _find_music_files()
         # Filter music by selected folders if specified
-        if music_folders:
+        if music_folders and not no_music:
             music_dir = ASSETS_DIR / "music"
             filtered_music = []
             for m in music_files:
@@ -1020,7 +1069,7 @@ def _generate(model, num_videos, num_variations=1, folders=None,
                                    variation_ctx=variation_ctx,
                                    enable_text_overlays=enable_text_overlays)
                 if not plan or not plan.get("clips"):
-                    emit(f"{var_label}: Claude couldn't create a plan")
+                    emit(f"{var_label}: {_active_provider_label()} couldn't create a plan")
                     continue
 
                 n_clips = len(plan["clips"])
@@ -1085,8 +1134,9 @@ def _pipeline_emit(msg):
     pipeline_progress.put(msg)
 
 
-def _run_pipeline(model):
+def _run_pipeline(model, provider=None):
     """Full auto-pipeline: scan → analyze → generate."""
+    _call_ctx.provider = provider  # threadlocal override for nested calls
     from analyzer import (
         analyze_full, ALL_TAG_SET, emit_progress as analyzer_emit,
     )
@@ -1179,7 +1229,7 @@ def _run_pipeline(model):
 
         plan = _plan_video(model, research, scenes, music_files, feedback)
         if not plan or not plan.get("clips"):
-            _pipeline_emit("Claude couldn't create a plan")
+            _pipeline_emit(f"{_active_provider_label()} couldn't create a plan")
             _pipeline_emit("DONE:error")
             return
 
@@ -1222,7 +1272,33 @@ def wizard_page():
 
 @wizard_bp.route("/wizard/api/models")
 def api_models():
-    return jsonify(MODELS)
+    """Return the cross-provider model catalog so the wizard dropdown can
+    list every option (cheapest first) regardless of which provider is set
+    for the wizard task.
+
+    Shape:
+      {
+        groups:   [{provider, label, bin_found, models:[id,...]}, ...]
+        cheapest: {provider, model}            ← cheapest installed combo
+      }
+    """
+    cfg = ai_cli.get_config()
+    groups = []
+    for key, p in cfg["providers"].items():
+        groups.append({
+            "provider":  key,
+            "label":     p.get("label", key),
+            "bin_found": bool(p.get("bin_found")),
+            "default":   p.get("model"),
+            "models":    list(p.get("models") or []),
+        })
+    cheapest = None
+    for r in cfg.get("cheapest_rank", []):
+        pr = cfg["providers"].get(r["provider"]) or {}
+        if pr.get("bin_found"):
+            cheapest = {"provider": r["provider"], "model": r["model"]}
+            break
+    return jsonify({"groups": groups, "cheapest": cheapest})
 
 
 @wizard_bp.route("/wizard/api/folders")
@@ -1247,7 +1323,8 @@ def api_folders():
 @wizard_bp.route("/wizard/api/generate", methods=["POST"])
 def api_generate():
     data = request.json or {}
-    model = data.get("model", "claude-opus-4-6")
+    model = (data.get("model") or "").strip() or None
+    provider = (data.get("provider") or "").strip() or None
     num_videos = max(1, min(10, data.get("num_videos", 1)))
     num_variations = max(1, min(3, data.get("variations", 1)))
     folders = data.get("folders", [])
@@ -1255,16 +1332,24 @@ def api_generate():
     enable_text_overlays = data.get("text_overlays", False)
     music_folders = data.get("music_folders", [])
     include_wide = data.get("include_wide", True)
+    no_music = bool(data.get("no_music", False))
 
-    valid_ids = {m["id"] for m in MODELS}
-    if model not in valid_ids:
-        model = "claude-opus-4-6"
-
-    threading.Thread(target=_generate,
-                     args=(model, num_videos, num_variations, folders,
-                           mute_source, enable_text_overlays, music_folders,
-                           include_wide),
-                     daemon=True).start()
+    threading.Thread(
+        target=_generate,
+        kwargs={
+            "model": model,
+            "num_videos": num_videos,
+            "num_variations": num_variations,
+            "folders": folders,
+            "mute_source": mute_source,
+            "enable_text_overlays": enable_text_overlays,
+            "music_folders": music_folders,
+            "include_wide": include_wide,
+            "provider": provider,
+            "no_music": no_music,
+        },
+        daemon=True,
+    ).start()
     return jsonify({"status": "started"})
 
 
@@ -1290,7 +1375,11 @@ def api_music_folders():
 def api_regenerate_caption(video_id):
     """Regenerate caption for an existing video."""
     data = request.json or {}
-    model = data.get("model", "claude-sonnet-4-6")
+    model = (data.get("model") or "").strip() or None
+    provider = (data.get("provider") or "").strip() or None
+    # Synchronous endpoint — set the provider override on this request's
+    # thread for the duration of the call.
+    _call_ctx.provider = provider
 
     from db import get_all_generated_videos
     videos = get_all_generated_videos()
@@ -1362,9 +1451,13 @@ def api_video(video_id):
 
 @wizard_bp.route("/wizard/api/research")
 def api_get_research():
-    """Return the current cached research, or null."""
-    cached = _get_cached_research()
-    return jsonify({"research": cached})
+    """Return the current cached research with provider attribution."""
+    bundle = _get_cached_research(include_provider=True) or {}
+    return jsonify({
+        "research":      bundle.get("research"),
+        "provider":      bundle.get("provider") or "",
+        "researched_at": bundle.get("researched_at") or "",
+    })
 
 
 @wizard_bp.route("/wizard/api/research", methods=["PUT"])
@@ -1381,7 +1474,11 @@ def api_save_research():
         conn.commit()
     finally:
         conn.close()
-    _save_research(research)
+    # User edits don't have a provider — preserve the most recent one we
+    # have (so the badge keeps reflecting whoever produced the original
+    # cache) rather than dropping attribution.
+    prev = _get_cached_research(include_provider=True) or {}
+    _save_research(research, provider=(prev.get("provider") or None))
     return jsonify({"status": "saved"})
 
 
@@ -1419,8 +1516,11 @@ def api_refresh_research():
         )
         if raw:
             result = _parse_json(raw)
-            _save_research(result)
-            return jsonify({"status": "ok", "research": result})
+            actual_provider = (provider_override
+                               or ai_cli.get_provider_for_task("wizard"))
+            _save_research(result, provider=actual_provider)
+            return jsonify({"status": "ok", "research": result,
+                            "provider": actual_provider})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
     return jsonify({"status": "error", "message": "Empty response"}), 500
@@ -1519,8 +1619,10 @@ def api_excluded_scenes():
 @wizard_bp.route("/wizard/api/pipeline/start", methods=["POST"])
 def api_pipeline_start():
     data = request.json or {}
-    model = data.get("model", "claude-sonnet-4-6")
-    threading.Thread(target=_run_pipeline, args=(model,), daemon=True).start()
+    model = (data.get("model") or "").strip() or None
+    provider = (data.get("provider") or "").strip() or None
+    threading.Thread(target=_run_pipeline, args=(model, provider),
+                     daemon=True).start()
     return jsonify({"status": "started"})
 
 
@@ -1867,6 +1969,10 @@ button:disabled{opacity:.5;cursor:not-allowed}
       <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#aaa;cursor:pointer">
         <input type="checkbox" id="mute-source"> Mute source audio (music only)
       </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#aaa;cursor:pointer"
+             title="Skip the music overlay entirely. Original audio (speech) is preserved.">
+        <input type="checkbox" id="no-music"> No music
+      </label>
       <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#aaa;cursor:pointer">
         <input type="checkbox" id="text-overlays"> Enable text overlays
       </label>
@@ -1927,21 +2033,57 @@ var generatedVideos = [];
 var currentResearch = null;
 
 async function init() {
-  // Load models
-  var models = await fetch('/wizard/api/models').then(function(r){return r.json()});
-  var sel = document.getElementById('model-select');
-  for (var i = 0; i < models.length; i++) {
-    var o = document.createElement('option');
-    o.value = models[i].id;
-    o.textContent = models[i].name;
-    if (i === 0) o.selected = true;  // default to most capable
-    sel.appendChild(o);
-  }
-
+  await loadModels();
   loadExcluded();
   loadFolders();
   loadMusicFolders();
   loadHistory();
+}
+
+async function loadModels() {
+  var data = await fetch('/wizard/api/models').then(function(r){return r.json()});
+  var sel = document.getElementById('model-select');
+  sel.innerHTML = '';
+  var groups = data.groups || [];
+  var cheapest = data.cheapest || null;
+  var cheapestVal = cheapest ? (cheapest.provider + '::' + cheapest.model) : '';
+
+  for (var gi = 0; gi < groups.length; gi++) {
+    var g = groups[gi];
+    var optgroup = document.createElement('optgroup');
+    optgroup.label = g.label + (g.bin_found ? '' : '  (binary missing)');
+    for (var mi = 0; mi < g.models.length; mi++) {
+      var m = g.models[mi];
+      var opt = document.createElement('option');
+      opt.value = g.provider + '::' + m;
+      var label = m;
+      if (m === g.default) label += '   (default)';
+      if (cheapest && g.provider === cheapest.provider && m === cheapest.model) {
+        label += '   💸 cheapest';
+      }
+      opt.textContent = label;
+      optgroup.appendChild(opt);
+    }
+    sel.appendChild(optgroup);
+  }
+  // Default to the cheapest installed (provider, model) combo overall.
+  if (cheapestVal && [].slice.call(sel.options).some(function(o){return o.value===cheapestVal})) {
+    sel.value = cheapestVal;
+  } else if (sel.options.length) {
+    sel.selectedIndex = 0;
+  }
+}
+
+// Used by every "click Generate / Regenerate" handler so the wizard
+// always sends both fields and the server can override the task→provider
+// mapping for this single run.
+function getSelectedModel() {
+  var raw = (document.getElementById('model-select') || {}).value || '';
+  var sep = raw.indexOf('::');
+  if (sep > 0) {
+    return {provider: raw.slice(0, sep), model: raw.slice(sep + 2)};
+  }
+  return {provider: '', model: raw};
 }
 
 async function loadHistory() {
@@ -1971,10 +2113,14 @@ async function loadHistory() {
     }
 
     var date = formatDate(v.generated_at);
+    var wizBadge = (window.pgAiBadge && v.wizard_provider)
+      ? ' ' + window.pgAiBadge(v.wizard_provider, {size:13, title:'Reel composed by ' + v.wizard_provider}) : '';
+    var capBadge = (window.pgAiBadge && v.caption_provider && v.caption_provider !== v.wizard_provider)
+      ? ' ' + window.pgAiBadge(v.caption_provider, {size:11, title:'Caption by ' + v.caption_provider}) : '';
     html += '<div class="hist-card" id="hc-' + v.id + '">'
       + '<div class="hist-header" onclick="toggleHistCard(' + v.id + ')">'
       + '<div class="hist-info">'
-      + '<div class="hist-name">' + escHtml(v.filename) + '</div>'
+      + '<div class="hist-name">' + escHtml(v.filename) + wizBadge + capBadge + '</div>'
       + '<div class="hist-meta">' + v.duration + 's &middot; ' + date + '</div>'
       + fbSummary
       + '</div>'
@@ -2091,7 +2237,7 @@ function startGeneration() {
   if (generating) return;
   generating = true;
 
-  var model = document.getElementById('model-select').value;
+  var sel = getSelectedModel();
   var numVids = parseInt(document.getElementById('num-videos').value) || 1;
   var numVars = parseInt(document.getElementById('num-variations').value) || 1;
 
@@ -2113,12 +2259,14 @@ function startGeneration() {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({
-      model: model,
+      model: sel.model,
+      provider: sel.provider,
       num_videos: numVids,
       variations: numVars,
       folders: getSelectedFromPicker('folder-dropdown'),
       music_folders: getSelectedFromPicker('music-dropdown'),
       mute_source: document.getElementById('mute-source').checked,
+      no_music: document.getElementById('no-music').checked,
       text_overlays: document.getElementById('text-overlays').checked,
       include_wide: document.getElementById('include-wide').checked,
     }),
@@ -2270,7 +2418,7 @@ function copyCaption(videoId) {
 }
 
 async function regenCaption(videoId) {
-  var model = document.getElementById('model-select').value;
+  var sel = getSelectedModel();
   var box = event.target.closest('.caption-box');
   var textEl = box.querySelector('.cap-text');
   textEl.textContent = 'Generating caption...';
@@ -2280,7 +2428,7 @@ async function regenCaption(videoId) {
     var res = await fetch('/wizard/api/caption/' + videoId, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({model: model}),
+      body: JSON.stringify({model: sel.model, provider: sel.provider}),
     });
     var data = await res.json();
     if (data.caption) {
@@ -2482,7 +2630,7 @@ var pipelineRunning = false;
 function startPipeline() {
   if (pipelineRunning) return;
   pipelineRunning = true;
-  var model = document.getElementById('model-select').value;
+  var sel = getSelectedModel();
 
   document.getElementById('pipeline-btn').disabled = true;
   document.getElementById('pipeline-stop-btn').style.display = '';
@@ -2496,7 +2644,7 @@ function startPipeline() {
   fetch('/wizard/api/pipeline/start', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({model: model}),
+    body: JSON.stringify({model: sel.model, provider: sel.provider}),
   }).then(function() {
     var es = new EventSource('/wizard/api/pipeline/status');
     es.onmessage = function(e) {

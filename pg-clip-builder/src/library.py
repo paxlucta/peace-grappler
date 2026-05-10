@@ -242,6 +242,11 @@ select:focus{outline:none;border-color:#e53935}
 }
 .play-btn .play-icon:hover{transform:scale(1.1);background:#e53935}
 .play-btn .play-icon svg{width:24px;height:24px;fill:#fff;margin-left:3px}
+.video-card .card-ai-badges{
+  position:absolute;top:6px;left:6px;display:flex;gap:3px;
+  padding:2px 4px;border-radius:4px;
+  background:rgba(0,0,0,.55);align-items:center;
+}
 .video-card .dur-badge{
   position:absolute;bottom:8px;right:8px;
   background:rgba(0,0,0,.8);color:#fff;font-size:12px;font-weight:600;
@@ -509,6 +514,10 @@ function renderGrid(videos) {
       tagsHtml += '<span class="ctag">+' + (v.tags.length - 4) + '</span>';
     }
 
+    var wizBadge = (window.pgAiBadge && v.wizard_provider)
+      ? window.pgAiBadge(v.wizard_provider, {size:14, title:'Reel composed by ' + v.wizard_provider}) : '';
+    var capBadge = (window.pgAiBadge && v.caption_provider && v.caption_provider !== v.wizard_provider)
+      ? window.pgAiBadge(v.caption_provider, {size:12, title:'Caption by ' + v.caption_provider}) : '';
     html += '<div class="video-card" onclick="playVideo(' + v.id + ',\'' + escHtml(v.filename) + '\')">'
       + '<div class="thumb-wrap">'
       + '<img src="/library/api/thumbnail/' + v.id + '" loading="lazy" alt=""/>'
@@ -516,6 +525,7 @@ function renderGrid(videos) {
       + '<div class="play-icon"><svg viewBox="0 0 24 24"><polygon points="8,5 19,12 8,19"/></svg></div>'
       + '</div>'
       + '<span class="dur-badge">' + formatDuration(v.duration) + '</span>'
+      + ((wizBadge || capBadge) ? '<span class="card-ai-badges">' + wizBadge + capBadge + '</span>' : '')
       + '<button class="card-del" onclick="event.stopPropagation();deleteVideo(' + v.id + ')" title="Delete">&times;</button>'
       + '</div>'
       + '<div class="meta">'

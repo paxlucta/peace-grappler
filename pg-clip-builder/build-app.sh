@@ -198,10 +198,18 @@ if ! command -v node &>/dev/null; then
     echo "Installing Node.js..."
     brew install node 2>/dev/null || true
 fi
-if ! command -v claude &>/dev/null; then
-    echo "Installing Claude CLI..."
-    npm install -g @anthropic-ai/claude-code 2>/dev/null || true
-fi
+
+# Install all three supported AI CLIs (user picks which to use on /settings).
+for entry in \
+    "claude|@anthropic-ai/claude-code|Claude Code" \
+    "gemini|@google/gemini-cli|Gemini CLI" \
+    "codex|@openai/codex|Codex CLI"; do
+    IFS='|' read -r BIN PKG NAME <<< "$entry"
+    if ! command -v "$BIN" &>/dev/null; then
+        echo "Installing $NAME..."
+        npm install -g "$PKG" 2>/dev/null || true
+    fi
+done
 
 echo "Setting up Python environment..."
 python3 -m venv .venv

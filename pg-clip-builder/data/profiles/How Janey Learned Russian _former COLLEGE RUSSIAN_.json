@@ -1,0 +1,131 @@
+{
+  "profile_name": "How Janey Learned Russian _former COLLEGE RUSSIAN_",
+  "brand_name": "How Janey Learned Russian (former COLLEGE RUSSIAN)",
+  "content_domain": "Russian language learning and teaching",
+  "source_folder": "videos/collegerussian",
+  "output_folder": "output/collegerussian",
+  "tag_schema": {
+    "activity": [
+      "grammar-lesson",
+      "verb-conjugation",
+      "case-system-lesson",
+      "pronunciation-drill",
+      "vocabulary-building",
+      "listening-practice",
+      "translation-exercise",
+      "reading-comprehension",
+      "speaking-practice",
+      "cultural-explanation",
+      "literature-analysis",
+      "writing-feedback",
+      "accent-coaching",
+      "dialogue-practice",
+      "russian-music",
+      "music-translation",
+      "history-lesson",
+      "american-perspective",
+      "native-speaker-tips",
+      "beginner-lesson",
+      "intermediate-lesson",
+      "advanced-lesson",
+      "stress-marks-lesson",
+      "intonation-practice",
+      "idiom-explanation",
+      "slang-introduction",
+      "formal-register",
+      "informal-register",
+      "conversational-russian",
+      "business-russian",
+      "student-questions",
+      "q-and-a-session",
+      "online-tutoring",
+      "whiteboard-teaching",
+      "direct-address",
+      "lecture-style",
+      "demonstration",
+      "role-play",
+      "singing-lesson",
+      "russian-cinema",
+      "aspect-system-lesson",
+      "word-order-explanation",
+      "college-classroom-simulation",
+      "zoom-tutoring-session"
+    ],
+    "camera": [
+      "close-up",
+      "medium-shot",
+      "wide-shot",
+      "overhead",
+      "pov",
+      "handheld",
+      "steady",
+      "tracking",
+      "slow-pan"
+    ],
+    "energy": [
+      "high-energy",
+      "medium-energy",
+      "low-energy"
+    ],
+    "quality": [
+      "low-quality"
+    ],
+    "setting": [
+      "home-office",
+      "bedroom",
+      "living-room",
+      "zoom-classroom",
+      "virtual-background",
+      "studio",
+      "desk-setup",
+      "window-backdrop",
+      "plain-background",
+      "whiteboard",
+      "bookshelves",
+      "classroom",
+      "kitchen"
+    ]
+  },
+  "ai": {
+    "tasks": {
+      "analysis": "gemini",
+      "captions": "claude",
+      "wizard": "claude"
+    },
+    "providers": {
+      "claude": {
+        "bin": "claude",
+        "model": "claude-haiku-4-5-20251001"
+      },
+      "codex": {
+        "bin": "codex",
+        "model": "gpt-5"
+      },
+      "gemini": {
+        "bin": "gemini",
+        "model": "gemini-2.5-flash"
+      }
+    }
+  },
+  "socials": {
+    "instagram": {
+      "handle": "@collegerussian",
+      "url": "https://instagram.com/collegerussian",
+      "cookies": "chrome"
+    },
+    "tiktok": {
+      "handle": "",
+      "url": "",
+      "cookies": ""
+    },
+    "youtube": {
+      "handle": "@howjaneylearned",
+      "url": "https://www.youtube.com/@howjaneylearned",
+      "cookies": "chrome"
+    }
+  },
+  "whisper_language": "",
+  "analysis_mode": "speech",
+  "whisper_model": "large-v3",
+  "whisper_translate": true
+}

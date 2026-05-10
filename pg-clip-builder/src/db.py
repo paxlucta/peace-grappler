@@ -156,6 +156,31 @@ CREATE TABLE IF NOT EXISTS text_overlay_presets (
     thumbnail BLOB,
     created_at TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS transcripts (
+    id INTEGER PRIMARY KEY,
+    video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+    language TEXT NOT NULL DEFAULT '',
+    is_translation BOOLEAN DEFAULT 0,
+    start_time REAL NOT NULL,
+    end_time REAL NOT NULL,
+    text TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_transcripts_video_time
+    ON transcripts(video_id, start_time, end_time);
+CREATE INDEX IF NOT EXISTS idx_transcripts_text
+    ON transcripts(video_id, language);
+
+CREATE TABLE IF NOT EXISTS imported_externals (
+    platform     TEXT NOT NULL,
+    external_id  TEXT NOT NULL,
+    title        TEXT,
+    page_url     TEXT,
+    local_path   TEXT,
+    video_id     INTEGER REFERENCES videos(id) ON DELETE SET NULL,
+    imported_at  TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (platform, external_id)
+);
 """
 
 
@@ -189,6 +214,7 @@ def get_db():
     _provider_columns = {
         "videos":           ["analyzer_provider"],
         "generated_videos": ["caption_provider", "wizard_provider"],
+        "wizard_research":  ["provider"],
     }
     for table, cols in _provider_columns.items():
         for col in cols:
@@ -197,6 +223,35 @@ def get_db():
             except sqlite3.OperationalError:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT")
                 conn.commit()
+    # Migrate: per-mode analysis timestamps. The legacy `analyzed_at` is set
+    # by both visual and speech runs and can't tell them apart, which makes
+    # the analyze-page status badge ambiguous. Track each mode separately
+    # and backfill from existing data: any video that already has transcript
+    # rows must have had speech analysis run; otherwise we attribute the
+    # legacy timestamp to visual.
+    needs_backfill = False
+    for col in ("visual_analyzed_at", "speech_analyzed_at"):
+        try:
+            conn.execute(f"SELECT {col} FROM videos LIMIT 0")
+        except sqlite3.OperationalError:
+            conn.execute(f"ALTER TABLE videos ADD COLUMN {col} TEXT")
+            needs_backfill = True
+    if needs_backfill:
+        # Speech: whoever has transcript rows.
+        conn.execute(
+            """UPDATE videos
+               SET speech_analyzed_at = COALESCE(speech_analyzed_at, analyzed_at)
+               WHERE id IN (SELECT DISTINCT video_id FROM transcripts)
+                 AND analyzed_at IS NOT NULL"""
+        )
+        # Visual: anyone analyzed who *doesn't* have transcripts.
+        conn.execute(
+            """UPDATE videos
+               SET visual_analyzed_at = COALESCE(visual_analyzed_at, analyzed_at)
+               WHERE id NOT IN (SELECT DISTINCT video_id FROM transcripts)
+                 AND analyzed_at IS NOT NULL"""
+        )
+        conn.commit()
     conn.commit()
     return conn
 
@@ -318,7 +373,8 @@ def get_all_scenes(include_ignored=False, include_excluded=False):
         rows = conn.execute(f"""
             SELECT s.id, s.video_id, s.start_time, s.end_time,
                    s.excluded, s.ignored,
-                   v.path, v.filename, v.wide, v.duration as video_duration
+                   v.path, v.filename, v.wide, v.duration as video_duration,
+                   v.analyzer_provider
             FROM scenes s
             JOIN videos v ON v.id = s.video_id
             {where}
@@ -342,6 +398,7 @@ def get_all_scenes(include_ignored=False, include_excluded=False):
                 "video_filename": row["filename"],
                 "wide": bool(row["wide"]),
                 "video_duration": row["video_duration"],
+                "analyzer_provider": row["analyzer_provider"] or "",
                 "tags": [t["tag"] for t in tags],
             })
         return scenes
@@ -350,11 +407,14 @@ def get_all_scenes(include_ignored=False, include_excluded=False):
 
 
 def save_analysis(video_id, tags_dict, moments_list, analyzed_tag_names,
-                  provider=None):
+                  provider=None, mode=None):
     """Save analysis results (tags, moments, analyzed_tag_names) to DB.
     tags_dict: {"tag_name": [{"start": 0.0, "end": 5.2}, ...], ...}
     moments_list: [{"at": 3.5, "note": "...", "dialog": "..."}, ...]
     analyzed_tag_names: list of tag names that were analyzed
+    mode: 'visual' or 'speech' — sets the per-mode timestamp column so the
+        analyze-page status badge can show distinct visual/audio states. If
+        None, only the legacy ``analyzed_at`` timestamp is set.
     """
     conn = get_db()
     try:
@@ -404,17 +464,25 @@ def save_analysis(video_id, tags_dict, moments_list, analyzed_tag_names,
             )
 
         # Mark video as analyzed and record which provider produced the tags.
+        # Also stamp the per-mode timestamp so the analyze-page can show
+        # separate Visual / Audio status badges.
+        mode_col = None
+        if mode == "visual":
+            mode_col = "visual_analyzed_at"
+        elif mode == "speech":
+            mode_col = "speech_analyzed_at"
+        sets = ["analyzed_at = datetime('now')"]
+        params = []
+        if mode_col:
+            sets.append(f"{mode_col} = datetime('now')")
         if provider:
-            conn.execute(
-                "UPDATE videos SET analyzed_at = datetime('now'), "
-                "analyzer_provider = ? WHERE id=?",
-                (provider, video_id),
-            )
-        else:
-            conn.execute(
-                "UPDATE videos SET analyzed_at = datetime('now') WHERE id=?",
-                (video_id,),
-            )
+            sets.append("analyzer_provider = ?")
+            params.append(provider)
+        params.append(video_id)
+        conn.execute(
+            f"UPDATE videos SET {', '.join(sets)} WHERE id=?",
+            params,
+        )
 
         conn.commit()
     finally:
@@ -569,6 +637,241 @@ def get_analyzed_tags(video_id):
             "SELECT tag FROM analyzed_tags WHERE video_id=?", (video_id,)
         ).fetchall()
         return {r["tag"] for r in rows}
+    finally:
+        conn.close()
+
+
+def save_transcripts(video_id, segments, language="", is_translation=False):
+    """Persist Whisper transcript segments for a video. Replaces any prior
+    rows for the same (video_id, language, is_translation) so re-running
+    audio analysis with the same settings overwrites cleanly.
+
+    *segments*: list of ``{"start": float, "end": float, "text": str}`` —
+        the same shape audio_analysis.transcribe() returns.
+    *language*: ISO code from Whisper's auto-detect (e.g. 'ru'), or '' if
+        unknown. For *is_translation=True* this is the SOURCE language —
+        the text itself is English regardless.
+    *is_translation*: False for the original transcript, True for the
+        Whisper-translated English version saved alongside it.
+    """
+    if not segments:
+        return
+    conn = get_db()
+    try:
+        conn.execute(
+            "DELETE FROM transcripts WHERE video_id=? AND language=? AND is_translation=?",
+            (video_id, language or "", 1 if is_translation else 0),
+        )
+        rows = [
+            (video_id, language or "", 1 if is_translation else 0,
+             float(s.get("start", 0)), float(s.get("end", 0)),
+             (s.get("text") or "").strip())
+            for s in segments
+            if (s.get("text") or "").strip()
+        ]
+        conn.executemany(
+            """INSERT INTO transcripts
+               (video_id, language, is_translation, start_time, end_time, text)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            rows,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_transcripts_in_range(video_id, start_time, end_time):
+    """Return transcript segments that overlap [start_time, end_time] for a
+    given video. Result is grouped by ``(language, is_translation)`` so the
+    UI can show source + translation side-by-side.
+
+    Returns: ``[{"language": "ru", "is_translation": False, "segments":
+    [{start, end, text}, ...]}, ...]`` — original first, translations after.
+    """
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            """SELECT language, is_translation, start_time, end_time, text
+               FROM transcripts
+               WHERE video_id=?
+                 AND start_time < ?
+                 AND end_time > ?
+               ORDER BY is_translation, start_time""",
+            (video_id, end_time, start_time),
+        ).fetchall()
+        groups = {}
+        for r in rows:
+            key = (r["language"], bool(r["is_translation"]))
+            groups.setdefault(key, []).append({
+                "start": r["start_time"],
+                "end":   r["end_time"],
+                "text":  r["text"],
+            })
+        out = []
+        for (lang, is_xlat), segs in sorted(groups.items(), key=lambda x: x[0][1]):
+            out.append({
+                "language":       lang,
+                "is_translation": is_xlat,
+                "segments":       segs,
+            })
+        return out
+    finally:
+        conn.close()
+
+
+def get_video_ids_with_transcripts():
+    """Set of video_ids that have at least one transcript row in the active
+    profile. Used to decide whether to surface the transcript button on
+    the Analyze page."""
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT video_id FROM transcripts"
+        ).fetchall()
+        return {r["video_id"] for r in rows}
+    finally:
+        conn.close()
+
+
+def get_scene_ids_with_transcripts():
+    """Set of scene_ids whose [start,end] window overlaps any transcript
+    row for the same video. Cheaper than per-scene queries when rendering
+    a long Scenes page."""
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            """SELECT DISTINCT s.id
+               FROM scenes s
+               JOIN transcripts t
+                 ON t.video_id = s.video_id
+                AND t.start_time < s.end_time
+                AND t.end_time   > s.start_time"""
+        ).fetchall()
+        return {r["id"] for r in rows}
+    finally:
+        conn.close()
+
+
+def get_video_transcripts(video_id):
+    """All transcript groups for *video_id*. Same shape as
+    get_transcripts_in_range() but spans the full video. Used by the
+    analyze-page transcript modal."""
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            """SELECT language, is_translation, start_time, end_time, text
+               FROM transcripts
+               WHERE video_id=?
+               ORDER BY is_translation, start_time""",
+            (video_id,),
+        ).fetchall()
+        groups = {}
+        for r in rows:
+            key = (r["language"], bool(r["is_translation"]))
+            groups.setdefault(key, []).append({
+                "start": r["start_time"],
+                "end":   r["end_time"],
+                "text":  r["text"],
+            })
+        out = []
+        for (lang, is_xlat), segs in sorted(groups.items(), key=lambda x: x[0][1]):
+            out.append({
+                "language":       lang,
+                "is_translation": is_xlat,
+                "segments":       segs,
+            })
+        return out
+    finally:
+        conn.close()
+
+
+def search_scene_ids_by_text(query):
+    """Loose text search across transcripts → set of scene_ids whose time
+    window overlaps a matching transcript row.
+
+    Loose-matching strategy: split the query on whitespace; every token
+    must appear (case-insensitive substring) in the SAME transcript row.
+    This catches \"praktika 234\" or \"234 practice\" without requiring
+    word-order to match what Whisper produced. Pure substring would be
+    too strict for multi-word queries; full-text search is overkill for
+    the dataset size we expect.
+    """
+    q = (query or "").strip()
+    if not q:
+        return set()
+    tokens = [t for t in q.split() if t]
+    if not tokens:
+        return set()
+    where_clauses = " AND ".join(["t.text LIKE ? COLLATE NOCASE"] * len(tokens))
+    params = [f"%{tok}%" for tok in tokens]
+    sql = f"""SELECT DISTINCT s.id
+              FROM scenes s
+              JOIN transcripts t
+                ON t.video_id = s.video_id
+               AND t.start_time < s.end_time
+               AND t.end_time   > s.start_time
+              WHERE {where_clauses}"""
+    conn = get_db()
+    try:
+        rows = conn.execute(sql, params).fetchall()
+        return {r["id"] for r in rows}
+    finally:
+        conn.close()
+
+
+def create_scene(video_id, start_time, end_time, tags=None):
+    """Insert a new scene + tags. Returns the new scene id. Used by the
+    \"Cut Scene from selection\" flow on the Analyze page."""
+    conn = get_db()
+    try:
+        cur = conn.execute(
+            """INSERT INTO scenes (video_id, start_time, end_time)
+               VALUES (?, ?, ?)""",
+            (video_id, round(float(start_time), 2), round(float(end_time), 2)),
+        )
+        scene_id = cur.lastrowid
+        for tag in (tags or []):
+            tag = (tag or "").strip()
+            if not tag:
+                continue
+            conn.execute(
+                "INSERT OR IGNORE INTO scene_tags (scene_id, tag) VALUES (?, ?)",
+                (scene_id, tag),
+            )
+        conn.commit()
+        return scene_id
+    finally:
+        conn.close()
+
+
+def search_transcripts(query, limit=200):
+    """Substring search across all stored transcripts in the active profile.
+    Returns ``[{video_id, filename, language, is_translation, start, end,
+    text}, ...]`` ordered by video then time. Case-insensitive."""
+    q = (query or "").strip()
+    if not q:
+        return []
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            """SELECT t.video_id, v.filename, t.language, t.is_translation,
+                      t.start_time, t.end_time, t.text
+               FROM transcripts t
+               JOIN videos v ON v.id = t.video_id
+               WHERE t.text LIKE ? COLLATE NOCASE
+               ORDER BY t.video_id, t.start_time
+               LIMIT ?""",
+            (f"%{q}%", int(limit)),
+        ).fetchall()
+        return [{
+            "video_id":       r["video_id"],
+            "filename":       r["filename"],
+            "language":       r["language"],
+            "is_translation": bool(r["is_translation"]),
+            "start":          r["start_time"],
+            "end":            r["end_time"],
+            "text":           r["text"],
+        } for r in rows]
     finally:
         conn.close()
 
@@ -792,6 +1095,54 @@ def delete_text_preset(preset_id):
     try:
         conn.execute(
             "DELETE FROM text_overlay_presets WHERE id=?", (preset_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ── Imported external videos (per profile) ─────────────────────────────────
+
+def get_imported_external_ids(platform):
+    """Set of external_ids already imported for *platform* in the active
+    profile DB. Used to filter the import-modal listing."""
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT external_id FROM imported_externals WHERE platform=?",
+            (platform,),
+        ).fetchall()
+        return {r["external_id"] for r in rows}
+    finally:
+        conn.close()
+
+
+def list_imported_externals():
+    """All imported videos across platforms, newest first."""
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT platform, external_id, title, page_url, local_path, "
+            "video_id, imported_at FROM imported_externals "
+            "ORDER BY imported_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def record_imported_external(platform, external_id, title=None,
+                              page_url=None, local_path=None, video_id=None):
+    """Mark a (platform, external_id) as imported. Idempotent."""
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO imported_externals "
+            "(platform, external_id, title, page_url, local_path, video_id, "
+            " imported_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))",
+            (platform, external_id, title, page_url,
+             str(local_path) if local_path else None,
+             video_id),
         )
         conn.commit()
     finally:

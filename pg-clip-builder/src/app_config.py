@@ -39,6 +39,53 @@ DEFAULT_CONTENT_DOMAIN = "MMA / combat sports"
 DEFAULT_SOURCE_FOLDER = "videos"
 DEFAULT_OUTPUT_FOLDER = "output"
 
+# Analysis mode — drives how the analyzer breaks each video into scenes.
+#   "visual" — default; samples frames + asks AI for tag time-ranges.
+#              Best for action / sports / motion-heavy content.
+#   "speech" — runs local Whisper on the audio, uses transcript segments
+#              as scene boundaries, sends frame + spoken text to the AI
+#              for per-scene tagging. Best for tutorials, interviews,
+#              podcasts, talking-head content.
+DEFAULT_ANALYSIS_MODE = "visual"
+ANALYSIS_MODES = ("visual", "speech")
+DEFAULT_WHISPER_MODEL = "base"
+WHISPER_MODELS = ("tiny", "base", "small", "medium", "large-v3")
+DEFAULT_WHISPER_LANGUAGE = ""  # empty = auto-detect
+DEFAULT_WHISPER_TRANSLATE = False  # if True, transcript is forced to English
+
+SOCIAL_PLATFORMS = ("instagram", "tiktok", "youtube")
+
+
+def _validate_socials(value):
+    """Sanitize a socials dict. Accepts unknown platforms but normalizes the
+    known ones so the UI always has fields to render.
+
+    Each slot has: handle, url, cookies (browser name or path to cookies.txt).
+    """
+    if not isinstance(value, dict):
+        return None
+    def _slot(s):
+        s = s or {}
+        if not isinstance(s, dict):
+            s = {}
+        return {
+            "handle":  str(s.get("handle")  or "").strip(),
+            "url":     str(s.get("url")     or "").strip(),
+            "cookies": str(s.get("cookies") or "").strip(),
+        }
+    out = {plat: _slot(value.get(plat)) for plat in SOCIAL_PLATFORMS}
+    # Pass through any extra platforms the user added by hand.
+    for k, v in value.items():
+        if k in SOCIAL_PLATFORMS or not isinstance(v, dict):
+            continue
+        out[k] = _slot(v)
+    return out
+
+
+DEFAULT_SOCIALS = {p: {"handle": "", "url": "", "cookies": ""}
+                   for p in SOCIAL_PLATFORMS}
+
+
 DEFAULT_TAGS = {
     "activity": [
         "grappling", "striking", "punching", "kicking", "takedown", "submission",
@@ -201,14 +248,29 @@ def _ensure_profile():
 
 
 def _fill_defaults(raw, profile_name):
-    """Apply built-in defaults for any missing field."""
+    """Apply built-in defaults for any missing field.
+
+    Legacy migration: if the profile JSON still has a top-level
+    ``social_handle`` (from before the per-platform Social Channels block),
+    fold it into ``socials.instagram.handle`` so the AI prompts keep
+    receiving a useful value via ``domain_vars()``.
+    """
+    socials = _validate_socials(raw.get("socials")) or deepcopy(DEFAULT_SOCIALS)
+    legacy_handle = (raw.get("social_handle") or "").strip()
+    if legacy_handle and not socials.get("instagram", {}).get("handle"):
+        socials["instagram"]["handle"] = legacy_handle
+
+    mode = (raw.get("analysis_mode") or "").strip().lower()
+    if mode not in ANALYSIS_MODES:
+        mode = DEFAULT_ANALYSIS_MODE
+    whisper_model = (raw.get("whisper_model") or "").strip()
+    if whisper_model not in WHISPER_MODELS:
+        whisper_model = DEFAULT_WHISPER_MODEL
     return {
         "profile_name":   (raw.get("profile_name") or profile_name or "").strip()
                           or DEFAULT_BRAND_NAME,
         "brand_name":     (raw.get("brand_name") or "").strip()
                           or DEFAULT_BRAND_NAME,
-        "social_handle":  (raw.get("social_handle") or "").strip()
-                          or DEFAULT_SOCIAL_HANDLE,
         "content_domain": (raw.get("content_domain") or "").strip()
                           or DEFAULT_CONTENT_DOMAIN,
         "source_folder":  (raw.get("source_folder") or "").strip()
@@ -217,7 +279,12 @@ def _fill_defaults(raw, profile_name):
                           or DEFAULT_OUTPUT_FOLDER,
         "tag_schema":     _validate_tags(raw.get("tag_schema"))
                           or deepcopy(DEFAULT_TAGS),
+        "socials":        socials,
         "ai":             raw.get("ai") or {},
+        "analysis_mode":     mode,
+        "whisper_model":     whisper_model,
+        "whisper_language":  (raw.get("whisper_language") or "").strip(),
+        "whisper_translate": bool(raw.get("whisper_translate", False)),
     }
 
 
@@ -242,10 +309,34 @@ def set_config(**fields):
     current_name = get_active_profile_name()
     raw = _read_profile_raw(current_name)
 
-    for k in ("brand_name", "social_handle", "content_domain",
-              "source_folder", "output_folder"):
+    # Drop the deprecated top-level social_handle; primary handle now lives
+    # in socials.instagram.handle (migrated on load by _fill_defaults).
+    raw.pop("social_handle", None)
+
+    for k in ("brand_name", "content_domain",
+              "source_folder", "output_folder",
+              "whisper_language"):
         if k in fields and fields[k] is not None:
             raw[k] = (fields[k] or "").strip()
+
+    if "analysis_mode" in fields and fields["analysis_mode"] is not None:
+        m = (fields["analysis_mode"] or "").strip().lower()
+        if m and m not in ANALYSIS_MODES:
+            raise ValueError(
+                f"analysis_mode must be one of {ANALYSIS_MODES}, got {m!r}"
+            )
+        raw["analysis_mode"] = m or DEFAULT_ANALYSIS_MODE
+
+    if "whisper_model" in fields and fields["whisper_model"] is not None:
+        m = (fields["whisper_model"] or "").strip()
+        if m and m not in WHISPER_MODELS:
+            raise ValueError(
+                f"whisper_model must be one of {WHISPER_MODELS}, got {m!r}"
+            )
+        raw["whisper_model"] = m or DEFAULT_WHISPER_MODEL
+
+    if "whisper_translate" in fields and fields["whisper_translate"] is not None:
+        raw["whisper_translate"] = bool(fields["whisper_translate"])
 
     if "tag_schema" in fields and fields["tag_schema"] is not None:
         validated = _validate_tags(fields["tag_schema"])
@@ -254,6 +345,14 @@ def set_config(**fields):
                 "tag_schema must be a dict of category → list of tag strings"
             )
         raw["tag_schema"] = validated
+
+    if "socials" in fields and fields["socials"] is not None:
+        validated = _validate_socials(fields["socials"])
+        if validated is None:
+            raise ValueError(
+                "socials must be a dict of platform → {handle, url}"
+            )
+        raw["socials"] = validated
 
     if "ai" in fields and fields["ai"] is not None:
         if not isinstance(fields["ai"], dict):
@@ -330,10 +429,23 @@ def get_all_tag_set():
 
 
 def domain_vars():
+    """Variables for AI prompt formatting.
+
+    {handle} resolves from the Social Channels block — IG first (Reels are
+    Instagram-first), then TikTok, then YouTube, then empty. Use whichever
+    is set so the AI always has something concrete to reference in captions.
+    """
     c = get_config()
+    socials = c.get("socials") or {}
+    handle = ""
+    for plat in ("instagram", "tiktok", "youtube"):
+        h = ((socials.get(plat) or {}).get("handle") or "").strip()
+        if h:
+            handle = h
+            break
     return {
         "brand":  c["brand_name"],
-        "handle": c["social_handle"],
+        "handle": handle,
         "domain": c["content_domain"],
     }
 

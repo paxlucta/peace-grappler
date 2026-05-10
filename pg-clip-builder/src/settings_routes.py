@@ -24,20 +24,25 @@ def api_app_get():
 def api_app_set():
     """Persist EVERY setting on the page into the active profile.
 
-    Accepts: profile_name, brand_name, social_handle, content_domain,
-    source_folder, output_folder, tag_schema, ai (the dict expected by
-    ai_cli with tasks + providers).
+    Accepts: profile_name, brand_name, content_domain, source_folder,
+    output_folder, tag_schema, socials, ai (the dict expected by ai_cli with
+    tasks + providers). The deprecated social_handle field is silently
+    ignored — primary handle lives at socials.instagram.handle now.
     """
     data = request.get_json(force=True) or {}
     try:
         app_config.set_config(
             profile_name=data.get("profile_name"),
             brand_name=data.get("brand_name"),
-            social_handle=data.get("social_handle"),
             content_domain=data.get("content_domain"),
             source_folder=data.get("source_folder"),
             output_folder=data.get("output_folder"),
             tag_schema=data.get("tag_schema"),
+            socials=data.get("socials"),
+            analysis_mode=data.get("analysis_mode"),
+            whisper_model=data.get("whisper_model"),
+            whisper_language=data.get("whisper_language"),
+            whisper_translate=data.get("whisper_translate"),
             ai=data.get("ai"),
         )
     except ValueError as e:
@@ -56,6 +61,39 @@ def api_app_load():
         app_config.load_profile(name)
     except FileNotFoundError as e:
         return jsonify({"ok": False, "error": str(e)}), 404
+    out = app_config.get_config()
+    out["profiles"] = app_config.list_profiles()
+    out["active_profile"] = app_config.get_active_profile_name()
+    return jsonify({"ok": True, **out})
+
+
+@settings_bp.route("/settings/api/app/import", methods=["POST"])
+def api_app_import():
+    """Import a brand profile JSON: validate, copy into data/profiles/, set
+    active. Body shape:
+      {filename: "MyBrand.json", content: <profile dict>}
+    Used by the Load Profile button on /settings — the client reads the
+    user's chosen file with FileReader and posts it here.
+    """
+    import json as _json
+    data = request.get_json(force=True) or {}
+    raw_name = (data.get("filename") or "").strip()
+    content = data.get("content")
+    if not isinstance(content, dict):
+        return jsonify({"ok": False, "error": "content must be a JSON object"}), 400
+    # Pick a profile name: prefer the file's profile_name/brand_name field,
+    # fall back to the filename minus .json.
+    name = (content.get("profile_name") or content.get("brand_name") or "").strip()
+    if not name and raw_name.lower().endswith(".json"):
+        name = raw_name[:-5]
+    if not name:
+        name = raw_name or "imported"
+    try:
+        # Round-trip through validators by writing then loading.
+        app_config._write_profile_raw(name, content)
+        app_config.load_profile(name)
+    except (ValueError, FileNotFoundError) as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
     out = app_config.get_config()
     out["profiles"] = app_config.list_profiles()
     out["active_profile"] = app_config.get_active_profile_name()
@@ -157,8 +195,13 @@ that would help an AI tag scenes from this brand's videos.
 Return ONLY a JSON object with this exact structure:
 {{
   "brand_name":     "<channel/brand name as it appears on the page>",
-  "social_handle":  "<@handle for Instagram/TikTok/Twitter/YouTube, or empty if not visible>",
+  "social_handle":  "<primary @handle (often the IG handle), or empty if not visible>",
   "content_domain": "<plain-English description of the niche, 2-6 words. Examples: 'sourdough baking', 'urban skateboarding', 'wedding cinematography', 'MMA / combat sports'>",
+  "socials": {{
+    "instagram": {{"handle": "<@handle or empty>", "url": "<https://instagram.com/... or empty>"}},
+    "tiktok":    {{"handle": "<@handle or empty>", "url": "<https://tiktok.com/@... or empty>"}},
+    "youtube":   {{"handle": "<@handle or empty>", "url": "<https://youtube.com/@... or full channel URL, or empty>"}}
+  }},
   "tag_schema": {{
     "activity": ["<20-50 tags SPECIFIC to this niche — what visual actions, techniques, objects, or events would the AI need to recognize in their videos?>"],
     "setting":  ["<10-20 location/environment tags relevant to this niche>"],
@@ -169,6 +212,10 @@ Return ONLY a JSON object with this exact structure:
 }}
 
 Rules:
+- For "socials": fill in only platforms the page actually links to or
+  references. Leave handle/url empty for platforms with no signal.
+  Inspect og:url, canonical URLs, and any anchor hrefs that point at
+  instagram.com / tiktok.com / youtube.com.
 - Tag values must be lowercase, hyphenated (e.g. "knife-skills" not "Knife Skills").
 - "activity" tags should be highly specific to the niche — generic tags like "talking" or "outro" are fine to include but the bulk should be domain-specific.
 - "setting" tags should describe the physical locations/environments where this brand films.
@@ -369,6 +416,28 @@ SETTINGS_PAGE = """<!doctype html>
   .prof-btn:hover{background:#22222e;border-color:#444;color:#fff}
   select:focus{outline:none;border-color:#e53935}
 
+  /* Social channels */
+  .social-row{
+    display:grid;grid-template-columns:110px 1fr 1.4fr 1fr;gap:8px;
+    align-items:center;padding:10px 0;
+    border-bottom:1px solid #1a1a24;
+  }
+  .social-row:last-child{border-bottom:none}
+  .social-row .plat{
+    display:flex;align-items:center;gap:8px;
+    font-size:13px;font-weight:600;color:#fff;
+  }
+  .social-row .plat svg{width:18px;height:18px;flex-shrink:0}
+  .social-row input{font-size:11px}
+  .socials-help{
+    font-size:11px;color:#888;line-height:1.5;margin-top:14px;
+    padding:10px 12px;background:rgba(124,58,237,0.06);
+    border:1px solid rgba(124,58,237,0.2);border-radius:6px;
+  }
+  .socials-help b{color:#c7a8ff}
+  .socials-help code{background:#0a0a10;padding:1px 5px;border-radius:3px;
+    font-size:10px;color:#ff8a8a}
+
   /* Settings Wizard */
   .wiz-btn{
     padding:9px 14px;background:linear-gradient(135deg,#7c3aed 0%,#4338ca 100%);
@@ -429,23 +498,14 @@ SETTINGS_PAGE = """<!doctype html>
 
   <div class="section-title">Profile</div>
   <div class="card">
-    <div class="grid2">
-      <div>
-        <label>Active profile</label>
-        <div style="display:flex;gap:6px;align-items:center">
-          <select id="profile-picker" style="flex:1;padding:8px 10px;background:#0c0c14;border:1px solid #2e2e3e;color:#eee;border-radius:5px;font-size:12px"></select>
-          <button onclick="loadProfile()" class="prof-btn">Load</button>
-          <button onclick="deleteActiveProfile()" class="prof-btn" title="Delete this profile">&#x1F5D1;</button>
-        </div>
-      </div>
-      <div>
-        <label>Settings file name</label>
-        <input type="text" id="profile-name" placeholder="defaults to brand name">
-        <div class="muted" style="margin-top:4px">
-          Saved as <code>data/profiles/&lt;name&gt;.json</code>. Saving with a
-          new name <b>creates a new profile</b> (the previous one is kept).
-          Use the trash button to delete a profile.
-        </div>
+    <div>
+      <label>Settings file name</label>
+      <input type="text" id="profile-name" placeholder="defaults to brand name">
+      <div class="muted" style="margin-top:4px">
+        Saved as <code>data/profiles/&lt;name&gt;.json</code>. Saving with a
+        new name <b>creates a new profile</b> (the previous one is kept).
+        Use the <b>Load Profile</b> button at the bottom to switch to a
+        different brand.
       </div>
     </div>
     <div style="margin-top:14px;padding-top:14px;border-top:1px solid #1e1e2a">
@@ -482,17 +542,12 @@ SETTINGS_PAGE = """<!doctype html>
 
   <div class="section-title">Brand &amp; Content</div>
   <div class="card">
-    <div class="grid2">
-      <div>
-        <label>Brand name</label>
-        <input type="text" id="brand-name" placeholder="e.g. ClipBuilder, MyChannel">
-        <div class="muted" style="margin-top:4px">
-          Appears in AI prompts and email defaults.
-        </div>
-      </div>
-      <div>
-        <label>Social handle</label>
-        <input type="text" id="social-handle" placeholder="e.g. @mychannel">
+    <div>
+      <label>Brand name</label>
+      <input type="text" id="brand-name" placeholder="e.g. ClipBuilder, MyChannel">
+      <div class="muted" style="margin-top:4px">
+        Appears in AI prompts and email defaults. (Social handles live in
+        the Social Channels section below.)
       </div>
     </div>
     <div style="margin-top:12px">
@@ -513,6 +568,26 @@ SETTINGS_PAGE = """<!doctype html>
     </div>
   </div>
 
+  <div class="section-title">Social Channels</div>
+  <div class="card">
+    <p class="muted" style="margin:0 0 12px 0">
+      Per-platform handles, URLs, and (optionally) cookies for downloads.
+      Used by the AI Wizard for caption generation and by <b>Import Videos</b>
+      on /analyze.
+    </p>
+    <div id="socials-rows"></div>
+    <div class="socials-help">
+      <b>Cookies</b> field — only needed when a platform blocks anonymous
+      downloads (common on YouTube and Instagram). Two formats:
+      <br>• Browser name: <code>chrome</code>, <code>firefox</code>, <code>brave</code>, <code>edge</code> — yt-dlp pulls cookies directly from your logged-in browser. <b>Recommended.</b>
+      <br>• File path: absolute path to a <code>cookies.txt</code> file
+      (e.g. exported with the <i>Get cookies.txt LOCALLY</i> browser extension).
+      <br>• <b>macOS gotcha:</b> <code>safari</code> usually fails because Safari's
+      cookies are sandboxed — use a different browser, or grant Terminal
+      Full Disk Access in System Settings → Privacy &amp; Security.
+    </div>
+  </div>
+
   <div class="section-title">Folders</div>
   <div class="card">
     <div class="grid2">
@@ -529,6 +604,69 @@ SETTINGS_PAGE = """<!doctype html>
         <input type="text" id="output-folder" placeholder="output">
         <div class="muted" style="margin-top:4px">
           Where generated reels are written. Restart the app after changing.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-title">Analysis</div>
+  <div class="card">
+    <p class="muted" style="margin:0 0 12px 0">
+      How videos get broken into scenes during analysis. Pick the mode that
+      fits this brand's content type.
+    </p>
+    <div class="grid2">
+      <div>
+        <label>Mode</label>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">
+          <button class="prov-pill" id="amode-visual" data-mode="visual">
+            <b>Visual</b> · action / sports
+          </button>
+          <button class="prov-pill" id="amode-speech" data-mode="speech">
+            <b>Speech</b> · tutorials / interviews
+          </button>
+        </div>
+        <div class="muted" style="margin-top:6px;line-height:1.55">
+          <b>Visual</b> samples frames + asks the AI to tag each timeframe.
+          Best for fights, sports, motion content.<br>
+          <b>Speech</b> runs a local Whisper transcription, uses transcript
+          segments as scene boundaries, then tags each spoken chunk. Best
+          for talking-head content where the spoken topic — not the camera
+          cuts — defines a scene.
+        </div>
+      </div>
+      <div id="speech-opts" style="display:none">
+        <label>Whisper model</label>
+        <select id="whisper-model"
+                style="width:100%;padding:8px 10px;background:#0c0c14;border:1px solid #2e2e3e;color:#eee;border-radius:5px;font-size:12px">
+          <option value="tiny">tiny — 39 MB, fastest, English-leaning</option>
+          <option value="base">base — 74 MB, balanced (default)</option>
+          <option value="small">small — 244 MB, better accuracy</option>
+          <option value="medium">medium — 769 MB, very accurate</option>
+          <option value="large-v3">large-v3 — 1.5 GB, best quality (recommended for multilingual)</option>
+        </select>
+        <div style="height:10px"></div>
+        <label>Language (ISO code, optional)</label>
+        <input type="text" id="whisper-language"
+               placeholder="auto-detect (e.g. en, ru, es, pt)">
+        <div class="muted" style="margin-top:6px">
+          Lock the language for faster + more accurate transcription. Leave
+          blank to auto-detect each video. <b>Multilingual content:</b>
+          leave blank and use the <code>large-v3</code> model — it handles
+          code-switching far better than smaller models.
+        </div>
+        <div style="height:12px"></div>
+        <label class="tl-check" style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="whisper-translate">
+          <span>Translate transcript to English</span>
+        </label>
+        <div class="muted" style="margin-top:4px">
+          Whisper transcribes the source audio AND translates to English in
+          one pass. Useful for multilingual videos so downstream AI tagging
+          gets a uniform English transcript regardless of source language.
+          Leaves audio untouched — only affects the cached transcript text.
+          Models download on first use to
+          <code>~/.cache/huggingface/hub/</code>.
         </div>
       </div>
     </div>
@@ -565,6 +703,12 @@ SETTINGS_PAGE = """<!doctype html>
 
   <div style="margin-top:18px;display:flex;align-items:center;gap:14px">
     <button class="save" onclick="saveAll()">Save settings</button>
+    <button class="prof-btn" onclick="document.getElementById('profile-file-input').click()"
+            title="Pick a brand profile JSON from disk; the app will load it and restart.">
+      Load Profile
+    </button>
+    <input type="file" id="profile-file-input" accept=".json,application/json"
+           style="display:none" onchange="onProfileFilePicked(this)">
     <span id="msg" class="muted"></span>
   </div>
 </main>
@@ -605,75 +749,123 @@ async function load(){
   appCfg = await appRes.json();
   restartSnapshot = _captureRestartSnapshot(appCfg);
   fillFromAppCfg();
-  refreshProfilePicker();
   render();
   loadResearch();
+  // Wire analysis-mode pill clicks once.
+  for (const m of ['visual', 'speech']) {
+    const el = document.getElementById('amode-' + m);
+    if (el) el.onclick = () => selectAnalysisMode(m);
+  }
+}
+
+function _currentAnalysisMode(){
+  for (const m of ['visual', 'speech']) {
+    const el = document.getElementById('amode-' + m);
+    if (el && el.classList.contains('sel')) return m;
+  }
+  return 'visual';
 }
 
 function fillFromAppCfg(){
   document.getElementById('brand-name').value     = appCfg.brand_name || '';
-  document.getElementById('social-handle').value  = appCfg.social_handle || '';
   document.getElementById('content-domain').value = appCfg.content_domain || '';
   document.getElementById('source-folder').value  = appCfg.source_folder || '';
   document.getElementById('output-folder').value  = appCfg.output_folder || '';
   document.getElementById('profile-name').value   = appCfg.profile_name || '';
   document.getElementById('tag-schema').value     =
     JSON.stringify(appCfg.tag_schema || {}, null, 2);
+  renderSocials(appCfg.socials || {});
+  // Analysis mode
+  const mode = (appCfg.analysis_mode || 'visual');
+  selectAnalysisMode(mode);
+  document.getElementById('whisper-model').value =
+    appCfg.whisper_model || 'base';
+  document.getElementById('whisper-language').value =
+    appCfg.whisper_language || '';
+  document.getElementById('whisper-translate').checked =
+    !!appCfg.whisper_translate;
 }
 
-function refreshProfilePicker(){
-  const sel = document.getElementById('profile-picker');
-  const profiles = appCfg.profiles || [];
-  const active   = appCfg.active_profile || appCfg.profile_name || '';
-  sel.innerHTML = '';
-  if (!profiles.length) {
-    sel.innerHTML = '<option>(no profiles)</option>';
+function selectAnalysisMode(mode){
+  for (const m of ['visual', 'speech']) {
+    const el = document.getElementById('amode-' + m);
+    if (el) el.classList.toggle('sel', m === mode);
+  }
+  // Speech-only options visible only in speech mode.
+  const opts = document.getElementById('speech-opts');
+  if (opts) opts.style.display = (mode === 'speech') ? '' : 'none';
+}
+
+const SOCIAL_PLATFORMS = [
+  {key:'instagram', label:'Instagram',
+   icon: '<svg viewBox="0 0 24 24" fill="#E4405F"><path d="M7.8 2h8.4C19.4 2 22 4.6 22 7.8v8.4a5.8 5.8 0 0 1-5.8 5.8H7.8C4.6 22 2 19.4 2 16.2V7.8A5.8 5.8 0 0 1 7.8 2m-.2 2A3.6 3.6 0 0 0 4 7.6v8.8C4 18.39 5.61 20 7.6 20h8.8a3.6 3.6 0 0 0 3.6-3.6V7.6C20 5.61 18.39 4 16.4 4H7.6m9.65 1.5a1.25 1.25 0 1 1 0 2.5a1.25 1.25 0 0 1 0-2.5M12 7a5 5 0 1 1 0 10a5 5 0 0 1 0-10m0 2a3 3 0 1 0 0 6a3 3 0 0 0 0-6z"/></svg>'},
+  {key:'tiktok', label:'TikTok',
+   icon: '<svg viewBox="0 0 24 24"><path fill="#25F4EE" d="M19.6 6.3a4.8 4.8 0 0 1-2.5-2.3h-2.4v12.5a2.6 2.6 0 1 1-2.5-2.7v-2.5a5 5 0 1 0 5 5V8.1a7 7 0 0 0 4 1.3V7a4.8 4.8 0 0 1-1.6-.7z"/><path fill="#FE2C55" d="M21.6 5.6a4.8 4.8 0 0 1-2.5-2.3h-2.4v12.5a2.6 2.6 0 1 1-2.5-2.7v-2.5a5 5 0 1 0 5 5V7.4a7 7 0 0 0 4 1.3V6.3a4.8 4.8 0 0 1-1.6-.7z" opacity=".6"/></svg>'},
+  {key:'youtube', label:'YouTube',
+   icon: '<svg viewBox="0 0 24 24" fill="#FF0000"><path d="M23 7.2a2.8 2.8 0 0 0-2-2C19.3 4.8 12 4.8 12 4.8s-7.3 0-9 .4a2.8 2.8 0 0 0-2 2C0.7 8.8 0.7 12 0.7 12s0 3.2.4 4.8c.2.9 1 1.7 2 2C2.7 19.2 12 19.2 12 19.2s7.3 0 9-.4a2.8 2.8 0 0 0 2-2c.4-1.6.4-4.8.4-4.8s0-3.2-.4-4.8zM9.6 15.4V8.6L15.6 12l-6 3.4z"/></svg>'},
+];
+
+function renderSocials(socials){
+  const root = document.getElementById('socials-rows');
+  if (!root) return;
+  root.innerHTML = '';
+  for (const p of SOCIAL_PLATFORMS) {
+    const slot = (socials || {})[p.key] || {handle:'', url:'', cookies:''};
+    const row = document.createElement('div');
+    row.className = 'social-row';
+    row.innerHTML = `
+      <div class="plat">${p.icon}<span>${p.label}</span></div>
+      <input type="text" id="social-${p.key}-handle"
+             placeholder="@handle" value="${escapeHtml(slot.handle || '')}">
+      <input type="text" id="social-${p.key}-url"
+             placeholder="https://..." value="${escapeHtml(slot.url || '')}">
+      <input type="text" id="social-${p.key}-cookies"
+             placeholder="cookies (browser or path)"
+             title="Browser name (safari/chrome/firefox/edge/brave) or absolute path to cookies.txt"
+             value="${escapeHtml(slot.cookies || '')}">
+    `;
+    root.appendChild(row);
+  }
+}
+
+function _collectSocials(){
+  const out = {};
+  for (const p of SOCIAL_PLATFORMS) {
+    const h = document.getElementById('social-' + p.key + '-handle');
+    const u = document.getElementById('social-' + p.key + '-url');
+    const c = document.getElementById('social-' + p.key + '-cookies');
+    out[p.key] = {
+      handle:  h ? h.value.trim() : '',
+      url:     u ? u.value.trim() : '',
+      cookies: c ? c.value.trim() : '',
+    };
+  }
+  return out;
+}
+
+async function onProfileFilePicked(input){
+  const file = input && input.files && input.files[0];
+  input.value = '';   // reset so picking the same file twice still fires onchange
+  if (!file) return;
+  let parsed;
+  try {
+    const text = await file.text();
+    parsed = JSON.parse(text);
+  } catch (e) {
+    setMsg('Not a valid JSON file: ' + e.message, false);
     return;
   }
-  for (const p of profiles) {
-    const opt = document.createElement('option');
-    opt.value = p;
-    opt.textContent = p + (p === active ? '  •  active' : '');
-    if (p === active) opt.selected = true;
-    sel.appendChild(opt);
-  }
-}
-
-async function loadProfile(){
-  const name = document.getElementById('profile-picker').value;
-  if (!name) return;
-  if (name === appCfg.active_profile) return;
-  const r = await fetch('/settings/api/app/load', {
+  setMsg('Loading "' + file.name + '"…', true);
+  const r = await fetch('/settings/api/app/import', {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({profile: name}),
+    body: JSON.stringify({filename: file.name, content: parsed}),
   });
   const d = await r.json();
-  if (!d.ok) {
-    setMsg('Load failed: ' + (d.error || 'unknown'), false);
-    return;
-  }
-  // Force a full reload so every page (Analyze, Library, Builder, Rate)
-  // re-reads from the new profile's database.
-  setMsg('Loaded "' + name + '". Reloading…', true);
-  setTimeout(() => { window.location.reload(); }, 400);
-}
-
-async function deleteActiveProfile(){
-  const name = appCfg.active_profile;
-  if (!name) return;
-  if (!confirm('Delete profile "' + name + '"? This cannot be undone.')) return;
-  const r = await fetch('/settings/api/app/delete', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({profile: name}),
-  });
-  const d = await r.json();
-  if (!d.ok) { setMsg('Delete failed: ' + (d.error||'unknown'), false); return; }
-  appCfg = d;
-  cfg = await (await fetch('/settings/api/ai')).json();
-  fillFromAppCfg();
-  refreshProfilePicker();
-  render();
-  setMsg('Deleted. Active is now "' + (appCfg.active_profile || '(none)') + '"', true);
+  if (!d.ok) { setMsg('Load failed: ' + (d.error || 'unknown'), false); return; }
+  // Restart so per-profile DB / source folder / tag schema all flip,
+  // then reload the page once the new server is up.
+  setMsg('Loaded "' + (d.active_profile || file.name) + '". Restarting server…', true);
+  await restartAndReload();
 }
 
 function setMsg(text, ok){
@@ -690,12 +882,15 @@ async function loadResearch(){
     const d = await r.json();
     const ta = document.getElementById('research-json');
     const status = document.getElementById('research-status');
+    const badge = (window.pgAiBadge && d.provider)
+      ? '  ' + window.pgAiBadge(d.provider, {size:13, title:'Research generated by ' + d.provider})
+      : '';
     if (d.research) {
       ta.value = JSON.stringify(d.research, null, 2);
-      status.textContent = '(cached)';
+      status.innerHTML = '(cached' + (d.researched_at ? ' ' + d.researched_at : '') + ')' + badge;
     } else {
       ta.value = '';
-      status.textContent = '(no research yet for this profile)';
+      status.innerHTML = '(no research yet for this profile)';
     }
     populateResearchModelPicker();
   } catch (e) {
@@ -705,19 +900,41 @@ async function loadResearch(){
 
 function populateResearchModelPicker(){
   // Flatten provider × models into one option per (provider, model) pair.
-  // The model list is seeded by ai_cli.PROVIDER_DEFAULTS and merged with the
-  // current "Default model" field so any custom model the user typed shows
-  // up too.
+  // The model list is seeded by ai_cli.PROVIDER_DEFAULTS (cheapest-first
+  // per provider) and merged with the user's live "Default model" field
+  // so a typed custom model shows up too.
   const sel = document.getElementById('research-model');
   if (!sel || !cfg) return;
   const prev = sel.value;
   sel.innerHTML = '';
+
+  // Compute the cheapest globally-available (provider, model) pair using
+  // the cross-provider rank from the API. We only count providers whose
+  // binary actually resolved on PATH.
+  const rank = cfg.cheapest_rank || [];
+  let cheapest = null;
+  for (const r of rank) {
+    const pr = cfg.providers[r.provider];
+    if (pr && pr.bin_found) { cheapest = r; break; }
+  }
+  // Fallback if nothing in rank is installed: pick the configured default
+  // of any installed provider, else the first installed provider's first model.
+  if (!cheapest) {
+    for (const k of PROVIDERS) {
+      const p = cfg.providers[k];
+      if (p && p.bin_found && (p.model || (p.models || []).length)) {
+        cheapest = {provider: k, model: p.model || p.models[0]};
+        break;
+      }
+    }
+  }
+
   for (const key of PROVIDERS) {
     const p = cfg.providers[key];
     if (!p) continue;
     const live = (document.getElementById('model-' + key) || {}).value
                  || p.model || '';
-    // Build a deduped, ordered list: live model first, then catalog entries.
+    // Build a deduped list: live model first (if set), then catalog entries.
     const seen = new Set();
     const ordered = [];
     if (live) { ordered.push(live); seen.add(live); }
@@ -729,24 +946,26 @@ function populateResearchModelPicker(){
     grp.label = (p.label || key) + (p.bin_found ? '' : '  (binary missing)');
     for (const m of ordered) {
       const opt = document.createElement('option');
-      opt.value = key + '::' + m;  // "<provider>::<model>"
-      opt.textContent = m + (m === live ? '   (default)' : '');
+      opt.value = key + '::' + m;
+      let label = m;
+      if (m === live) label += '   (default)';
+      if (cheapest && key === cheapest.provider && m === cheapest.model) {
+        label += '   💸 cheapest';
+      }
+      opt.textContent = label;
       grp.appendChild(opt);
     }
     sel.appendChild(grp);
   }
-  // Default selection: the wizard task's provider × its current default model.
-  const wizardProv = cfg.tasks && cfg.tasks.wizard;
-  const defaultModel = wizardProv
-    ? ((document.getElementById('model-' + wizardProv) || {}).value
-       || (cfg.providers[wizardProv] || {}).model || '')
-    : '';
-  const desired = wizardProv && defaultModel
-    ? wizardProv + '::' + defaultModel : '';
+
+  // Default to the cheapest option globally. User's prior selection (if
+  // they reopened the picker after switching) wins.
+  const cheapestVal = cheapest
+    ? cheapest.provider + '::' + cheapest.model : '';
   if (prev && [...sel.options].some(o => o.value === prev)) {
     sel.value = prev;
-  } else if (desired && [...sel.options].some(o => o.value === desired)) {
-    sel.value = desired;
+  } else if (cheapestVal && [...sel.options].some(o => o.value === cheapestVal)) {
+    sel.value = cheapestVal;
   } else if (sel.options.length) {
     sel.selectedIndex = 0;
   }
@@ -776,7 +995,10 @@ async function refreshResearch(){
     if (d.status === 'ok' && d.research) {
       document.getElementById('research-json').value =
         JSON.stringify(d.research, null, 2);
-      document.getElementById('research-status').textContent = '(just refreshed)';
+      const badge = (window.pgAiBadge && d.provider)
+        ? '  ' + window.pgAiBadge(d.provider, {size:13, title:'Research generated by ' + d.provider})
+        : '';
+      document.getElementById('research-status').innerHTML = '(just refreshed)' + badge;
       msg.textContent = 'Updated.';
       msg.style.color = '#22c55e';
     } else {
@@ -805,6 +1027,12 @@ function setWizStatus(text, cls){
   const el = document.getElementById('wiz-status');
   el.textContent = text || '';
   el.className = 'muted' + (cls ? ' ' + cls : '');
+  // Mirror to the global log footer so progress/errors are triage-able
+  // even after the modal closes.
+  if (text && window.pgLog) {
+    const lg = (cls === 'err') ? 'error' : (cls === 'ok' ? 'ok' : '');
+    window.pgLog('[wizard] ' + text, lg);
+  }
 }
 async function runWizard(){
   const url = document.getElementById('wiz-url').value.trim();
@@ -820,16 +1048,49 @@ async function runWizard(){
     const d = await r.json();
     if (!d.ok) {
       setWizStatus('Failed: ' + (d.error || 'unknown'), 'err');
+      // If the AI returned something we couldn't parse, the endpoint
+      // includes the raw response — dump it to the footer for triage.
+      if (d.raw && window.pgLog) {
+        const lines = String(d.raw).split(/\\r?\\n/);
+        for (const ln of lines) {
+          if (ln.trim()) window.pgLog('[wizard:raw] ' + ln, 'error');
+        }
+      }
       btn.disabled = false;
       return;
     }
     const ext = d.extracted || {};
     if (ext.brand_name)     document.getElementById('brand-name').value     = ext.brand_name;
-    if (ext.social_handle)  document.getElementById('social-handle').value  = ext.social_handle;
     if (ext.content_domain) document.getElementById('content-domain').value = ext.content_domain;
     if (ext.tag_schema && typeof ext.tag_schema === 'object') {
       document.getElementById('tag-schema').value =
         JSON.stringify(ext.tag_schema, null, 2);
+    }
+    if ((ext.socials && typeof ext.socials === 'object') || ext.social_handle) {
+      // Merge into the current rows so the user keeps anything they'd
+      // already typed in for platforms the AI couldn't detect.
+      const merged = Object.assign({}, _collectSocials(), {});
+      // Legacy field → IG slot if not otherwise populated
+      if (ext.social_handle && !(ext.socials && ext.socials.instagram
+                                  && ext.socials.instagram.handle)) {
+        merged.instagram = {
+          handle: ext.social_handle,
+          url:    (merged.instagram && merged.instagram.url) || '',
+        };
+      }
+      if (ext.socials && typeof ext.socials === 'object') {
+        for (const k of Object.keys(ext.socials)) {
+          const val = ext.socials[k] || {};
+          merged[k] = {
+            handle:  (val.handle  || (merged[k] && merged[k].handle)  || '').trim(),
+            url:     (val.url     || (merged[k] && merged[k].url)     || '').trim(),
+            // Wizard scrape never produces cookies — preserve whatever the
+            // user already typed in.
+            cookies: (merged[k] && merged[k].cookies) || '',
+          };
+        }
+      }
+      renderSocials(merged);
     }
     // If profile-name is empty (or matches the previous brand), follow brand.
     if (ext.brand_name) {
@@ -992,11 +1253,15 @@ async function saveAll(){
   const body = {
     profile_name:   document.getElementById('profile-name').value,
     brand_name:     document.getElementById('brand-name').value,
-    social_handle:  document.getElementById('social-handle').value,
     content_domain: document.getElementById('content-domain').value,
     source_folder:  document.getElementById('source-folder').value,
     output_folder:  document.getElementById('output-folder').value,
     tag_schema:     tagSchema,
+    socials:        _collectSocials(),
+    analysis_mode:     _currentAnalysisMode(),
+    whisper_model:     document.getElementById('whisper-model').value,
+    whisper_language:  document.getElementById('whisper-language').value,
+    whisper_translate: document.getElementById('whisper-translate').checked,
     ai: { tasks: cfg.tasks, providers: aiProviders },
   };
   const r = await fetch('/settings/api/app', {
@@ -1030,7 +1295,6 @@ async function saveAll(){
   appCfg = d;
   cfg = await (await fetch('/settings/api/ai')).json();
   fillFromAppCfg();
-  refreshProfilePicker();
   render();
 
   const newSnap = _captureRestartSnapshot(appCfg);
