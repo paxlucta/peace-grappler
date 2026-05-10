@@ -1163,7 +1163,18 @@ def api_scene_from_selection():
             conn.close()
         except Exception:
             pass
-    return jsonify({"scene_id": scene_id, "start": start, "end": end})
+    # Enrich with the source video's filename + wide flag so the Builder can
+    # append this scene to its timeline without a second round-trip.
+    vk = v.keys()
+    return jsonify({
+        "scene_id": scene_id,
+        "start":    start,
+        "end":      end,
+        "duration": round(end - start, 2),
+        "wide":     bool(v["wide"]) if "wide" in vk else False,
+        "filename": v["filename"] if "filename" in vk else "",
+        "video_file": v["path"] if "path" in vk else "",
+    })
 
 
 @analyzer_bp.route("/analyze/api/scene/<int:scene_id>", methods=["DELETE"])
@@ -1408,6 +1419,11 @@ td{font-size:13px}
   border-color:#1976d2;color:#fff;
 }
 .vtx-foot .vtx-cut:disabled{opacity:.4;cursor:not-allowed;background:#222}
+.vtx-foot .vtx-add{
+  background:linear-gradient(135deg,#43a047,#2e7d32);
+  border-color:#2e7d32;color:#fff;
+}
+.vtx-foot .vtx-add:disabled{opacity:.4;cursor:not-allowed;background:#222}
 
 /* -- Cut Scene confirmation modal -- */
 .cut-overlay{
@@ -1620,6 +1636,7 @@ td{font-size:13px}
     <div class="vtx-foot">
       <span class="vtx-sel-info" id="vtx-sel-info">Select text to enable Cut Scene.</span>
       <button class="vtx-cut" id="vtx-cut-btn" disabled onclick="cutSceneFromSelection()">Cut Scene</button>
+      <button class="vtx-add" id="vtx-add-btn" disabled onclick="addSelectionToBuilder()">Add to Builder</button>
     </div>
   </div>
 </div>
@@ -2336,6 +2353,7 @@ async function openVideoTranscript(videoId) {
   _vtxState.selectionEnd = null;
   _vtxState.selectionText = '';
   document.getElementById('vtx-cut-btn').disabled = true;
+  document.getElementById('vtx-add-btn').disabled = true;
   document.getElementById('vtx-sel-info').innerHTML = 'Loading transcript...';
   var body = document.getElementById('vtx-body');
   body.innerHTML = '';
@@ -2394,9 +2412,11 @@ document.addEventListener('selectionchange', function() {
   if (!overlay || !overlay.classList.contains('active')) return;
   var sel = window.getSelection();
   var btn = document.getElementById('vtx-cut-btn');
+  var addBtn = document.getElementById('vtx-add-btn');
   var info = document.getElementById('vtx-sel-info');
   if (!sel || sel.isCollapsed || !sel.rangeCount) {
     btn.disabled = true;
+    if (addBtn) addBtn.disabled = true;
     _vtxState.selectionStart = null;
     _vtxState.selectionEnd = null;
     _vtxState.selectionText = '';
@@ -2414,6 +2434,7 @@ document.addEventListener('selectionchange', function() {
   var endSeg   = _vtxFindSegText(range.endContainer);
   if (!startSeg || !endSeg) {
     btn.disabled = true;
+    if (addBtn) addBtn.disabled = true;
     info.textContent = 'Select text inside a transcript line to enable Cut Scene.';
     return;
   }
@@ -2436,12 +2457,14 @@ document.addEventListener('selectionchange', function() {
   }
   if (!isFinite(minStart) || !isFinite(maxEnd) || maxEnd <= minStart) {
     btn.disabled = true;
+    if (addBtn) addBtn.disabled = true;
     return;
   }
   _vtxState.selectionStart = minStart;
   _vtxState.selectionEnd   = maxEnd;
   _vtxState.selectionText  = sel.toString();
   btn.disabled = false;
+  if (addBtn) addBtn.disabled = false;
   info.innerHTML = 'Cut from <b>' + _vtxFmt(minStart) + '</b> to <b>'
     + _vtxFmt(maxEnd) + '</b> (' + (maxEnd - minStart).toFixed(1) + 's)';
 });
@@ -2473,6 +2496,112 @@ async function cutSceneFromSelection() {
     document.getElementById('vtx-sel-info').textContent = 'Cut failed: ' + e.message;
   } finally {
     btn.textContent = 'Cut Scene';
+    btn.disabled = false;
+  }
+}
+
+// Cut the selected scene and append it to the end of Layer I of the
+// builder's saved timeline. Stays on the current page — the change is
+// written directly into the same localStorage key the builder restores
+// from on next open.
+var BUILDER_STATE_KEY = 'pg-builder-state-v1';
+
+function _builderEmptySnapshot() {
+  return {
+    video_track: [],
+    sound_track: [],
+    text_overlays: [],
+    track_settings: [
+      {muted:false, default_position:'top',    captions:'none', default_crop_x_frac:null},
+      {muted:false, default_position:'center', captions:'none', default_crop_x_frac:null},
+      {muted:false, default_position:'bottom', captions:'none', default_crop_x_frac:null},
+    ],
+    track_count: 1,
+    track_sequential: [true, true, true],
+    include_intro: true,
+    include_outro: true,
+  };
+}
+
+async function addSelectionToBuilder() {
+  if (_vtxState.selectionStart == null || _vtxState.selectionEnd == null) return;
+  var btn = document.getElementById('vtx-add-btn');
+  btn.disabled = true;
+  var orig = btn.textContent;
+  btn.textContent = 'Adding...';
+  try {
+    var r = await fetch('/analyze/api/scene-from-selection', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        video_id: _vtxState.videoId,
+        start:    _vtxState.selectionStart,
+        end:      _vtxState.selectionEnd,
+        text:     _vtxState.selectionText,
+      }),
+    });
+    var data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'failed');
+
+    // Load the builder snapshot (or seed an empty one).
+    var snap = null;
+    try {
+      var raw = localStorage.getItem(BUILDER_STATE_KEY);
+      if (raw) snap = JSON.parse(raw);
+    } catch (e) { snap = null; }
+    if (!snap || typeof snap !== 'object') snap = _builderEmptySnapshot();
+    if (!Array.isArray(snap.video_track))   snap.video_track = [];
+    if (!Array.isArray(snap.track_settings) || snap.track_settings.length < 3) {
+      snap.track_settings = _builderEmptySnapshot().track_settings;
+    }
+
+    // End of Layer I = max(start_time + duration) over track 0. We don't
+    // store duration on the saved entry, so build a {id: duration} map from
+    // /api/clips. New entries get a fallback duration from the response.
+    var durById = {};
+    try {
+      var cr = await fetch('/api/clips');
+      var clips = await cr.json();
+      for (var i = 0; i < clips.length; i++) durById[clips[i].id] = clips[i].duration;
+    } catch (e) { /* fall through with empty map */ }
+    var endOfLayer1 = 0;
+    for (var j = 0; j < snap.video_track.length; j++) {
+      var it = snap.video_track[j];
+      if (it.type !== 'clip') continue;
+      if ((it.track || 0) !== 0) continue;
+      var d = (it.id !== undefined && durById[it.id] !== undefined)
+              ? durById[it.id]
+              : ((it.end != null && it.start != null) ? (it.end - it.start) : 0);
+      var endT = (it.start_time || 0) + (d || 0);
+      if (endT > endOfLayer1) endOfLayer1 = endT;
+    }
+
+    // Append the new clip at end of Layer I.
+    snap.video_track.push({
+      type: 'clip',
+      id: data.scene_id,
+      start_time: endOfLayer1,
+      track: 0,
+      wide: !!data.wide,
+      stack_order: 0,
+      volume: 5,
+      muted: false,
+      position: null,
+      trans_in: null,
+      trans_out: null,
+      crop_x_frac: null,
+      captions: 'inherit',
+    });
+
+    localStorage.setItem(BUILDER_STATE_KEY, JSON.stringify(snap));
+
+    document.getElementById('vtx-sel-info').innerHTML =
+      'Added scene <b>#' + data.scene_id + '</b> to Builder Layer I '
+      + '(' + (data.duration || (data.end - data.start)).toFixed(1) + 's).';
+  } catch (e) {
+    document.getElementById('vtx-sel-info').textContent = 'Add failed: ' + e.message;
+  } finally {
+    btn.textContent = orig;
     btn.disabled = false;
   }
 }

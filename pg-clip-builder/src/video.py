@@ -558,22 +558,37 @@ def composite_layered_segment(placements, seg_dur, out_path):
     filters = []
 
     # Per-clip video processing: scale + pad to slot size, normalize PTS.
+    # When a wide clip has crop_x_frac set, crop it to a 9:16 region of the
+    # source (full-frame, not slot) at the user-selected horizontal offset.
     for i, p in enumerate(placements):
         src_idx = i + 2
-        target_h = SLOT_H if p["is_wide"] else H
-        filters.append(
-            f"[{src_idx}:v]setpts=PTS-STARTPTS,"
-            f"scale={W}:{target_h}:force_original_aspect_ratio=decrease,"
-            f"pad={W}:{target_h}:(ow-iw)/2:(oh-ih)/2:color=black,"
-            f"setsar=1,fps=30[v{i}]"
-        )
+        crop_frac = p.get("crop_x_frac")
+        wide_cropped = p["is_wide"] and crop_frac is not None
+        target_h = H if (not p["is_wide"] or wide_cropped) else SLOT_H
+        if wide_cropped:
+            f = max(0.0, min(1.0, float(crop_frac)))
+            filters.append(
+                f"[{src_idx}:v]setpts=PTS-STARTPTS,"
+                f"crop=ih*9/16:ih:(iw-ih*9/16)*{f:.4f}:0,"
+                f"scale={W}:{H}:force_original_aspect_ratio=decrease,"
+                f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:color=black,"
+                f"setsar=1,fps=30[v{i}]"
+            )
+        else:
+            filters.append(
+                f"[{src_idx}:v]setpts=PTS-STARTPTS,"
+                f"scale={W}:{target_h}:force_original_aspect_ratio=decrease,"
+                f"pad={W}:{target_h}:(ow-iw)/2:(oh-ih)/2:color=black,"
+                f"setsar=1,fps=30[v{i}]"
+            )
 
     # Overlay chain — bottom layer first, top layer last.
     prev_label = "[0:v]"
     for i, p in enumerate(placements):
         is_last = (i == len(placements) - 1)
         out_label = "[vout]" if is_last else f"[ov{i}]"
-        if p["is_wide"]:
+        wide_cropped = p["is_wide"] and p.get("crop_x_frac") is not None
+        if p["is_wide"] and not wide_cropped:
             y = SLOT_Y.get(p.get("position") or "top", 0)
         else:
             y = 0

@@ -872,6 +872,13 @@ def _generate_multitrack(data):
             if cap_raw not in ("inherit", "none", "top", "middle", "bottom"):
                 cap_raw = "inherit"
             clip_data["captions_override"] = cap_raw
+            # Wide-scene crop override (None = inherit layer default).
+            # Float 0..1 = horizontal position of the 9:16 crop window
+            # (0 = left-aligned, 1 = right-aligned, 0.5 = centered).
+            cx = item.get("crop_x_frac")
+            clip_data["crop_x_frac"] = (
+                float(cx) if isinstance(cx, (int, float)) else None
+            )
             clips.append(clip_data)
 
     # Track-level settings (mute + default wide-clip position).
@@ -888,10 +895,14 @@ def _generate_multitrack(data):
         elif cap is False or cap is None: cap = "none"
         if cap not in ("none", "top", "middle", "bottom"):
             cap = "none"
+        dcx = s.get("default_crop_x_frac")
         track_settings.append({
             "muted": bool(s.get("muted", False)),
             "default_position": s.get("default_position") or default_positions[i],
             "captions": cap,
+            "default_crop_x_frac": (
+                float(dcx) if isinstance(dcx, (int, float)) else None
+            ),
         })
 
     # Resolve effective position for each wide clip (per-clip override beats
@@ -902,6 +913,13 @@ def _generate_multitrack(data):
                 c.get("position")
                 or track_settings[c.get("track", 0)]["default_position"]
             )
+            # Crop: per-clip override > layer default > None (no crop).
+            crop = c.get("crop_x_frac")
+            if crop is None:
+                crop = track_settings[c.get("track", 0)].get(
+                    "default_crop_x_frac"
+                )
+            c["effective_crop_x_frac"] = crop
         # Layer mute overrides per-clip mute.
         if track_settings[c.get("track", 0)]["muted"]:
             c["muted"] = True
@@ -1000,6 +1018,7 @@ def _generate_multitrack(data):
                     "position": c.get("effective_position", "top"),
                     "muted": bool(c.get("muted")),
                     "stack_order": int(c.get("stack_order", 0)),
+                    "crop_x_frac": c.get("effective_crop_x_frac"),
                 })
 
             seg_out = os.path.join(tmp, f"seg{si:03d}_layered.mp4")
@@ -1636,6 +1655,46 @@ footer{
   text-transform:uppercase;
 }
 .scene-editor .se-delete:hover{background:#3a1818;border-color:#e53935;color:#fff}
+.scene-editor .se-crop-btn{
+  background:#26262c;border:1px solid #3a3a44;color:#bbb;
+  padding:6px 12px;border-radius:5px;font-size:11px;font-weight:600;
+  cursor:pointer;display:inline-flex;align-items:center;gap:6px;
+}
+.scene-editor .se-crop-btn:hover{border-color:#555}
+.scene-editor .se-crop-btn.has-crop{background:#0d2540;border-color:#1976d2;color:#90caf9}
+.scene-editor .se-crop-btn.layer-default{color:#ffb0b0;border-color:#5a3a3a}
+
+/* Crop modal */
+.crop-stage{
+  display:flex;justify-content:center;align-items:center;
+  background:#0a0a0a;border-radius:8px;padding:14px;
+}
+.crop-thumb-wrap{
+  position:relative;display:inline-block;user-select:none;
+  max-width:100%;
+}
+.crop-thumb-wrap img{
+  display:block;max-width:480px;width:100%;height:auto;border-radius:4px;
+  pointer-events:none;
+}
+.crop-mask{
+  position:absolute;top:0;bottom:0;background:rgba(0,0,0,.6);
+  pointer-events:none;
+}
+.crop-frame{
+  position:absolute;top:0;bottom:0;
+  border:2px solid #2196f3;box-sizing:border-box;
+  box-shadow:0 0 0 1px rgba(0,0,0,.4);
+  cursor:grab;
+}
+.crop-frame:active{cursor:grabbing}
+.crop-frame::after{
+  content:'9:16';position:absolute;top:6px;left:6px;
+  background:rgba(33,150,243,.85);color:#fff;font-size:10px;font-weight:700;
+  padding:2px 6px;border-radius:3px;letter-spacing:.5px;
+}
+/* Track-header crop button */
+.th-btn.crop-btn.active{color:#90caf9}
 
 /* Sound blocks */
 .sblock{border:1px solid rgba(255,255,255,.15);color:#fff}
@@ -2045,6 +2104,28 @@ footer{
 <!-- Per-scene editor popover (anchored next to the clicked block) -->
 <div class="scene-editor" id="scene-editor"></div>
 
+<div class="overlay" id="crop-modal">
+  <div class="modal" style="max-width:560px">
+    <h2 style="color:#2196f3">Crop Wide Scene</h2>
+    <p id="crop-info" style="font-size:12px;color:#aaa;margin-bottom:12px">
+      Drag the 9:16 frame to pick the cropped region. The selection fills the full output frame.
+    </p>
+    <div id="crop-stage" class="crop-stage">
+      <div id="crop-thumb-wrap" class="crop-thumb-wrap">
+        <img id="crop-thumb" alt="">
+        <div id="crop-mask-l" class="crop-mask"></div>
+        <div id="crop-mask-r" class="crop-mask"></div>
+        <div id="crop-frame" class="crop-frame"></div>
+      </div>
+    </div>
+    <div style="margin-top:14px;display:flex;gap:8px;justify-content:center;align-items:center">
+      <button onclick="clearCrop()">Remove Crop</button>
+      <button onclick="closeCropModal()">Cancel</button>
+      <button onclick="saveCrop()" class="primary" style="background:#2196f3;border-color:#2196f3;color:#fff">Save</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay" id="trans-picker-modal">
   <div class="modal" style="max-width:480px">
     <h2 style="color:#e53935">Change Transition</h2>
@@ -2151,9 +2232,9 @@ var tlSequential = [true, true, true]; /* per-track: true = sequential, false = 
  * 2 → center, 3 → bottom. muted = mute the entire layer's audio.
  */
 var trackSettings = [
-  {muted:false, default_position:'top',    captions:'none'},
-  {muted:false, default_position:'center', captions:'none'},
-  {muted:false, default_position:'bottom', captions:'none'},
+  {muted:false, default_position:'top',    captions:'none', default_crop_x_frac:null},
+  {muted:false, default_position:'center', captions:'none', default_crop_x_frac:null},
+  {muted:false, default_position:'bottom', captions:'none', default_crop_x_frac:null},
 ];
 
 // Captions cycle order. Click the layer icon to advance:
@@ -2165,6 +2246,7 @@ var CAPTIONS_CLIP_CYCLE  = ['inherit','bottom','middle','top','none'];
 function toggleTrackMute(t) {
   trackSettings[t].muted = !trackSettings[t].muted;
   renderTrackHeaders();
+  saveBuilderState();
 }
 function cycleTrackCaptions(t) {
   var cur = trackSettings[t].captions || 'none';
@@ -2172,11 +2254,13 @@ function cycleTrackCaptions(t) {
   trackSettings[t].captions = CAPTIONS_LAYER_CYCLE[(i + 1) % CAPTIONS_LAYER_CYCLE.length];
   renderTrackHeaders();
   renderVideoTrack(); /* per-clip "captions" badge depends on layer flag */
+  saveBuilderState();
 }
 function setTrackPosition(t, pos) {
   trackSettings[t].default_position = pos;
   renderTrackHeaders();
   renderVideoTrack(); /* clip-level "uses default" badges may need redraw */
+  saveBuilderState();
 }
 
 // Cycle wide-clip vertical position with one click instead of forcing
@@ -2241,6 +2325,14 @@ function renderTrackHeaders() {
     var posIcon = posIconHtml(s.default_position, 12);
     var posTitle = 'Wide-clip position: ' + s.default_position
       + ' — click to cycle (top → center → bottom)';
+    var hasCrop = (typeof s.default_crop_x_frac === 'number');
+    var cropIcon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" '
+      + 'stroke="currentColor" stroke-width="2">'
+      + '<path d="M6 2v14a2 2 0 0 0 2 2h14"/>'
+      + '<path d="M2 6h14a2 2 0 0 1 2 2v14"/></svg>';
+    var cropTitle = hasCrop
+      ? ('Layer crop: ' + Math.round(s.default_crop_x_frac * 100) + '% — click to edit')
+      : 'Layer crop: off — click to set default crop for wide clips';
     hdr.innerHTML =
       '<div class="th-name">' + label + '</div>'
       + '<div class="th-row">'
@@ -2250,6 +2342,8 @@ function renderTrackHeaders() {
       +           'title="' + capTitle + '" data-act="cap">' + capIcon + '</button>'
       +   '<button class="th-btn pos-btn" '
       +           'title="' + posTitle + '" data-act="pos">' + posIcon + '</button>'
+      +   '<button class="th-btn crop-btn' + (hasCrop ? ' active' : '') + '" '
+      +           'title="' + cropTitle + '" data-act="crop">' + cropIcon + '</button>'
       + '</div>'
       + '<div class="th-mode" title="Free: clips can overlap. Seq: clips snap end-to-end.">'
       +   '<span class="th-mode-lbl' + (!seqOn ? ' on' : '') + '">FREE</span>'
@@ -2261,6 +2355,7 @@ function renderTrackHeaders() {
     hdr.querySelector('[data-act="mute"]').onclick = function() { toggleTrackMute(t); };
     hdr.querySelector('[data-act="cap"]').onclick = function() { cycleTrackCaptions(t); };
     hdr.querySelector('[data-act="pos"]').onclick = function() { cycleTrackPosition(t); };
+    hdr.querySelector('[data-act="crop"]').onclick = function() { openCropModal({trackIdx: t}); };
     hdr.querySelector('[data-act="mode"]').onclick = function(e) {
       e.stopPropagation();
       toggleTimelineMode(t);
@@ -2314,6 +2409,8 @@ async function init() {
   var params = new URLSearchParams(window.location.search);
   var loadFile = params.get('load');
   if (loadFile) {
+    /* Loading a generated video supersedes the autosaved state. */
+    clearBuilderState();
     fetch('/api/load-video', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body:JSON.stringify({filename: loadFile}),
@@ -2323,6 +2420,23 @@ async function init() {
       else if (data.timeline) loadOldTimeline(data.timeline);
     });
     /* Clean up the URL */
+    window.history.replaceState({}, '', '/builder');
+  } else {
+    /* No explicit load — bring back whatever the user had last time. */
+    if (restoreBuilderState()) {
+      renderTrackHeaders(); /* reflect restored layer mute/captions/crop */
+    }
+  }
+
+  /* Append a scene to the end of Layer I via ?add_scene=<id> — handoff from
+   * the Analyze page's transcript modal. Runs after restore so the new clip
+   * lands at the end of the preserved timeline. */
+  var addId = parseInt(params.get('add_scene'), 10);
+  if (!isNaN(addId)) {
+    var c = allClips.find(function(x){ return x.id === addId; });
+    if (c) {
+      addVideoItem(c, undefined, 0);
+    }
     window.history.replaceState({}, '', '/builder');
   }
 }
@@ -3019,6 +3133,30 @@ function _seBuildHTML(vi) {
       +   '<span class="se-label">Position</span>'
       +   '<div class="se-pos-group">' + posBtns + '</div>'
       + '</div>';
+
+    // Crop row — per-clip override > layer default > none.
+    var clipCrop = (typeof vi.crop_x_frac === 'number') ? vi.crop_x_frac : null;
+    var layerCrop = trackSettings[t].default_crop_x_frac;
+    var cropLabel, cropCls = 'se-crop-btn';
+    if (clipCrop !== null) {
+      cropLabel = 'Custom (' + Math.round(clipCrop * 100) + '%)';
+      cropCls += ' has-crop';
+    } else if (layerCrop !== null) {
+      cropLabel = 'Layer (' + Math.round(layerCrop * 100) + '%)';
+      cropCls += ' has-crop layer-default';
+    } else {
+      cropLabel = 'None';
+    }
+    html += ''
+      + '<div class="se-row">'
+      +   '<span class="se-label">Crop</span>'
+      +   '<button class="' + cropCls + '" data-act="crop">'
+      +     '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'
+      +       '<path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M2 6h14a2 2 0 0 1 2 2v14"/>'
+      +     '</svg>'
+      +     '<span>' + cropLabel + '</span>'
+      +   '</button>'
+      + '</div>';
   }
 
   var muteIcon = muted
@@ -3109,6 +3247,7 @@ function _seWireEvents(ed) {
       if (idx < 0 && act !== 'close') return;
       if (act === 'close') { closeSceneEditor(); }
       else if (act === 'pos') { setClipPosition(idx, this.dataset.pos); _seRefresh(); }
+      else if (act === 'crop') { closeSceneEditor(); openCropModal({clipIdx: idx}); }
       else if (act === 'cap-cycle') { cycleClipCaptions(idx); _seRefresh(); }
       else if (act === 'mute') { toggleClipMute(idx); _seRefresh(); }
       else if (act === 'trans-in') { closeSceneEditor(); openVideoTransPicker(idx, 'in'); }
@@ -3151,6 +3290,209 @@ document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape') closeSceneEditor();
 });
 
+/* ── Crop modal ──────────────────────────────────────────────────────────
+ * Lets the user pick a horizontal 9:16 crop window over a wide source. Used
+ * both per-clip (target = videoItems[clipIdx]) and per-layer
+ * (target = trackSettings[trackIdx].default_crop_x_frac).
+ *
+ * State:
+ *   _cropTarget   — {clipIdx} | {trackIdx}
+ *   _cropFrac     — float 0..1 (left edge of crop window as fraction of
+ *                   available horizontal range). 0.5 = centered.
+ *   _cropDrag     — drag bookkeeping
+ *
+ * The frame width is computed from the actual thumbnail aspect ratio so it
+ * matches the source — height fills the thumbnail, width = thumbH * 9/16
+ * scaled into thumbnail-display pixels.
+ */
+var _cropTarget = null;
+var _cropFrac = 0.5;
+var _cropDrag = null;
+
+function openCropModal(target) {
+  _cropTarget = target;
+  var existing;
+  var thumbUrl = null;
+  var info = '';
+  if (target.clipIdx !== undefined) {
+    var vi = videoItems[target.clipIdx];
+    if (!vi || !vi.clip || !vi.clip.wide) return;
+    existing = (typeof vi.crop_x_frac === 'number') ? vi.crop_x_frac : null;
+    if (existing === null) {
+      // Seed from layer default so the user starts from where the layer is.
+      var ld = trackSettings[vi.track || 0].default_crop_x_frac;
+      _cropFrac = (typeof ld === 'number') ? ld : 0.5;
+    } else {
+      _cropFrac = existing;
+    }
+    if (vi.clip.id !== undefined) {
+      thumbUrl = '/api/thumbnail/' + vi.clip.id;
+    }
+    info = (vi.clip.filename || 'Scene')
+      + ' — drag the 9:16 frame to pick the cropped region.';
+  } else if (target.trackIdx !== undefined) {
+    var s = trackSettings[target.trackIdx];
+    existing = (typeof s.default_crop_x_frac === 'number') ? s.default_crop_x_frac : null;
+    _cropFrac = (existing !== null) ? existing : 0.5;
+    info = 'Video ' + ['I','II','III'][target.trackIdx] + ' layer default'
+         + ' — applies to all wide clips on this layer (unless overridden per-scene).';
+    // Pick any wide clip in this layer for the preview thumb, if available.
+    for (var i = 0; i < videoItems.length; i++) {
+      var v = videoItems[i];
+      if ((v.track||0) === target.trackIdx && v.clip && v.clip.wide && v.clip.id !== undefined) {
+        thumbUrl = '/api/thumbnail/' + v.clip.id;
+        break;
+      }
+    }
+  } else { return; }
+
+  document.getElementById('crop-info').textContent = info;
+  var img = document.getElementById('crop-thumb');
+  img.onload = function() { _cropLayout(); };
+  img.onerror = function() {
+    // Fallback: synthesize a 16:9 placeholder so the user can still set crop.
+    img.removeAttribute('src');
+    img.style.width = '480px';
+    img.style.height = '270px';
+    img.style.background = 'linear-gradient(90deg,#222,#444,#222)';
+    _cropLayout();
+  };
+  img.style.background = '';
+  img.style.height = '';
+  if (thumbUrl) img.src = thumbUrl;
+  else img.onerror();
+
+  document.getElementById('crop-modal').classList.add('active');
+  _cropWireDrag();
+  // Layout once even if image is cached.
+  setTimeout(_cropLayout, 0);
+}
+
+function _cropLayout() {
+  var img = document.getElementById('crop-thumb');
+  var wrap = document.getElementById('crop-thumb-wrap');
+  var frame = document.getElementById('crop-frame');
+  var ml = document.getElementById('crop-mask-l');
+  var mr = document.getElementById('crop-mask-r');
+  if (!img || !frame) return;
+  var W = img.clientWidth || img.naturalWidth || 480;
+  var H = img.clientHeight || img.naturalHeight || 270;
+  wrap.style.width = W + 'px';
+  // Frame width = H * 9/16, height = H. Constrained to image width.
+  var fw = Math.min(W, H * 9 / 16);
+  var maxX = Math.max(0, W - fw);
+  var x = maxX * Math.max(0, Math.min(1, _cropFrac));
+  frame.style.width = fw + 'px';
+  frame.style.left = x + 'px';
+  ml.style.left = '0px';
+  ml.style.width = x + 'px';
+  mr.style.left = (x + fw) + 'px';
+  mr.style.width = (W - x - fw) + 'px';
+}
+
+function _cropWireDrag() {
+  var frame = document.getElementById('crop-frame');
+  var wrap = document.getElementById('crop-thumb-wrap');
+  if (!frame || frame._wired) return;
+  frame._wired = true;
+  function onDown(e) {
+    e.preventDefault();
+    var rect = wrap.getBoundingClientRect();
+    var img = document.getElementById('crop-thumb');
+    var W = img.clientWidth || rect.width;
+    var H = img.clientHeight || rect.height;
+    var fw = Math.min(W, H * 9 / 16);
+    var maxX = Math.max(0, W - fw);
+    var clientX = (e.touches ? e.touches[0].clientX : e.clientX);
+    var startFrameX = parseFloat(frame.style.left) || 0;
+    var startMouseX = clientX - rect.left;
+    _cropDrag = {startFrameX:startFrameX, startMouseX:startMouseX,
+                 maxX:maxX, fw:fw, W:W, rect:rect};
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.addEventListener('touchmove', onMove, {passive:false});
+    document.addEventListener('touchend', onUp);
+  }
+  function onMove(e) {
+    if (!_cropDrag) return;
+    e.preventDefault();
+    var clientX = (e.touches ? e.touches[0].clientX : e.clientX);
+    var rect = _cropDrag.rect;
+    var mouseX = clientX - rect.left;
+    var newX = _cropDrag.startFrameX + (mouseX - _cropDrag.startMouseX);
+    newX = Math.max(0, Math.min(_cropDrag.maxX, newX));
+    _cropFrac = _cropDrag.maxX > 0 ? (newX / _cropDrag.maxX) : 0.5;
+    _cropLayout();
+  }
+  function onUp() {
+    _cropDrag = null;
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    document.removeEventListener('touchmove', onMove);
+    document.removeEventListener('touchend', onUp);
+  }
+  frame.addEventListener('mousedown', onDown);
+  frame.addEventListener('touchstart', onDown, {passive:false});
+  // Click anywhere on the image to recenter the frame on that x.
+  wrap.addEventListener('click', function(e) {
+    if (e.target === frame) return;
+    var img = document.getElementById('crop-thumb');
+    var rect = wrap.getBoundingClientRect();
+    var W = img.clientWidth || rect.width;
+    var H = img.clientHeight || rect.height;
+    var fw = Math.min(W, H * 9 / 16);
+    var maxX = Math.max(0, W - fw);
+    var mouseX = e.clientX - rect.left;
+    var newX = Math.max(0, Math.min(maxX, mouseX - fw/2));
+    _cropFrac = maxX > 0 ? (newX / maxX) : 0.5;
+    _cropLayout();
+  });
+}
+
+function saveCrop() {
+  if (!_cropTarget) { closeCropModal(); return; }
+  var f = Math.max(0, Math.min(1, _cropFrac));
+  if (_cropTarget.clipIdx !== undefined) {
+    var vi = videoItems[_cropTarget.clipIdx];
+    if (vi) vi.crop_x_frac = f;
+  } else if (_cropTarget.trackIdx !== undefined) {
+    trackSettings[_cropTarget.trackIdx].default_crop_x_frac = f;
+    renderTrackHeaders();
+  }
+  closeCropModal();
+  renderVideoTrack();
+  saveBuilderState();
+}
+
+function clearCrop() {
+  if (!_cropTarget) { closeCropModal(); return; }
+  if (_cropTarget.clipIdx !== undefined) {
+    var vi = videoItems[_cropTarget.clipIdx];
+    if (vi) vi.crop_x_frac = null;
+  } else if (_cropTarget.trackIdx !== undefined) {
+    trackSettings[_cropTarget.trackIdx].default_crop_x_frac = null;
+    renderTrackHeaders();
+  }
+  closeCropModal();
+  renderVideoTrack();
+  saveBuilderState();
+}
+
+function closeCropModal() {
+  _cropTarget = null;
+  _cropDrag = null;
+  document.getElementById('crop-modal').classList.remove('active');
+}
+
+window.addEventListener('resize', function() {
+  var m = document.getElementById('crop-modal');
+  if (m && m.classList.contains('active')) _cropLayout();
+});
+
+/* Last-chance save so transient state changes (toggles, drags, drops that
+ * happen between syncTl calls) always reach localStorage. */
+window.addEventListener('beforeunload', function() { saveBuilderState(); });
+
 function addVideoItem(clip, startTime, trackIdx) {
   /* Prevent adding the same scene twice */
   if (clip.id !== undefined && getTlClipIds().indexOf(clip.id) >= 0) return;
@@ -3169,6 +3511,7 @@ function addVideoItem(clip, startTime, trackIdx) {
     trans_out: null,
     volume: 5,
     stackOrder: 0,
+    crop_x_frac: null,
   });
   if (tlSequential[t]) {
     packTimeline(t);
@@ -3450,6 +3793,7 @@ function addSelectedSegments() {
       trans_out: null,
       volume: 5,
       stackOrder: 0,
+      crop_x_frac: null,
     });
   }
   closeSegmentModal();
@@ -3466,6 +3810,7 @@ function syncTl() {
   renderVideoTrack();
   renderSoundTrack();
   renderTextTrack();
+  saveBuilderState();
   var total = getVideoDuration();
   var summary = videoItems.length + ' clip' + (videoItems.length !== 1 ? 's' : '');
   if (soundItems.length) summary += ' + ' + soundItems.length + ' music';
@@ -3635,6 +3980,7 @@ function buildTimeline() {
     var entry = {type:'clip', start_time:vi.startTime, track:vi.track||0, wide:!!c.wide, stack_order:vi.stackOrder||0, volume:vi.volume||5,
       muted:!!vi.muted, position:vi.position||null,
       trans_in:vi.trans_in||null, trans_out:vi.trans_out||null,
+      crop_x_frac: (typeof vi.crop_x_frac === 'number') ? vi.crop_x_frac : null,
       captions: (function(){
         var v = vi.captions;
         if (v === true)  return 'bottom';   // legacy in-memory state
@@ -3672,12 +4018,46 @@ function buildTimeline() {
   return {video_track:vt, sound_track:st, text_overlays:tt,
     track_settings: trackSettings.map(function(s){
       return {muted: !!s.muted, default_position: s.default_position,
-              captions: s.captions || 'none'};
+              captions: s.captions || 'none',
+              default_crop_x_frac: (typeof s.default_crop_x_frac === 'number') ? s.default_crop_x_frac : null};
     }),
     track_count: tlTrackCount,
     track_sequential: tlSequential.slice(),
     include_intro: document.getElementById('include-intro').checked,
     include_outro: document.getElementById('include-outro').checked};
+}
+
+/* Persist builder state across page navigation. Saved on every timeline
+ * mutation (via syncTl) and restored in init() before any URL-param actions
+ * so handoffs like ?add_scene=<id> append to the saved timeline rather than
+ * starting from scratch. */
+var BUILDER_STATE_KEY = 'pg-builder-state-v1';
+
+function saveBuilderState() {
+  try {
+    var snap = buildTimeline();
+    localStorage.setItem(BUILDER_STATE_KEY, JSON.stringify(snap));
+  } catch (e) { /* quota / serialization — ignore */ }
+}
+
+function restoreBuilderState() {
+  try {
+    var raw = localStorage.getItem(BUILDER_STATE_KEY);
+    if (!raw) return false;
+    var data = JSON.parse(raw);
+    if (!data || !data.video_track) return false;
+    // Don't restore an empty timeline — nothing to restore.
+    var hasContent = (data.video_track && data.video_track.length)
+                  || (data.sound_track && data.sound_track.length)
+                  || (data.text_overlays && data.text_overlays.length);
+    if (!hasContent) return false;
+    loadNewTimeline(data);
+    return true;
+  } catch (e) { return false; }
+}
+
+function clearBuilderState() {
+  try { localStorage.removeItem(BUILDER_STATE_KEY); } catch (e) {}
 }
 
 async function generateVideo() {
@@ -3798,6 +4178,7 @@ function loadOldTimeline(timeline) {
         trans_out: null,
         volume: 5,
         stackOrder: 0,
+        crop_x_frac: null,
       });
       pendTrans = null;
     } else if (item.type === 'music' && item.name) {
@@ -3839,6 +4220,7 @@ function loadNewTimeline(data) {
         if (CAPTIONS_CLIP_CYCLE.indexOf(v) >= 0) return v;
         return 'inherit';
       })(),
+      crop_x_frac: (typeof item.crop_x_frac === 'number') ? item.crop_x_frac : null,
     });
     if (itemTrack > 0 && itemTrack >= tlTrackCount) setTrackCount(itemTrack + 1);
     pendTrans = null;
@@ -3851,6 +4233,7 @@ function loadNewTimeline(data) {
       trackSettings[ts] = {
         muted: !!src.muted,
         default_position: src.default_position || defaults[ts],
+        default_crop_x_frac: (typeof src.default_crop_x_frac === 'number') ? src.default_crop_x_frac : null,
         // Old saves had a boolean; new ones have 'none'/'top'/'middle'/'bottom'.
         captions: (function(){
           var v = src.captions;
