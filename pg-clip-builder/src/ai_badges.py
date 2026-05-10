@@ -52,6 +52,20 @@ BADGES = {
             '</svg>'
         ),
     },
+    "minimax": {
+        "label": "MiniMax",
+        "color": "#1f4cff",
+        # Concentric "M": two rising peaks framed in MiniMax's brand blue.
+        "svg": (
+            '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" '
+            'aria-label="MiniMax">'
+            '<rect x="2" y="2" width="20" height="20" rx="4" fill="#1f4cff"/>'
+            '<path fill="#fff" d="M5 17V7h2.4l3.1 5.4h.1L13.7 7H16v10h-2V11.4'
+            'l-2.4 4.1h-1.1L8.1 11.4V17H5z"/>'
+            '<rect x="17" y="7" width="2" height="10" fill="#fff"/>'
+            '</svg>'
+        ),
+    },
 }
 
 

@@ -65,6 +65,10 @@ for entry in "${AI_CLIS[@]}"; do
     fi
 done
 
+# MiniMax has no canonical CLI tool — it's HTTPS API only. Users authenticate
+# by setting MINIMAX_API_KEY in .env. No install step required.
+echo "  • MiniMax (API only) — set MINIMAX_API_KEY in .env to enable"
+
 # ── Step 5: Python venv + deps + folders ────────────────────────────────────
 echo "Step 5/5: Setting up Python environment..."
 python3 -m venv .venv

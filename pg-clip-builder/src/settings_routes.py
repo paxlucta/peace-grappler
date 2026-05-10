@@ -721,7 +721,7 @@ SETTINGS_PAGE = """<!doctype html>
 </main>
 
 <script>
-const PROVIDERS = ['claude','codex','gemini'];
+const PROVIDERS = ['claude','codex','gemini','minimax'];
 const TASKS = ['analysis','wizard','captions'];
 let cfg = null;
 let appCfg = null;
@@ -1193,19 +1193,23 @@ function renderProviders(){
       : 'Not currently used';
     const card = document.createElement('div');
     card.className = 'prov-card';
-    card.innerHTML = `
-      <h3>
-        <span style="color:#fff;font-weight:700;font-size:14px">${escapeHtml(p.label)}</span>
-        <span class="pill ${p.bin_found ? 'found' : 'missing'}">
-          ${p.bin_found ? 'binary found' : 'binary missing'}
-        </span>
-        <span class="muted" style="margin-left:auto;font-size:10px">
-          ${p.supports_images ? '✓ image input' : '⚠ text-only'}
-        </span>
-      </h3>
-      <div class="muted" style="margin:0 0 12px 0">${escapeHtml(usedByText)}</div>
-      <div class="grid2">
-        <div>
+    // API-only providers (e.g. MiniMax) authenticate via an env var
+    // instead of a CLI binary; render a different "found / missing" pill
+    // and an env-var hint instead of a binary path.
+    const apiOnly = !!p.auth_env;
+    const foundLabel = apiOnly
+      ? (p.bin_found ? p.auth_env + ' set' : p.auth_env + ' missing')
+      : (p.bin_found ? 'binary found' : 'binary missing');
+    const binSection = apiOnly
+      ? `<div>
+          <label>Auth</label>
+          <div class="muted" style="font-size:11px;line-height:1.5;padding:8px 10px;background:#0c0c14;border:1px solid #2e2e3e;border-radius:4px">
+            Set <code>${escapeHtml(p.auth_env)}</code> in your <code>.env</code> file
+            ${p.bin_found ? '— ✓ key detected.' : '— key not detected.'}
+            <a href="${p.homepage}" target="_blank" rel="noopener" style="color:#1976d2">Get API key</a>
+          </div>
+        </div>`
+      : `<div>
           <label>Binary</label>
           <input type="text" id="bin-${key}" value="${escapeHtml(p.bin || '')}" placeholder="${key}">
           <div class="muted" style="margin-top:4px">
@@ -1213,7 +1217,20 @@ function renderProviders(){
               ? '→ <code>' + escapeHtml(p.bin_resolved) + '</code>'
               : 'Not on PATH. <a href="' + p.homepage + '" target="_blank" rel="noopener">install instructions</a>'}
           </div>
-        </div>
+        </div>`;
+    card.innerHTML = `
+      <h3>
+        <span style="color:#fff;font-weight:700;font-size:14px">${escapeHtml(p.label)}</span>
+        <span class="pill ${p.bin_found ? 'found' : 'missing'}">
+          ${escapeHtml(foundLabel)}
+        </span>
+        <span class="muted" style="margin-left:auto;font-size:10px">
+          ${p.supports_images ? '✓ image input' : '⚠ text-only'}
+        </span>
+      </h3>
+      <div class="muted" style="margin:0 0 12px 0">${escapeHtml(usedByText)}</div>
+      <div class="grid2">
+        ${binSection}
         <div>
           <label>Default model</label>
           <input type="text" id="model-${key}" value="${escapeHtml(p.model || '')}">
@@ -1246,12 +1263,15 @@ async function saveAll(){
     }
   }
 
-  // Build the AI sub-block from current form state.
+  // Build the AI sub-block from current form state. API-only providers
+  // (auth via env var) skip the binary input — only model is editable.
   const aiProviders = {};
   for (const key of PROVIDERS) {
+    const binEl = document.getElementById('bin-' + key);
+    const modelEl = document.getElementById('model-' + key);
     aiProviders[key] = {
-      bin:   document.getElementById('bin-' + key).value,
-      model: document.getElementById('model-' + key).value,
+      bin:   binEl ? binEl.value : '',
+      model: modelEl ? modelEl.value : '',
     };
   }
 

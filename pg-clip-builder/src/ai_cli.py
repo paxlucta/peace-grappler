@@ -1,7 +1,8 @@
 """ai_cli.py — Provider-agnostic AI CLI dispatch.
 
-Wraps the local AI CLI tools (claude / codex / gemini) behind a single
-`call_ai(prompt, frames=..., model=..., timeout=..., on_log=...)` entry point.
+Wraps the local AI CLI tools (claude / codex / gemini / minimax) behind
+a single `call_ai(prompt, frames=..., model=..., timeout=..., on_log=...)`
+entry point.
 
 The active provider + per-provider settings (binary path, default model) live
 in `data/ai_cli_config.json` and can be edited from the /settings page.
@@ -10,6 +11,7 @@ Capabilities matrix:
   - claude  : full (text + image frames, stream-json protocol)
   - codex   : text-only (frames are dropped with a warning)
   - gemini  : text-only (frames are dropped with a warning)
+  - minimax : text + images for VL models, via HTTPS API + MINIMAX_API_KEY
 """
 
 import base64
@@ -130,25 +132,50 @@ PROVIDER_DEFAULTS = {
             "gemini-2.5-pro",
         ],
     },
+    "minimax": {
+        # MiniMax has no canonical CLI tool, so we talk to their HTTPS
+        # API directly. Auth is via MINIMAX_API_KEY in the environment
+        # (loaded from .env at startup, like GEMINI_API_KEY).
+        "bin": "minimax",
+        "model": "MiniMax-M1",
+        "label": "MiniMax",
+        "supports_images": True,           # VL models accept image inputs
+        "homepage": "https://www.minimax.io/platform",
+        "auth_env": "MINIMAX_API_KEY",
+        # Listed cheapest → priciest (rough — MiniMax pricing changes
+        # often; reorder if needed).
+        "models": [
+            "abab6.5s-chat",               # cheapest legacy
+            "MiniMax-Text-01",
+            "MiniMax-VL-01",               # multimodal
+            "MiniMax-M1",                  # flagship reasoning
+            "MiniMax-M2",                  # latest
+        ],
+    },
 }
 
 
 # Cross-provider cheapest ranking, used to pre-select the cheapest model
 # overall in the research dropdown. Lower index = cheaper.
 CHEAPEST_RANK = [
-    ("gemini", "gemini-2.5-flash-lite"),
-    ("gemini", "gemini-2.5-flash"),
-    ("gemini", "gemini-2.0-flash"),
-    ("codex",  "gpt-5-nano"),
-    ("codex",  "gpt-5-mini"),
-    ("claude", "claude-haiku-4-5-20251001"),
-    ("codex",  "o3-mini"),
-    ("claude", "claude-sonnet-4-6"),
-    ("codex",  "gpt-5-codex"),
-    ("codex",  "o3"),
-    ("codex",  "gpt-5"),
-    ("gemini", "gemini-2.5-pro"),
-    ("claude", "claude-opus-4-7"),
+    ("gemini",  "gemini-2.5-flash-lite"),
+    ("minimax", "abab6.5s-chat"),
+    ("gemini",  "gemini-2.5-flash"),
+    ("gemini",  "gemini-2.0-flash"),
+    ("minimax", "MiniMax-Text-01"),
+    ("codex",   "gpt-5-nano"),
+    ("codex",   "gpt-5-mini"),
+    ("minimax", "MiniMax-VL-01"),
+    ("claude",  "claude-haiku-4-5-20251001"),
+    ("codex",   "o3-mini"),
+    ("minimax", "MiniMax-M1"),
+    ("minimax", "MiniMax-M2"),
+    ("claude",  "claude-sonnet-4-6"),
+    ("codex",   "gpt-5-codex"),
+    ("codex",   "o3"),
+    ("codex",   "gpt-5"),
+    ("gemini",  "gemini-2.5-pro"),
+    ("claude",  "claude-opus-4-7"),
 ]
 
 
@@ -196,10 +223,18 @@ def get_config():
         user = (raw.get("providers") or {}).get(key) or {}
         cfg = dict(defaults)
         cfg.update({k: v for k, v in user.items() if v not in (None, "")})
-        bin_path = cfg.get("bin", "")
-        resolved = shutil.which(bin_path) if bin_path else None
-        cfg["bin_resolved"] = resolved
-        cfg["bin_found"] = bool(resolved)
+        # API-only providers (e.g. MiniMax) declare an `auth_env` instead
+        # of a CLI binary — having the env var set is what counts as
+        # "installed". Binary-based providers fall back to PATH lookup.
+        auth_env = cfg.get("auth_env")
+        if auth_env:
+            cfg["bin_resolved"] = None
+            cfg["bin_found"] = bool(os.environ.get(auth_env))
+        else:
+            bin_path = cfg.get("bin", "")
+            resolved = shutil.which(bin_path) if bin_path else None
+            cfg["bin_resolved"] = resolved
+            cfg["bin_found"] = bool(resolved)
         providers[key] = cfg
 
     return {
@@ -284,8 +319,13 @@ def call_ai(prompt_text, task="wizard", frames=None, model=None,
     log = on_log or (lambda m: None)
 
     if not settings["bin_found"]:
-        log(f"AI CLI '{settings['bin']}' not found on PATH. "
-            f"Install it or change provider on /settings.")
+        if settings.get("auth_env"):
+            log(f"{settings['label']} not configured. Set "
+                f"{settings['auth_env']} in your .env or environment, "
+                f"or pick a different provider on /settings.")
+        else:
+            log(f"AI CLI '{settings['bin']}' not found on PATH. "
+                f"Install it or change provider on /settings.")
         return None
 
     use_model = (model or settings.get("model") or "").strip() or None
@@ -304,6 +344,8 @@ def call_ai(prompt_text, task="wizard", frames=None, model=None,
     if name == "gemini":
         return _call_gemini(settings["bin_resolved"], prompt_text, frames,
                             use_model, timeout, log)
+    if name == "minimax":
+        return _call_minimax(prompt_text, frames, use_model, timeout, log)
     log(f"Unknown provider: {name}")
     return None
 
@@ -490,3 +532,107 @@ def _call_gemini(bin_path, prompt_text, frames, model, timeout, log):
     # Strip leading "Loaded cached credentials." style noise some versions emit.
     text = re.sub(r"^[A-Z][^\n]*credentials\.\s*\n+", "", text)
     return text or None
+
+
+# ── minimax (HTTPS API) ─────────────────────────────────────────────────────
+
+# MiniMax exposes an OpenAI-compatible chat-completions endpoint at this URL.
+# Endpoint can be overridden by setting MINIMAX_API_URL in the environment for
+# users on the .io vs .chat domains, or behind a self-hosted proxy.
+_MINIMAX_DEFAULT_URL = "https://api.minimax.io/v1/text/chatcompletion_v2"
+
+
+def _call_minimax(prompt_text, frames, model, timeout, log):
+    """Call MiniMax's HTTPS chat-completions endpoint. Auth via the
+    MINIMAX_API_KEY env var (loaded by app.py at startup).
+
+    Frames are forwarded as base64 data URLs when *model* is a VL variant;
+    text-only models silently drop frames (the dispatch layer already
+    warns if supports_images is False, so this is a fallback)."""
+    api_key = os.environ.get("MINIMAX_API_KEY", "").strip()
+    if not api_key:
+        log("MINIMAX_API_KEY missing. Set it in .env or your environment.")
+        return None
+
+    url = os.environ.get("MINIMAX_API_URL", "").strip() or _MINIMAX_DEFAULT_URL
+
+    # Build OpenAI-style messages. MiniMax accepts string content for
+    # text-only and a list of typed parts for multimodal.
+    if frames and model and "VL" in model:
+        content = []
+        for jpeg_bytes, label in frames:
+            b64 = base64.b64encode(jpeg_bytes).decode()
+            content.append({"type": "text", "text": f"[Frame at {label}]"})
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+            })
+        content.append({"type": "text", "text": prompt_text})
+        messages = [{"role": "user", "content": content}]
+    else:
+        messages = [{"role": "user", "content": prompt_text}]
+
+    body = {
+        "model": model or "MiniMax-M1",
+        "messages": messages,
+        # Reasonable defaults; matches the chat-completions API shape.
+        "temperature": 0.7,
+        "max_tokens": 4096,
+    }
+    payload = json.dumps(body).encode("utf-8")
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    # urllib keeps us dependency-free even if `requests` isn't installed.
+    import urllib.request
+    import urllib.error
+    req = urllib.request.Request(url, data=payload, headers=headers,
+                                 method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as e:
+        err_body = ""
+        try:
+            err_body = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            pass
+        if _is_quota_error(err_body) or e.code == 429:
+            raise AIQuotaError(f"MiniMax quota exhausted: {err_body[:200]}")
+        log(f"MiniMax HTTP {e.code}: {err_body[:200] or e.reason}")
+        return None
+    except Exception as e:
+        log(f"MiniMax call failed: {e}")
+        return None
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        log(f"MiniMax returned non-JSON: {raw[:200]}")
+        return None
+
+    # OpenAI-style: {choices: [{message: {content: "..."}}]}
+    try:
+        choice = (data.get("choices") or [{}])[0]
+        msg = choice.get("message", {})
+        content = msg.get("content")
+    except Exception:
+        content = None
+
+    if isinstance(content, list):
+        # Multimodal response — concat text parts only.
+        text = " ".join(
+            part.get("text", "") for part in content
+            if isinstance(part, dict) and part.get("type") == "text"
+        ).strip()
+    elif isinstance(content, str):
+        text = content.strip()
+    else:
+        text = ""
+
+    if not text:
+        log(f"MiniMax returned empty response: {raw[:200]}")
+        return None
+    return text
