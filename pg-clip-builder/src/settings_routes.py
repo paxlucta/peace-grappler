@@ -348,6 +348,21 @@ SETTINGS_PAGE = """<!doctype html>
 <html><head><meta charset="utf-8"><title>Settings — ClipBuilder</title>
 <style>
   body{font-family:system-ui,-apple-system,sans-serif;background:#08080c;color:#eeeef2;margin:0}
+  /* Shared chrome — keep these rules in sync with the other pages so the
+     header is the same height everywhere. */
+  header{
+    background:#141414;border-bottom:1px solid #2a2a2a;
+    padding:10px 20px;display:flex;align-items:center;gap:16px;flex-shrink:0;
+  }
+  header h1{font-size:18px;font-weight:600;color:#fff;white-space:nowrap;
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    letter-spacing:0;margin:0;}
+  header h1 span{color:#e53935}
+  header nav{display:flex;gap:8px;margin-left:auto;flex-shrink:0}
+  header nav a{color:#aaa;text-decoration:none;font-size:12px;padding:4px 8px;
+    border:1px solid #444;border-radius:6px}
+  header nav a:hover{color:#fff;border-color:#888}
+  header nav a.active{color:#e53935;border-color:#e53935}
   main{max-width:880px;margin:30px auto;padding:0 20px 80px}
   h2{font-family:'Bebas Neue',Impact,sans-serif;letter-spacing:2px;margin-top:32px;color:#fff}
   h3{margin:0 0 6px 0;font-size:14px;letter-spacing:0.5px;display:flex;align-items:center;gap:8px}
@@ -477,15 +492,7 @@ SETTINGS_PAGE = """<!doctype html>
   a{color:#ff5252;font-size:11px}
 </style></head>
 <body>
-<header><h1>Clip<span>Builder</span></h1>
-<nav>
-  <a href="/wizard">AI Wizard</a>
-  <a href="/builder">Builder</a>
-  <a href="/library">Library</a>
-  <a href="/rate">Scenes</a>
-  <a href="/analyze">Analyze</a>
-</nav>
-</header>
+<!-- pg-chrome -->
 
 <main>
   <h2>Settings</h2>
@@ -1368,4 +1375,5 @@ load();
 
 @settings_bp.route("/settings")
 def settings_page():
-    return SETTINGS_PAGE
+    from chrome import inject_chrome
+    return inject_chrome(SETTINGS_PAGE, active="settings")

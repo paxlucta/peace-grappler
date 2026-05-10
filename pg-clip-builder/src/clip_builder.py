@@ -139,8 +139,9 @@ def _resolve_clip_for_track(item):
 
 @clip_builder_bp.route("/builder")
 def builder_page():
+    from chrome import inject_chrome
     _pregenerate_thumbnails()
-    return HTML_PAGE
+    return inject_chrome(HTML_PAGE, active="builder")
 
 
 @clip_builder_bp.route("/api/tags")
@@ -1822,16 +1823,7 @@ footer{
 </head>
 <body>
 
-<header>
-  <h1>Clip<span>Builder</span></h1>
-  <nav>
-    <a href="/wizard">AI Wizard</a>
-    <a href="/builder" class="active">Builder</a>
-    <a href="/library">Library</a>
-    <a href="/rate">Scenes</a>
-    <a href="/analyze">Analyze</a>
-  </nav>
-</header>
+<!-- pg-chrome -->
 
 <div class="sub-toolbar">
   <select id="tag-filter" onchange="filterByTag()">
@@ -3128,7 +3120,8 @@ function renderGrid() {
   }
   var grid = document.getElementById('clip-grid');
   grid.innerHTML = clips.map(cardHTML).join('');
-  document.getElementById('clip-count').textContent = clips.length + ' clips';
+  document.getElementById('clip-count').textContent =
+    clips.length + ' scene' + (clips.length === 1 ? '' : 's');
 
   if (gridSort) gridSort.destroy();
   gridSort = new Sortable(grid, {

@@ -23,6 +23,35 @@ from pathlib import Path
 
 ROOT_DIR = Path(__file__).parent.parent
 DATA_DIR = ROOT_DIR / "data"
+
+
+class AIQuotaError(Exception):
+    """Raised when the underlying AI CLI reports a hard, non-retryable
+    quota / billing / terminal error. Callers running batch loops should
+    abort the whole run instead of paying the latency to retry every
+    remaining batch — they will all fail the same way until the quota
+    resets."""
+    pass
+
+
+# Substrings (case-insensitive) that indicate the provider has hit a
+# terminal quota or billing limit. Pattern is provider-agnostic so we
+# don't need to maintain a per-CLI list — most CLIs surface the same
+# words when they fail this way.
+_QUOTA_MARKERS = (
+    "terminalquota",         # gemini-cli
+    "quota exceeded",
+    "quotaexceeded",
+    "rate limit exceeded",
+    "billing",
+    "insufficient_quota",    # openai-style
+    "you exceeded your current quota",
+)
+
+
+def _is_quota_error(text):
+    low = (text or "").lower()
+    return any(m in low for m in _QUOTA_MARKERS)
 CONFIG_PATH = DATA_DIR / "ai_cli_config.json"
 
 
@@ -320,13 +349,15 @@ def _call_claude(bin_path, prompt_text, frames, model, timeout, log):
             stderr = (result.stderr or "").strip()
 
             if result.returncode != 0 and not raw:
-                err_msg = stderr[:200] or "unknown error"
+                err_msg = stderr[:400] or "unknown error"
                 low = err_msg.lower()
+                if _is_quota_error(err_msg):
+                    raise AIQuotaError(f"Claude quota exhausted: {err_msg[:200]}")
                 if "auth" in low or "login" in low or "api key" in low:
                     log("Claude CLI not authenticated. Run 'claude' in "
                         "Terminal to sign in.")
                     return None
-                log(f"Claude CLI error: {err_msg}")
+                log(f"Claude CLI error: {err_msg[:200]}")
                 if attempt < max_retries:
                     log(f"Retrying ({attempt + 1}/{max_retries})...")
                     time.sleep(5)
@@ -385,12 +416,14 @@ def _call_codex(bin_path, prompt_text, model, timeout, log):
         log(f"Codex CLI not found at {bin_path}")
         return None
     if result.returncode != 0:
-        err = (result.stderr or "").strip()[:200]
+        err = (result.stderr or "").strip()[:400]
         low = err.lower()
+        if _is_quota_error(err):
+            raise AIQuotaError(f"Codex quota exhausted: {err[:200]}")
         if "auth" in low or "login" in low or "api key" in low:
             log("Codex CLI not authenticated. Run 'codex login' in Terminal.")
         else:
-            log(f"Codex CLI error: {err or 'unknown error'}")
+            log(f"Codex CLI error: {err[:200] or 'unknown error'}")
         return None
     text = (result.stdout or "").strip()
     return text or None
@@ -442,8 +475,12 @@ def _call_gemini(bin_path, prompt_text, frames, model, timeout, log):
             return None
 
     if result.returncode != 0:
-        err = (result.stderr or "").strip()[:200]
+        err = (result.stderr or "").strip()[:400]
         low = err.lower()
+        # Hard quota / billing failure — bail out so the caller can stop
+        # the whole batch run instead of looping through more doomed calls.
+        if _is_quota_error(err):
+            raise AIQuotaError(f"Gemini quota exhausted: {err[:200]}")
         if "auth" in low or "login" in low or "api key" in low:
             log("Gemini CLI not authenticated. Run 'gemini auth' in Terminal.")
         else:

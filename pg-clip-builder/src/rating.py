@@ -35,7 +35,8 @@ rating_bp = Blueprint("rating", __name__)
 
 @rating_bp.route("/rate")
 def rate_page():
-    return SCENES_HTML
+    from chrome import inject_chrome
+    return inject_chrome(SCENES_HTML, active="rate")
 
 
 @rating_bp.route("/rate/api/scenes")
@@ -277,8 +278,14 @@ nav a.active{color:#e53935;border-color:#e53935}
 /* -- Thumbs row on each card -- */
 .scene-card .vote-row{
   display:flex;justify-content:center;gap:8px;padding:6px;
-  border-top:1px solid #222;
+  border-top:1px solid #222;align-items:center;position:relative;
 }
+/* Transcript button anchors to the far right without shifting the
+   centered up/down vote pair. */
+.scene-card .vote-row .vote-btn-end{
+  position:absolute;right:6px;top:50%;transform:translateY(-50%);
+}
+.scene-card .vote-row .vote-btn-end:hover{transform:translateY(-50%) scale(1.15)}
 .vote-btn{
   width:32px;height:32px;border-radius:50%;border:1.5px solid #444;
   background:#111;cursor:pointer;transition:all .12s;
@@ -364,16 +371,7 @@ nav a.active{color:#e53935;border-color:#e53935}
 </head>
 <body>
 
-<header>
-  <h1>Clip<span>Builder</span></h1>
-  <nav>
-    <a href="/wizard">AI Wizard</a>
-    <a href="/builder">Builder</a>
-    <a href="/library">Library</a>
-    <a href="/rate" class="active">Scenes</a>
-    <a href="/analyze">Analyze</a>
-  </nav>
-</header>
+<!-- pg-chrome -->
 
 <div class="content">
   <div class="search-row">
@@ -493,6 +491,21 @@ function renderGrid() {
   document.getElementById('scene-count').textContent = filtered.length + ' scene' + (filtered.length !== 1 ? 's' : '');
 
   var grid = document.getElementById('scene-grid');
+  if (filtered.length === 0) {
+    var msg;
+    if (allScenes.length === 0) {
+      msg = '<h2 style="font-size:18px;color:#888;margin-bottom:6px">No scenes yet</h2>'
+        + '<p style="color:#666;font-size:13px">Run analysis on the '
+        + '<a href="/analyze" style="color:#1976d2">Analyze</a> page to break videos into scenes.</p>';
+    } else if (searchHitIds) {
+      msg = '<p style="color:#666;font-size:13px">No scenes match your search.</p>';
+    } else {
+      msg = '<p style="color:#666;font-size:13px">No scenes match this filter.</p>';
+    }
+    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:48px 0">'
+      + msg + '</div>';
+    return;
+  }
   var html = '';
   for (var i = 0; i < filtered.length; i++) {
     var s = filtered[i];
@@ -527,14 +540,14 @@ function renderGrid() {
       + '<button class="vote-btn vdown' + (s.status === 'down' ? ' active' : '') + '" onclick="vote(' + s.id + ',\'down\')" title="Hide scene">'
       + '<svg viewBox="0 0 24 24"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>'
       + '</button>'
-      + (s.has_transcript
-          ? '<button class="vote-btn vtxt" onclick="openTranscript(' + s.id + ')" title="Show transcript">'
-            + '<svg viewBox="0 0 24 24"><path d="M4 4h16v2H4V4zm0 4h16v2H4V8zm0 4h10v2H4v-2zm0 4h16v2H4v-2zm0 4h10v2H4v-2z"/></svg>'
-            + '</button>'
-          : '')
       + '<button class="vote-btn vup' + (s.status === 'up' ? ' active' : '') + '" onclick="vote(' + s.id + ',\'up\')" title="Keep scene">'
       + '<svg viewBox="0 0 24 24"><path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg>'
       + '</button>'
+      + (s.has_transcript
+          ? '<button class="vote-btn vtxt vote-btn-end" onclick="openTranscript(' + s.id + ')" title="Show transcript">'
+            + '<svg viewBox="0 0 24 24"><path d="M4 4h16v2H4V4zm0 4h16v2H4V8zm0 4h10v2H4v-2zm0 4h16v2H4v-2zm0 4h10v2H4v-2z"/></svg>'
+            + '</button>'
+          : '')
       + '</div>'
       + '</div>';
   }

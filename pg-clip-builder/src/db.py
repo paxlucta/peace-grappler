@@ -210,9 +210,15 @@ def get_db():
             except sqlite3.OperationalError:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT")
                 conn.commit()
-    # Migrate: AI provider attribution (which AI generated which content)
+    # Migrate: AI provider attribution (which AI generated which content).
+    # `analyzer_provider` is the legacy single-provider column. The two
+    # *_analyzer_provider columns split it per analysis mode so the
+    # status badges can attribute each pass independently — visual and
+    # speech might run under different providers.
     _provider_columns = {
-        "videos":           ["analyzer_provider"],
+        "videos":           ["analyzer_provider",
+                             "visual_analyzer_provider",
+                             "speech_analyzer_provider"],
         "generated_videos": ["caption_provider", "wizard_provider"],
         "wizard_research":  ["provider"],
     }
@@ -223,6 +229,21 @@ def get_db():
             except sqlite3.OperationalError:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT")
                 conn.commit()
+    # Backfill the per-mode provider columns from the legacy one. Same
+    # heuristic as the per-mode timestamp backfill: transcripts → speech,
+    # otherwise → visual.
+    conn.execute(
+        """UPDATE videos
+           SET speech_analyzer_provider = COALESCE(speech_analyzer_provider, analyzer_provider)
+           WHERE id IN (SELECT DISTINCT video_id FROM transcripts)
+             AND analyzer_provider IS NOT NULL"""
+    )
+    conn.execute(
+        """UPDATE videos
+           SET visual_analyzer_provider = COALESCE(visual_analyzer_provider, analyzer_provider)
+           WHERE id NOT IN (SELECT DISTINCT video_id FROM transcripts)
+             AND analyzer_provider IS NOT NULL"""
+    )
     # Migrate: per-mode analysis timestamps. The legacy `analyzed_at` is set
     # by both visual and speech runs and can't tell them apart, which makes
     # the analyze-page status badge ambiguous. Track each mode separately
@@ -464,20 +485,25 @@ def save_analysis(video_id, tags_dict, moments_list, analyzed_tag_names,
             )
 
         # Mark video as analyzed and record which provider produced the tags.
-        # Also stamp the per-mode timestamp so the analyze-page can show
-        # separate Visual / Audio status badges.
-        mode_col = None
+        # Also stamp the per-mode timestamp + per-mode provider so the
+        # analyze-page can show separate Visual / Audio status badges
+        # each with its own AI badge.
+        ts_col = None
+        prov_col = None
         if mode == "visual":
-            mode_col = "visual_analyzed_at"
+            ts_col, prov_col = "visual_analyzed_at", "visual_analyzer_provider"
         elif mode == "speech":
-            mode_col = "speech_analyzed_at"
+            ts_col, prov_col = "speech_analyzed_at", "speech_analyzer_provider"
         sets = ["analyzed_at = datetime('now')"]
         params = []
-        if mode_col:
-            sets.append(f"{mode_col} = datetime('now')")
+        if ts_col:
+            sets.append(f"{ts_col} = datetime('now')")
         if provider:
             sets.append("analyzer_provider = ?")
             params.append(provider)
+            if prov_col:
+                sets.append(f"{prov_col} = ?")
+                params.append(provider)
         params.append(video_id)
         conn.execute(
             f"UPDATE videos SET {', '.join(sets)} WHERE id=?",
@@ -815,6 +841,19 @@ def search_scene_ids_by_text(query):
     try:
         rows = conn.execute(sql, params).fetchall()
         return {r["id"] for r in rows}
+    finally:
+        conn.close()
+
+
+def delete_scene(scene_id):
+    """Hard-delete a scene and its dependent rows. Used by the Cut Scene
+    confirmation modal's Discard button so the user can throw away an
+    accidental cut without it cluttering the Scenes page."""
+    conn = get_db()
+    try:
+        # ON DELETE CASCADE on scene_tags / grades takes care of those.
+        conn.execute("DELETE FROM scenes WHERE id=?", (scene_id,))
+        conn.commit()
     finally:
         conn.close()
 

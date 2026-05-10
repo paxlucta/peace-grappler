@@ -1124,150 +1124,13 @@ def _generate(model, num_videos, num_variations=1, folders=None,
         emit("DONE:error")
 
 
-# ── Auto-pipeline ───────────────────────────────────────────────────────────
-
-pipeline_progress = queue.Queue()
-_pipeline_stop = threading.Event()
-
-
-def _pipeline_emit(msg):
-    pipeline_progress.put(msg)
-
-
-def _run_pipeline(model, provider=None):
-    """Full auto-pipeline: scan → analyze → generate."""
-    _call_ctx.provider = provider  # threadlocal override for nested calls
-    from analyzer import (
-        analyze_full, ALL_TAG_SET, emit_progress as analyzer_emit,
-    )
-    from db import register_video, get_all_videos, get_analyzed_tags
-    from video import VIDEO_DIR, VIDEO_EXTENSIONS
-
-    _pipeline_stop.clear()
-
-    try:
-        # Step 1: Scan for new videos
-        _pipeline_emit("Step 1: Scanning for new videos...")
-        VIDEO_DIR.mkdir(parents=True, exist_ok=True)
-        registered = 0
-        for root, _, files in os.walk(VIDEO_DIR):
-            if _pipeline_stop.is_set():
-                _pipeline_emit("Pipeline stopped by user")
-                _pipeline_emit("DONE:stopped")
-                return
-            for name in sorted(files):
-                if Path(name).suffix.lower() in VIDEO_EXTENSIONS and not name.startswith("."):
-                    path = Path(root) / name
-                    register_video(path)
-                    registered += 1
-        _pipeline_emit(f"Registered {registered} video files")
-
-        # Step 2: Analyze unanalyzed videos
-        videos = get_all_videos()
-        pending = []
-        for v in videos:
-            analyzed_tags = get_analyzed_tags(v["id"])
-            if not analyzed_tags or (ALL_TAG_SET - analyzed_tags):
-                pending.append(v)
-
-        if pending:
-            _pipeline_emit(f"Step 2: Analyzing {len(pending)} videos...")
-            for i, v in enumerate(pending):
-                if _pipeline_stop.is_set():
-                    _pipeline_emit("Pipeline stopped by user")
-                    _pipeline_emit("DONE:stopped")
-                    return
-
-                _pipeline_emit(f"Analyzing {i+1}/{len(pending)}: {v['filename']}...")
-
-                if v["duration"] <= 0:
-                    _pipeline_emit(f"  Skipping {v['filename']} (no duration)")
-                    continue
-
-                analyzed_tags = get_analyzed_tags(v["id"])
-                force = not bool(analyzed_tags)
-
-                try:
-                    if force:
-                        result = analyze_full(v["path"], v["duration"])
-                        if result:
-                            from db import save_analysis
-                            save_analysis(v["id"], result["tags"],
-                                          result["moments"], list(ALL_TAG_SET))
-                            _pipeline_emit(f"  Got {len(result['tags'])} tags")
-                        else:
-                            _pipeline_emit(f"  Analysis failed for {v['filename']}")
-                    else:
-                        from analyzer import analyze_incremental
-                        new_tags = ALL_TAG_SET - analyzed_tags
-                        new_results = analyze_incremental(v["path"], v["duration"],
-                                                          new_tags)
-                        from db import save_analysis
-                        save_analysis(v["id"], new_results, [], list(new_tags))
-                        _pipeline_emit(f"  Got {len(new_results)} new tags")
-                except Exception as e:
-                    _pipeline_emit(f"  Error analyzing {v['filename']}: {e}")
-        else:
-            _pipeline_emit("Step 2: All videos already analyzed")
-
-        # Step 3: Generate video with wizard
-        if _pipeline_stop.is_set():
-            _pipeline_emit("Pipeline stopped by user")
-            _pipeline_emit("DONE:stopped")
-            return
-
-        _pipeline_emit("Step 3: Generating video with AI Wizard...")
-        scenes = get_all_scenes()
-        if not scenes:
-            _pipeline_emit("No scenes available after analysis")
-            _pipeline_emit("DONE:error")
-            return
-
-        research = _run_research(model)
-        music_files = _find_music_files()
-        feedback = _get_all_feedback()
-
-        plan = _plan_video(model, research, scenes, music_files, feedback)
-        if not plan or not plan.get("clips"):
-            _pipeline_emit(f"{_active_provider_label()} couldn't create a plan")
-            _pipeline_emit("DONE:error")
-            return
-
-        rationale = plan.get("rationale", "")
-        if rationale:
-            _pipeline_emit(f"Strategy: {rationale}")
-
-        result = _assemble_video(plan, music_files, 1, 1)
-        if result:
-            # Generate caption
-            caption = _generate_caption(model, plan, result["duration"])
-            if caption:
-                from db import get_all_generated_videos
-                vids = get_all_generated_videos()
-                match = next(
-                    (v for v in vids
-                     if Path(v["path"]).name == result["filename"]),
-                    None,
-                )
-                if match:
-                    update_video_caption(match["id"], caption, provider=ai_cli.get_provider_for_task("captions"))
-
-            _pipeline_emit(f"Video complete: {result['filename']} ({result['duration']}s)")
-            _pipeline_emit("DONE:ok")
-        else:
-            _pipeline_emit("Video assembly failed")
-            _pipeline_emit("DONE:error")
-
-    except Exception as e:
-        _pipeline_emit(f"Pipeline error: {e}")
-        _pipeline_emit("DONE:error")
-
 
 # ── Routes ───────────────────────────────────────────────────────────────────
 
 @wizard_bp.route("/wizard")
 def wizard_page():
-    return WIZARD_HTML
+    from chrome import inject_chrome
+    return inject_chrome(WIZARD_HTML, active="wizard")
 
 
 @wizard_bp.route("/wizard/api/models")
@@ -1616,36 +1479,6 @@ def api_excluded_scenes():
         conn.close()
 
 
-@wizard_bp.route("/wizard/api/pipeline/start", methods=["POST"])
-def api_pipeline_start():
-    data = request.json or {}
-    model = (data.get("model") or "").strip() or None
-    provider = (data.get("provider") or "").strip() or None
-    threading.Thread(target=_run_pipeline, args=(model, provider),
-                     daemon=True).start()
-    return jsonify({"status": "started"})
-
-
-@wizard_bp.route("/wizard/api/pipeline/stop", methods=["POST"])
-def api_pipeline_stop():
-    _pipeline_stop.set()
-    return jsonify({"status": "stopping"})
-
-
-@wizard_bp.route("/wizard/api/pipeline/status")
-def api_pipeline_status():
-    def generate():
-        while True:
-            try:
-                msg = pipeline_progress.get(timeout=30)
-                yield f"data: {json.dumps({'message': msg})}\n\n"
-                if msg.startswith("DONE:"):
-                    break
-            except queue.Empty:
-                yield f"data: {json.dumps({'message': 'waiting...'})}\n\n"
-    return Response(generate(), mimetype="text/event-stream")
-
-
 # ── HTML ─────────────────────────────────────────────────────────────────────
 
 WIZARD_HTML = r"""<!DOCTYPE html>
@@ -1895,40 +1728,15 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .btn-edit:hover,.btn-email:hover{border-color:#666;color:#fff}
 .btn-edit svg,.btn-email svg{width:14px;height:14px;fill:currentColor}
 
-/* -- Pipeline -- */
-.pipeline-section{
-  background:#141414;border:1px solid #2a2a2a;border-radius:10px;
-  padding:16px 20px;margin-bottom:20px;
-}
-.pipeline-section h3{font-size:14px;color:#fff;margin-bottom:8px}
-.pipeline-section p{font-size:12px;color:#888;margin-bottom:12px}
-.pipeline-btns{display:flex;gap:10px;align-items:center}
-.pipeline-progress{
-  margin-top:12px;padding:12px;background:#0d0d0d;border-radius:8px;
-  font-size:12px;max-height:250px;overflow-y:auto;display:none;
-}
-.pipeline-progress.active{display:block}
-.pipeline-progress .line{padding:2px 0;color:#aaa}
-.pipeline-progress .line.done{color:#4caf50;font-weight:600}
-.pipeline-progress .line.error{color:#ef5350}
 </style>
 </head>
 <body>
 
-<header>
-  <h1>Clip<span>Builder</span></h1>
-  <nav>
-    <a href="/wizard" class="active">AI Wizard</a>
-    <a href="/builder">Builder</a>
-    <a href="/library">Library</a>
-    <a href="/rate">Scenes</a>
-    <a href="/analyze">Analyze</a>
-  </nav>
-</header>
+<!-- pg-chrome -->
 
 <div class="content">
-  <h2>AI Generator Wizard</h2>
-  <p class="subtitle">Autonomous Instagram Reels generator — AI researches best practices, picks scenes, music, and transitions to maximize engagement.</p>
+  <h2>AI Wizard</h2>
+  <p class="subtitle">Autonomous reel generator — AI researches best practices, picks scenes, music, and transitions to maximize engagement.</p>
 
   <div class="config">
     <div class="config-row">
@@ -1987,19 +1795,6 @@ button:disabled{opacity:.5;cursor:not-allowed}
 
   <!-- Research data was moved to /settings (Strategy Research section). -->
 
-  <!-- pipeline section hidden -->
-  <div class="pipeline-section" style="display:none">
-    <h3>Auto-Pipeline</h3>
-    <p>Scan for new videos, analyze them with AI, and generate an optimized reel — all in one click.</p>
-    <div class="pipeline-btns">
-      <button class="btn-primary" id="pipeline-btn" onclick="startPipeline()">Run Pipeline</button>
-      <button class="btn-secondary" id="pipeline-stop-btn" onclick="stopPipeline()" style="display:none">Stop</button>
-    </div>
-    <div class="pipeline-progress" id="pipeline-progress">
-      <div id="pipeline-lines"></div>
-    </div>
-  </div>
-
   <div class="excluded-panel" id="excluded-panel" style="display:none">
     <div class="excluded-toggle" onclick="toggleExcluded()">
       <h3>Excluded Scenes <span class="exc-count" id="exc-count"></span></h3>
@@ -2015,12 +1810,12 @@ button:disabled{opacity:.5;cursor:not-allowed}
   </div>
 
   <div class="results" id="results">
-    <h3>Generated Videos</h3>
+    <h3>Generated Reels</h3>
     <div id="result-cards"></div>
   </div>
 
   <div class="history" id="history">
-    <h3>Recent Videos</h3>
+    <h3>Recent Reels</h3>
     <div id="history-cards"></div>
   </div>
 </div>
@@ -2090,7 +1885,7 @@ async function loadHistory() {
   var history = await fetch('/wizard/api/history').then(function(r){return r.json()});
   var container = document.getElementById('history-cards');
   if (!history.length) {
-    container.innerHTML = '<p style="color:#555;font-size:13px">No videos generated yet.</p>';
+    container.innerHTML = '<p style="color:#555;font-size:13px">No reels yet — hit Generate above to make one.</p>';
     return;
   }
 
@@ -2621,74 +2416,6 @@ function formatDate(dateStr) {
     return d.toLocaleDateString(undefined, {year:'numeric',month:'short',day:'numeric'})
       + ' ' + d.toLocaleTimeString(undefined, {hour:'2-digit',minute:'2-digit'});
   } catch(e) { return dateStr; }
-}
-
-// ── Pipeline ──
-
-var pipelineRunning = false;
-
-function startPipeline() {
-  if (pipelineRunning) return;
-  pipelineRunning = true;
-  var sel = getSelectedModel();
-
-  document.getElementById('pipeline-btn').disabled = true;
-  document.getElementById('pipeline-stop-btn').style.display = '';
-
-  var prog = document.getElementById('pipeline-progress');
-  var lines = document.getElementById('pipeline-lines');
-  prog.classList.add('active');
-  lines.innerHTML = '';
-  addPipelineLine('Starting auto-pipeline...');
-
-  fetch('/wizard/api/pipeline/start', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({model: sel.model, provider: sel.provider}),
-  }).then(function() {
-    var es = new EventSource('/wizard/api/pipeline/status');
-    es.onmessage = function(e) {
-      var data = JSON.parse(e.data);
-      var msg = data.message;
-      if (msg.startsWith('DONE:')) {
-        es.close();
-        pipelineRunning = false;
-        document.getElementById('pipeline-btn').disabled = false;
-        document.getElementById('pipeline-stop-btn').style.display = 'none';
-        addPipelineLine(
-          msg === 'DONE:ok' ? 'Pipeline complete!' : (msg === 'DONE:stopped' ? 'Pipeline stopped.' : 'Pipeline failed'),
-          msg === 'DONE:ok' ? 'done' : 'error'
-        );
-        loadHistory();
-      } else if (msg.startsWith('Strategy:')) {
-        addPipelineLine(msg, 'strategy');
-      } else {
-        addPipelineLine(msg);
-      }
-    };
-    es.onerror = function() {
-      es.close();
-      pipelineRunning = false;
-      document.getElementById('pipeline-btn').disabled = false;
-      document.getElementById('pipeline-stop-btn').style.display = 'none';
-      addPipelineLine('Connection lost', 'error');
-    };
-  });
-}
-
-function stopPipeline() {
-  fetch('/wizard/api/pipeline/stop', {method: 'POST'});
-  addPipelineLine('Stopping pipeline...');
-}
-
-function addPipelineLine(text, cls) {
-  var lines = document.getElementById('pipeline-lines');
-  var div = document.createElement('div');
-  div.className = 'line' + (cls ? ' ' + cls : '');
-  div.textContent = text;
-  lines.appendChild(div);
-  var prog = document.getElementById('pipeline-progress');
-  prog.scrollTop = prog.scrollHeight;
 }
 
 init();

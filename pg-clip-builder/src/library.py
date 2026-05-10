@@ -50,7 +50,8 @@ def _extract_tags_from_timeline(timeline):
 
 @library_bp.route("/library")
 def library_page():
-    return LIBRARY_HTML
+    from chrome import inject_chrome
+    return inject_chrome(LIBRARY_HTML, active="library")
 
 
 @library_bp.route("/library/api/videos")
@@ -346,16 +347,7 @@ select:focus{outline:none;border-color:#e53935}
 </head>
 <body>
 
-<header>
-  <h1>Clip<span>Builder</span></h1>
-  <nav>
-    <a href="/wizard">AI Wizard</a>
-    <a href="/builder">Builder</a>
-    <a href="/library" class="active">Library</a>
-    <a href="/rate">Scenes</a>
-    <a href="/analyze">Analyze</a>
-  </nav>
-</header>
+<!-- pg-chrome -->
 
 <div class="toolbar">
   <label>Sort by</label>
@@ -373,8 +365,9 @@ select:focus{outline:none;border-color:#e53935}
 <div class="content">
   <div class="video-grid" id="video-grid"></div>
   <div class="empty" id="empty-state" style="display:none">
-    <h2>No Videos Yet</h2>
-    <p>Generate videos from the Builder or Generator to see them here.</p>
+    <h2>No reels yet</h2>
+    <p>Generate one from the <a href="/builder">Builder</a> or
+       <a href="/wizard">AI Wizard</a> and it'll show up here.</p>
   </div>
 </div>
 
