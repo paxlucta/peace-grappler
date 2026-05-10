@@ -116,6 +116,7 @@ def _resolve_clip(item):
         if scene:
             return {
                 "video_file": scene["video_path"],
+                "video_id":   scene["video_id"],
                 "start": scene["start_time"],
                 "end": scene["end_time"],
                 "duration": round(scene["end_time"] - scene["start_time"], 1),
@@ -123,6 +124,7 @@ def _resolve_clip(item):
     if item.get("video_file"):
         return {
             "video_file": item["video_file"],
+            "video_id":   None,
             "start": item["start"],
             "end": item["end"],
             "duration": round(item["end"] - item["start"], 1),
@@ -861,6 +863,15 @@ def _generate_multitrack(data):
             clip_data["muted"] = bool(item.get("muted", False))
             clip_data["position"] = item.get("position")  # 'top'/'center'/'bottom'/None
             clip_data["volume"] = item.get("volume", 5)
+            # Captions override per-clip: 'inherit' / 'none' / 'top' /
+            # 'middle' / 'bottom'. Old saves may use bool/None.
+            cap_raw = item.get("captions", "inherit")
+            if cap_raw is True:           cap_raw = "bottom"
+            elif cap_raw is False:        cap_raw = "none"
+            elif cap_raw is None:         cap_raw = "inherit"
+            if cap_raw not in ("inherit", "none", "top", "middle", "bottom"):
+                cap_raw = "inherit"
+            clip_data["captions_override"] = cap_raw
             clips.append(clip_data)
 
     # Track-level settings (mute + default wide-clip position).
@@ -870,9 +881,17 @@ def _generate_multitrack(data):
     track_settings = []
     for i in range(3):
         s = track_settings_raw[i] if i < len(track_settings_raw) else {}
+        # Layer captions: 'none' / 'top' / 'middle' / 'bottom'. Old saves
+        # may send a boolean — migrate.
+        cap = s.get("captions", "none")
+        if cap is True:  cap = "bottom"
+        elif cap is False or cap is None: cap = "none"
+        if cap not in ("none", "top", "middle", "bottom"):
+            cap = "none"
         track_settings.append({
             "muted": bool(s.get("muted", False)),
             "default_position": s.get("default_position") or default_positions[i],
+            "captions": cap,
         })
 
     # Resolve effective position for each wide clip (per-clip override beats
@@ -886,6 +905,12 @@ def _generate_multitrack(data):
         # Layer mute overrides per-clip mute.
         if track_settings[c.get("track", 0)]["muted"]:
             c["muted"] = True
+        # Captions: per-clip override wins, else inherit from the layer.
+        # Resolved value is one of 'none' / 'top' / 'middle' / 'bottom'.
+        layer_cap = track_settings[c.get("track", 0)]["captions"]
+        ovr = c.get("captions_override", "inherit")
+        c["captions_pos"] = layer_cap if ovr == "inherit" else ovr
+        c["captions_on"]  = c["captions_pos"] != "none"
 
     if not clips:
         return jsonify({"error": "No valid clips in video track"}), 400
@@ -979,6 +1004,40 @@ def _generate_multitrack(data):
 
             seg_out = os.path.join(tmp, f"seg{si:03d}_layered.mp4")
             if composite_layered_segment(placements, seg_dur, seg_out):
+                # Captions: burn AFTER compositing so they overlay the final
+                # 1080x1920 frame at top/middle/bottom of the actual screen,
+                # independent of how the compositor cropped or split-screened
+                # any wide source. Each captioned clip contributes its own
+                # transcript segments tagged with that clip's position; the
+                # PNG renderer respects the per-segment override.
+                cap_segs = []
+                for c in seg_clips:
+                    if not (c.get("captions_on") and c.get("video_id")):
+                        continue
+                    from db import get_transcript_for_clip
+                    clip_offset = seg_start - c["start_time"]
+                    src_start   = c["start"] + clip_offset
+                    src_end     = src_start + seg_dur
+                    tx = get_transcript_for_clip(
+                        c["video_id"], src_start, src_end,
+                    )
+                    cap_pos = c.get("captions_pos") or "bottom"
+                    for s in tx:
+                        cap_segs.append({
+                            "start":    s["start"],
+                            "end":      s["end"],
+                            "text":     s["text"],
+                            "position": cap_pos,
+                        })
+                if cap_segs:
+                    from captions import burn_captions
+                    seg_capped = os.path.join(tmp, f"seg{si:03d}_capped.mp4")
+                    if burn_captions(seg_out, seg_capped, cap_segs,
+                                     style={"color": "#FFFFFF",
+                                            "bg":    "#000000",
+                                            "bg_alpha": 30}):
+                        seg_out = seg_capped
+
                 clip_paths.append(seg_out)
                 if len(clip_paths) > 1:
                     # Use trans_in from the lowest-layer / first-listed clip.
@@ -1163,6 +1222,45 @@ select,button{
 select:hover,button:hover{border-color:#666}
 select:focus,button:focus{outline:none;border-color:#e53935}
 #clip-count{font-size:13px;color:#888}
+
+/* -- File filter (multi-select dropdown next to Tag filter) -- */
+.file-filter{position:relative;display:inline-block}
+.file-filter > button{
+  display:inline-flex;align-items:center;gap:6px;
+  background:#222;color:#e0e0e0;border:1px solid #444;
+  border-radius:6px;padding:6px 10px;font-size:13px;cursor:pointer;
+}
+.file-filter > button:hover{border-color:#666}
+.file-filter .ff-caret{font-size:10px;color:#888}
+.ff-pop{
+  display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:200;
+  width:320px;background:#15151c;border:1px solid #2e2e3e;border-radius:8px;
+  box-shadow:0 12px 32px rgba(0,0,0,.6);padding:10px;
+}
+.ff-pop.open{display:block}
+.ff-actions{display:flex;gap:6px;margin-bottom:8px}
+.ff-actions button{
+  flex:1;font-size:11px;padding:5px 10px;background:#1a1a1a;
+  border:1px solid #333;color:#ddd;border-radius:4px;cursor:pointer;
+}
+.ff-actions button:hover{border-color:#666;color:#fff}
+#ff-search{
+  width:100%;padding:6px 8px;background:#0c0c14;border:1px solid #2e2e3e;
+  color:#eee;border-radius:4px;font-size:12px;margin-bottom:8px;
+  box-sizing:border-box;outline:none;
+}
+#ff-search:focus{border-color:#1976d2}
+.ff-list{max-height:280px;overflow-y:auto;display:flex;flex-direction:column}
+.ff-item{
+  display:flex;align-items:center;gap:8px;padding:5px 6px;
+  border-radius:4px;cursor:pointer;font-size:12px;color:#ddd;
+}
+.ff-item:hover{background:#1a1a24}
+.ff-item input{accent-color:#e53935;flex-shrink:0}
+.ff-item .ff-name{
+  flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.ff-item .ff-count{color:#666;font-size:10px;flex-shrink:0}
 nav{display:flex;gap:8px;margin-left:auto;flex-shrink:0}
 nav a{color:#aaa;text-decoration:none;font-size:12px;padding:4px 8px;
   border:1px solid #444;border-radius:6px}
@@ -1301,18 +1399,20 @@ footer{
 .track-header .th-btn.active{background:#3a1818;border-color:#e53935;color:#ff6b6b}
 .track-header .th-btn svg{display:block}
 
-/* Hamburger picker: 3 stacked stripes representing top/center/bottom slot */
-.th-pos{
-  display:inline-flex;flex-direction:column;gap:1px;
-  width:18px;height:18px;border-radius:3px;border:1px solid #2a2a2a;
-  background:#181818;cursor:pointer;padding:2px;box-sizing:border-box;
+/* Captions cycle button: blue tint when in any non-'none' state.
+   Each position uses a distinct accent so the user can tell at a glance
+   whether captions are on, off, or which band they sit in. */
+.track-header .th-btn.cap-btn.cap-bottom,
+.track-header .th-btn.cap-btn.cap-middle,
+.track-header .th-btn.cap-btn.cap-top{
+  background:#0d2540;border-color:#1976d2;color:#90caf9;
 }
-.th-pos .th-stripe{
-  flex:1;background:#3a3a3a;border-radius:1px;transition:background .15s;
-}
-.th-pos .th-stripe.sel{background:#e53935}
-.th-pos:hover{border-color:#444}
-.th-pos:hover .th-stripe:not(.sel){background:#555}
+.track-header .th-btn.cap-btn.cap-none{color:#555}
+
+/* Wide-position cycle button: dim until non-default; the icon itself
+   indicates which slot (top/center/bottom) is active. */
+.track-header .th-btn.pos-btn{color:#bbb}
+.track-header .th-btn.pos-btn:hover{color:#fff;border-color:#555}
 
 /* Compact Free/Seq toggle inside the track header */
 .th-mode{
@@ -1516,6 +1616,19 @@ footer{
 .scene-editor .se-mute-btn.muted{background:#3a1818;border-color:#e53935;color:#ff8888}
 .scene-editor .se-mute-btn:hover{border-color:#555}
 .scene-editor .se-mute-btn svg{width:12px;height:12px}
+.scene-editor .se-cap-cycle{
+  background:#26262c;border:1px solid #3a3a44;color:#bbb;
+  padding:6px 12px;border-radius:5px;font-size:11px;font-weight:600;
+  cursor:pointer;display:inline-flex;align-items:center;gap:6px;
+}
+.scene-editor .se-cap-cycle:hover{border-color:#555}
+.scene-editor .se-cap-cycle.cap-bottom,
+.scene-editor .se-cap-cycle.cap-middle,
+.scene-editor .se-cap-cycle.cap-top{
+  background:#0d2540;border-color:#1976d2;color:#90caf9;
+}
+.scene-editor .se-cap-cycle.cap-none{color:#666}
+.scene-editor .se-cap-cycle svg{width:14px;height:14px;flex-shrink:0}
 .scene-editor .se-delete{
   width:100%;margin-top:10px;padding:8px;background:#2a1414;
   border:1px solid #5a2020;border-radius:5px;color:#ff8888;
@@ -1829,6 +1942,20 @@ footer{
   <select id="tag-filter" onchange="filterByTag()">
     <option value="">All Tags</option>
   </select>
+  <div class="file-filter">
+    <button type="button" id="file-filter-btn" onclick="toggleFileFilter(event)">
+      <span id="file-filter-label">All files</span>
+      <span class="ff-caret">▾</span>
+    </button>
+    <div id="file-filter-pop" class="ff-pop">
+      <div class="ff-actions">
+        <button type="button" onclick="ffSelectAll(true)">Select all</button>
+        <button type="button" onclick="ffSelectAll(false)">Deselect all</button>
+      </div>
+      <input type="search" id="ff-search" placeholder="Filter files…" oninput="ffRenderList()">
+      <div class="ff-list" id="ff-list"></div>
+    </div>
+  </div>
   <span id="clip-count"></span>
 </div>
 
@@ -2024,19 +2151,73 @@ var tlSequential = [true, true, true]; /* per-track: true = sequential, false = 
  * 2 → center, 3 → bottom. muted = mute the entire layer's audio.
  */
 var trackSettings = [
-  {muted:false, default_position:'top'},
-  {muted:false, default_position:'center'},
-  {muted:false, default_position:'bottom'},
+  {muted:false, default_position:'top',    captions:'none'},
+  {muted:false, default_position:'center', captions:'none'},
+  {muted:false, default_position:'bottom', captions:'none'},
 ];
+
+// Captions cycle order. Click the layer icon to advance:
+//   none → bottom → middle → top → none → ...
+// Same cycle is reused per-clip with an extra 'inherit' state at the start.
+var CAPTIONS_LAYER_CYCLE = ['none','bottom','middle','top'];
+var CAPTIONS_CLIP_CYCLE  = ['inherit','bottom','middle','top','none'];
 
 function toggleTrackMute(t) {
   trackSettings[t].muted = !trackSettings[t].muted;
   renderTrackHeaders();
 }
+function cycleTrackCaptions(t) {
+  var cur = trackSettings[t].captions || 'none';
+  var i = CAPTIONS_LAYER_CYCLE.indexOf(cur);
+  trackSettings[t].captions = CAPTIONS_LAYER_CYCLE[(i + 1) % CAPTIONS_LAYER_CYCLE.length];
+  renderTrackHeaders();
+  renderVideoTrack(); /* per-clip "captions" badge depends on layer flag */
+}
 function setTrackPosition(t, pos) {
   trackSettings[t].default_position = pos;
   renderTrackHeaders();
   renderVideoTrack(); /* clip-level "uses default" badges may need redraw */
+}
+
+// Cycle wide-clip vertical position with one click instead of forcing
+// the user to hit a tiny stripe. Cycles top → center → bottom → top.
+var POS_CYCLE = ['top','center','bottom'];
+function cycleTrackPosition(t) {
+  var cur = trackSettings[t].default_position || 'top';
+  var i = POS_CYCLE.indexOf(cur);
+  setTrackPosition(t, POS_CYCLE[(i + 1) % POS_CYCLE.length]);
+}
+
+// ── Icon helpers (4-state captions, 3-state wide position) ───────────────
+// Captions: a horizontal bar at top/middle/bottom shows the active state;
+// the 'none' state is an outline-only icon with a slash.
+function capIconHtml(state, size) {
+  size = size || 12;
+  var fill = 'currentColor';
+  var bar = function(y){return '<rect x="3" y="'+y+'" width="14" height="3" rx="1" fill="'+fill+'"/>'};
+  var dimBox = '<rect x="2" y="2" width="16" height="16" rx="2" stroke="'+fill+'" fill="none" stroke-width="1.4"/>';
+  var box    = '<rect x="2" y="2" width="16" height="16" rx="2" stroke="'+fill+'" fill="none" stroke-width="1.4"/>';
+  if (state === 'top')    return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 20 20">'+box+bar(5)+'</svg>';
+  if (state === 'middle') return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 20 20">'+box+bar(8.5)+'</svg>';
+  if (state === 'bottom') return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 20 20">'+box+bar(12)+'</svg>';
+  // 'none' — outline-only with a strike-through to make off-state obvious.
+  return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 20 20">'+dimBox
+       + '<line x1="3" y1="17" x2="17" y2="3" stroke="'+fill+'" stroke-width="1.6"/></svg>';
+}
+
+// Wide-position icon: stack of three thin bars with the active one filled.
+function posIconHtml(pos, size) {
+  size = size || 12;
+  var fill = 'currentColor';
+  function bar(y, sel) {
+    var op = sel ? '1' : '0.25';
+    return '<rect x="3" y="'+y+'" width="14" height="3" rx="1" fill="'+fill+'" opacity="'+op+'"/>';
+  }
+  return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 20 20">'
+    + bar(3,  pos === 'top')
+    + bar(8.5, pos === 'center')
+    + bar(14, pos === 'bottom')
+    + '</svg>';
 }
 function renderTrackHeaders() {
   for (var t = 0; t < 3; t++) {
@@ -2053,12 +2234,22 @@ function renderTrackHeaders() {
       return '<div class="th-stripe' + (s.default_position === p ? ' sel' : '') + '" data-pos="' + p + '"></div>';
     }).join('');
     var seqOn = !!tlSequential[t];
+    var capState = s.captions || 'none';
+    var capIcon = capIconHtml(capState, 12);
+    var capTitle = 'Captions: ' + capState
+      + ' — click to cycle (none → bottom → middle → top)';
+    var posIcon = posIconHtml(s.default_position, 12);
+    var posTitle = 'Wide-clip position: ' + s.default_position
+      + ' — click to cycle (top → center → bottom)';
     hdr.innerHTML =
       '<div class="th-name">' + label + '</div>'
       + '<div class="th-row">'
       +   '<button class="th-btn' + (s.muted ? ' active' : '') + '" '
       +           'title="Mute layer" data-act="mute">' + muteIcon + '</button>'
-      +   '<div class="th-pos" title="Default vertical position for wide clips on this layer">' + stripes + '</div>'
+      +   '<button class="th-btn cap-btn cap-' + capState + '" '
+      +           'title="' + capTitle + '" data-act="cap">' + capIcon + '</button>'
+      +   '<button class="th-btn pos-btn" '
+      +           'title="' + posTitle + '" data-act="pos">' + posIcon + '</button>'
       + '</div>'
       + '<div class="th-mode" title="Free: clips can overlap. Seq: clips snap end-to-end.">'
       +   '<span class="th-mode-lbl' + (!seqOn ? ' on' : '') + '">FREE</span>'
@@ -2068,17 +2259,13 @@ function renderTrackHeaders() {
       +   '<span class="th-mode-lbl' + (seqOn ? ' on' : '') + '">SEQ</span>'
       + '</div>';
     hdr.querySelector('[data-act="mute"]').onclick = function() { toggleTrackMute(t); };
+    hdr.querySelector('[data-act="cap"]').onclick = function() { cycleTrackCaptions(t); };
+    hdr.querySelector('[data-act="pos"]').onclick = function() { cycleTrackPosition(t); };
     hdr.querySelector('[data-act="mode"]').onclick = function(e) {
       e.stopPropagation();
       toggleTimelineMode(t);
       renderTrackHeaders(); /* refresh on/off label colors */
     };
-    hdr.querySelectorAll('.th-stripe').forEach(function(el) {
-      el.onclick = function(e) {
-        e.stopPropagation();
-        setTrackPosition(t, this.dataset.pos);
-      };
-    });
     })(t);
   }
 }
@@ -2093,6 +2280,7 @@ async function init() {
   }
 
   allClips = await fetch('/api/clips').then(function(r){return r.json()});
+  ffInit();
   renderGrid();
 
   /* Load fonts for text editor */
@@ -2744,6 +2932,26 @@ function toggleClipMute(idx) {
   renderVideoTrack();
 }
 
+function setClipCaptions(idx, val) {
+  // Per-clip captions: 'inherit' / 'none' / 'bottom' / 'middle' / 'top'.
+  // 'inherit' means the render pipeline reads the layer's setting.
+  if (idx < 0 || idx >= videoItems.length) return;
+  if (CAPTIONS_CLIP_CYCLE.indexOf(val) < 0) val = 'inherit';
+  videoItems[idx].captions = val;
+  renderVideoTrack();
+}
+
+function cycleClipCaptions(idx) {
+  if (idx < 0 || idx >= videoItems.length) return;
+  var cur = videoItems[idx].captions || 'inherit';
+  // Tolerate the previous tri-state representation in saved data.
+  if (cur === true)  cur = 'bottom';
+  if (cur === false) cur = 'none';
+  if (cur === null)  cur = 'inherit';
+  var i = CAPTIONS_CLIP_CYCLE.indexOf(cur);
+  setClipCaptions(idx, CAPTIONS_CLIP_CYCLE[(i + 1) % CAPTIONS_CLIP_CYCLE.length]);
+}
+
 function setClipPosition(idx, pos) {
   if (idx < 0 || idx >= videoItems.length) return;
   var vi = videoItems[idx];
@@ -2823,6 +3031,29 @@ function _seBuildHTML(vi) {
     +     muteIcon + '<span>' + (muted ? 'Muted' : 'On') + '</span>'
     +   '</button>'
     + '</div>'
+    // Captions: per-clip 5-state cycle (inherit / none / bottom / middle / top).
+    // Same single-click-cycles UX as the layer header button.
+    + (function(){
+        var raw = vi.captions;
+        // Migrate legacy boolean/null shape.
+        if (raw === true)  raw = 'bottom';
+        else if (raw === false) raw = 'none';
+        else if (raw === null || raw === undefined) raw = 'inherit';
+        var capState = raw;
+        var layerCap = trackSettings[t].captions || 'none';
+        var label = (capState === 'inherit')
+          ? 'Inherit (' + layerCap + ')'
+          : capState.charAt(0).toUpperCase() + capState.slice(1);
+        var iconState = (capState === 'inherit') ? layerCap : capState;
+        var icon = capIconHtml(iconState, 14);
+        return '<div class="se-row">'
+          + '<span class="se-label">Captions</span>'
+          + '<button class="se-cap-cycle cap-' + iconState + '" data-act="cap-cycle" '
+          +   'title="Click to cycle: inherit → bottom → middle → top → none">'
+          +   icon + '<span>' + label + '</span>'
+          + '</button>'
+          + '</div>';
+      })()
     + '<div class="se-row">'
     +   '<span class="se-label">Trans In</span>'
     +   '<button class="se-trans" data-act="trans-in">'
@@ -2878,6 +3109,7 @@ function _seWireEvents(ed) {
       if (idx < 0 && act !== 'close') return;
       if (act === 'close') { closeSceneEditor(); }
       else if (act === 'pos') { setClipPosition(idx, this.dataset.pos); _seRefresh(); }
+      else if (act === 'cap-cycle') { cycleClipCaptions(idx); _seRefresh(); }
       else if (act === 'mute') { toggleClipMute(idx); _seRefresh(); }
       else if (act === 'trans-in') { closeSceneEditor(); openVideoTransPicker(idx, 'in'); }
       else if (act === 'trans-out') { closeSceneEditor(); openVideoTransPicker(idx, 'out'); }
@@ -3118,6 +3350,11 @@ function renderGrid() {
   } else {
     clips = allClips.filter(function(c){return !c.ignored});
   }
+  // File filter — when ffSelected is non-null, restrict to clips whose
+  // source filename is in the set. Default (null) = no filtering.
+  if (ffSelected) {
+    clips = clips.filter(function(c){return ffSelected.has(c.filename)});
+  }
   var grid = document.getElementById('clip-grid');
   grid.innerHTML = clips.map(cardHTML).join('');
   document.getElementById('clip-count').textContent =
@@ -3245,6 +3482,92 @@ function syncTl() {
 
 function filterByTag() { renderGrid(); }
 
+// ── File filter (multi-select dropdown) ───────────────────────────────────
+// ffSelected: null = "all files included" (no filtering applied),
+// Set<filename> = explicit selection. Stored as a Set so re-render is O(1).
+var ffSelected = null;
+var ffFiles = [];   // [{name, count}, ...] sorted alphabetically.
+
+function ffInit() {
+  var counts = {};
+  for (var i = 0; i < allClips.length; i++) {
+    var fn = allClips[i].filename || '';
+    if (!fn) continue;
+    counts[fn] = (counts[fn] || 0) + 1;
+  }
+  ffFiles = Object.keys(counts).sort().map(function(fn){
+    return {name: fn, count: counts[fn]};
+  });
+  // Default: every file selected (functionally equivalent to "no filter"
+  // but having the explicit set means deselect-all immediately works).
+  ffSelected = new Set(ffFiles.map(function(f){return f.name}));
+  ffRenderList();
+  ffUpdateLabel();
+}
+
+function ffRenderList() {
+  var list = document.getElementById('ff-list');
+  if (!list) return;
+  var q = (document.getElementById('ff-search').value || '').toLowerCase();
+  var html = '';
+  for (var i = 0; i < ffFiles.length; i++) {
+    var f = ffFiles[i];
+    if (q && f.name.toLowerCase().indexOf(q) < 0) continue;
+    var checked = ffSelected.has(f.name) ? ' checked' : '';
+    var safe = f.name.replace(/"/g, '&quot;');
+    html += '<label class="ff-item">'
+      + '<input type="checkbox" data-fn="' + safe + '"' + checked
+      + ' onchange="ffToggle(this)">'
+      + '<span class="ff-name" title="' + safe + '">' + safe + '</span>'
+      + '<span class="ff-count">' + f.count + '</span>'
+      + '</label>';
+  }
+  list.innerHTML = html || '<div style="font-size:11px;color:#666;padding:6px">No matching files.</div>';
+}
+
+function ffToggle(input) {
+  var fn = input.getAttribute('data-fn');
+  if (input.checked) ffSelected.add(fn);
+  else ffSelected.delete(fn);
+  ffUpdateLabel();
+  renderGrid();
+}
+
+function ffSelectAll(on) {
+  if (on) {
+    ffSelected = new Set(ffFiles.map(function(f){return f.name}));
+  } else {
+    ffSelected = new Set();
+  }
+  ffRenderList();
+  ffUpdateLabel();
+  renderGrid();
+}
+
+function ffUpdateLabel() {
+  var el = document.getElementById('file-filter-label');
+  if (!el) return;
+  var total = ffFiles.length;
+  var n = ffSelected.size;
+  if (n === total)        el.textContent = 'All files (' + total + ')';
+  else if (n === 0)       el.textContent = 'No files';
+  else if (n === 1)       el.textContent = '1 file';
+  else                    el.textContent = n + ' / ' + total + ' files';
+}
+
+function toggleFileFilter(e) {
+  if (e) e.stopPropagation();
+  var pop = document.getElementById('file-filter-pop');
+  pop.classList.toggle('open');
+}
+document.addEventListener('click', function(e) {
+  var pop = document.getElementById('file-filter-pop');
+  if (!pop || !pop.classList.contains('open')) return;
+  var btn = document.getElementById('file-filter-btn');
+  if (pop.contains(e.target) || btn.contains(e.target)) return;
+  pop.classList.remove('open');
+});
+
 // -- Context menu (hide / unhide) --
 var ctxEl = null;
 function showCtx(e, id) {
@@ -3311,7 +3634,14 @@ function buildTimeline() {
     var c = vi.clip;
     var entry = {type:'clip', start_time:vi.startTime, track:vi.track||0, wide:!!c.wide, stack_order:vi.stackOrder||0, volume:vi.volume||5,
       muted:!!vi.muted, position:vi.position||null,
-      trans_in:vi.trans_in||null, trans_out:vi.trans_out||null};
+      trans_in:vi.trans_in||null, trans_out:vi.trans_out||null,
+      captions: (function(){
+        var v = vi.captions;
+        if (v === true)  return 'bottom';   // legacy in-memory state
+        if (v === false) return 'none';
+        if (CAPTIONS_CLIP_CYCLE.indexOf(v) >= 0) return v;
+        return 'inherit';
+      })()};
     if (c.id !== undefined) entry.id = c.id;
     else { entry.video_file = c.video_file; entry.start = c.start; entry.end = c.end; }
     vt.push(entry);
@@ -3341,7 +3671,8 @@ function buildTimeline() {
   }
   return {video_track:vt, sound_track:st, text_overlays:tt,
     track_settings: trackSettings.map(function(s){
-      return {muted: !!s.muted, default_position: s.default_position};
+      return {muted: !!s.muted, default_position: s.default_position,
+              captions: s.captions || 'none'};
     }),
     track_count: tlTrackCount,
     track_sequential: tlSequential.slice(),
@@ -3500,6 +3831,14 @@ function loadNewTimeline(data) {
       muted: !!item.muted,
       position: item.position || null,
       stackOrder: item.stack_order || 0,
+      // Captions: accept the new enum or migrate the old tri-state.
+      captions: (function(){
+        var v = item.captions;
+        if (v === true)  return 'bottom';
+        if (v === false) return 'none';
+        if (CAPTIONS_CLIP_CYCLE.indexOf(v) >= 0) return v;
+        return 'inherit';
+      })(),
     });
     if (itemTrack > 0 && itemTrack >= tlTrackCount) setTrackCount(itemTrack + 1);
     pendTrans = null;
@@ -3512,6 +3851,14 @@ function loadNewTimeline(data) {
       trackSettings[ts] = {
         muted: !!src.muted,
         default_position: src.default_position || defaults[ts],
+        // Old saves had a boolean; new ones have 'none'/'top'/'middle'/'bottom'.
+        captions: (function(){
+          var v = src.captions;
+          if (v === true)  return 'bottom';
+          if (v === false || v === undefined || v === null) return 'none';
+          if (['none','top','middle','bottom'].indexOf(v) >= 0) return v;
+          return 'none';
+        })(),
       };
     }
   }

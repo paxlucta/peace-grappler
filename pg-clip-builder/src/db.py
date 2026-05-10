@@ -778,6 +778,52 @@ def get_scene_ids_with_transcripts():
         conn.close()
 
 
+def get_transcript_for_clip(video_id, clip_start, clip_end,
+                            prefer_translation=False):
+    """Return transcript segments that fall inside ``[clip_start, clip_end]``
+    on *video_id*, shifted so timestamps are relative to ``clip_start``.
+
+    Used by the burn-in captions pipeline (wizard + builder per-layer
+    toggle). Each segment is also clamped to the clip window so partial
+    overlaps render only the visible portion.
+
+    *prefer_translation*: when True, picks the English-translation rows
+    first if they exist; otherwise returns the source-language rows.
+    Caller decides which to render — most users want the source language
+    since that matches what's actually being said in the audio.
+
+    Returns ``[{"start": float, "end": float, "text": str}, ...]`` or [].
+    """
+    if clip_end <= clip_start:
+        return []
+    conn = get_db()
+    try:
+        # Two passes — pick the side the user asked for if it has any
+        # rows, otherwise fall back to whatever's present.
+        for translate_first in ([1, 0] if prefer_translation else [0, 1]):
+            rows = conn.execute(
+                """SELECT start_time, end_time, text
+                   FROM transcripts
+                   WHERE video_id=? AND is_translation=?
+                     AND start_time < ? AND end_time > ?
+                   ORDER BY start_time""",
+                (video_id, translate_first, clip_end, clip_start),
+            ).fetchall()
+            if rows:
+                break
+        out = []
+        for r in rows:
+            s = max(float(r["start_time"]), clip_start) - clip_start
+            e = min(float(r["end_time"]),   clip_end)   - clip_start
+            if e <= s:
+                continue
+            out.append({"start": round(s, 2), "end": round(e, 2),
+                        "text": r["text"]})
+        return out
+    finally:
+        conn.close()
+
+
 def get_video_transcripts(video_id):
     """All transcript groups for *video_id*. Same shape as
     get_transcripts_in_range() but spans the full video. Used by the

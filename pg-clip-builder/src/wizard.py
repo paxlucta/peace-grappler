@@ -656,8 +656,15 @@ def _validate_plan(plan, scenes, music_files):
 # ── Video assembly ───────────────────────────────────────────────────────────
 
 def _assemble_video(plan, music_files, video_num, total,
-                    mute_source=False):
-    """Assemble a video from Claude's plan. Returns output path or None."""
+                    mute_source=False, add_captions=False,
+                    caption_style=None):
+    """Assemble a video from Claude's plan. Returns output path or None.
+
+    *add_captions* — when True, burn each scene's transcript onto the
+    extracted clip before subsequent steps (text overlay → mute → concat).
+    Style is taken from *caption_style* (font/color/bg/position); see
+    captions.build_ass for keys.
+    """
     clips = plan.get("clips", [])
     if len(clips) < 2:
         emit(f"Video {video_num}/{total}: not enough clips in plan")
@@ -727,6 +734,24 @@ def _assemble_video(plan, music_files, video_num, total,
                 ok = extract_subclip(scene["video_path"], start, duration, clip_out)
 
             if ok:
+                # Burn-in transcript captions if the user opted in.
+                # Done before text-overlay so the wizard's overlay text
+                # can render on top of the captions if both are enabled.
+                if add_captions:
+                    from db import get_transcript_for_clip
+                    from captions import burn_captions
+                    segs = get_transcript_for_clip(
+                        scene["video_id"], clip["start"], clip["end"],
+                    )
+                    if segs:
+                        cap_out = os.path.join(tmp, f"clip_{i:03d}_cap.mp4")
+                        if burn_captions(clip_out, cap_out, segs,
+                                         style=caption_style):
+                            clip_out = cap_out
+                        else:
+                            emit(f"  Captions failed for clip {i+1}, "
+                                 f"using clip without captions")
+
                 # Apply text overlay if specified
                 overlay_text = clip.get("text_overlay")
                 if overlay_text and overlay_text.strip():
@@ -965,7 +990,7 @@ def _auto_analyze_folders(model, folders):
 def _generate(model, num_videos, num_variations=1, folders=None,
               mute_source=False, enable_text_overlays=False,
               music_folders=None, include_wide=True, provider=None,
-              no_music=False):
+              no_music=False, add_captions=False, caption_style=None):
     """Full wizard generation flow. Runs in a background thread.
 
     *no_music* — when True, the AI plans without a music track and the
@@ -1088,7 +1113,9 @@ def _generate(model, num_videos, num_variations=1, folders=None,
 
                 emit(f"\nPhase 3: Assembling {var_label}...")
                 result = _assemble_video(plan, music_files, vid_num, num_videos,
-                                        mute_source=mute_source)
+                                        mute_source=mute_source,
+                                        add_captions=add_captions,
+                                        caption_style=caption_style)
                 if result:
                     # Generate caption
                     emit("Generating Instagram caption...")
@@ -1196,6 +1223,8 @@ def api_generate():
     music_folders = data.get("music_folders", [])
     include_wide = data.get("include_wide", True)
     no_music = bool(data.get("no_music", False))
+    add_captions = bool(data.get("add_captions", False))
+    caption_style = data.get("caption_style") or {}
 
     threading.Thread(
         target=_generate,
@@ -1210,6 +1239,8 @@ def api_generate():
             "include_wide": include_wide,
             "provider": provider,
             "no_music": no_music,
+            "add_captions": add_captions,
+            "caption_style": caption_style,
         },
         daemon=True,
     ).start()
@@ -1787,8 +1818,44 @@ button:disabled{opacity:.5;cursor:not-allowed}
       <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#aaa;cursor:pointer">
         <input type="checkbox" id="include-wide" checked> Include widescreen scenes
       </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#aaa;cursor:pointer"
+             title="Burn the spoken transcript onto each scene as on-screen captions.">
+        <input type="checkbox" id="add-captions" onchange="toggleCaptionsPanel()"> Add captions
+      </label>
       <div class="btn-row">
         <button class="btn-primary" id="gen-btn" onclick="startGeneration()">Generate</button>
+      </div>
+    </div>
+
+    <!-- Caption styling — visible when "Add captions" is checked. -->
+    <div class="config-row caption-cfg" id="caption-cfg" style="display:none">
+      <div class="field" style="min-width:120px">
+        <label>Font</label>
+        <select id="cap-font">
+          <option value="sans" selected>Sans-serif</option>
+          <option value="serif">Serif</option>
+          <option value="mono">Monospace</option>
+        </select>
+      </div>
+      <div class="field" style="min-width:90px">
+        <label>Text color</label>
+        <input type="color" id="cap-color" value="#ffffff">
+      </div>
+      <div class="field" style="min-width:90px">
+        <label>Background</label>
+        <input type="color" id="cap-bg" value="#000000">
+      </div>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#aaa;cursor:pointer;margin-bottom:6px"
+             title="Show a colored box behind the caption text">
+        <input type="checkbox" id="cap-bg-on"> Show background
+      </label>
+      <div class="field" style="min-width:120px">
+        <label>Position</label>
+        <select id="cap-pos">
+          <option value="bottom" selected>Bottom</option>
+          <option value="middle">Middle</option>
+          <option value="top">Top</option>
+        </select>
       </div>
     </div>
   </div>
@@ -2028,6 +2095,11 @@ function getSelectedFromPicker(ddId) {
   return selected;
 }
 
+function toggleCaptionsPanel() {
+  var on = document.getElementById('add-captions').checked;
+  document.getElementById('caption-cfg').style.display = on ? '' : 'none';
+}
+
 function startGeneration() {
   if (generating) return;
   generating = true;
@@ -2064,6 +2136,15 @@ function startGeneration() {
       no_music: document.getElementById('no-music').checked,
       text_overlays: document.getElementById('text-overlays').checked,
       include_wide: document.getElementById('include-wide').checked,
+      add_captions: document.getElementById('add-captions').checked,
+      caption_style: {
+        font:     document.getElementById('cap-font').value,
+        color:    document.getElementById('cap-color').value,
+        bg:       document.getElementById('cap-bg-on').checked
+                    ? document.getElementById('cap-bg').value
+                    : null,
+        position: document.getElementById('cap-pos').value,
+      },
     }),
   }).then(function() {
     var es = new EventSource('/wizard/api/status');
