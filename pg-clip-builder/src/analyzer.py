@@ -1133,48 +1133,66 @@ def api_scene_from_selection():
     """Create a new scene spanning [start, end] for *video_id* from a
     transcript text selection on the Analyze page. The selected text is
     saved as a moment so it shows up alongside the new scene."""
-    data = request.json or {}
     try:
-        video_id = int(data.get("video_id"))
-        start    = float(data.get("start"))
-        end      = float(data.get("end"))
-    except (TypeError, ValueError):
-        return jsonify({"error": "video_id, start, end required"}), 400
-    if end <= start:
-        return jsonify({"error": "end must be greater than start"}), 400
-    text = (data.get("text") or "").strip()
-    v = get_video_by_id(video_id)
-    if not v:
-        return jsonify({"error": "video not found"}), 404
-    # Clamp to the video's duration so we don't write nonsense.
-    dur = v["duration"] if "duration" in v.keys() else 0
-    if dur and end > dur:
-        end = dur
-    scene_id = db.create_scene(video_id, start, end, tags=["custom"])
-    if text:
+        data = request.get_json(silent=True) or {}
         try:
+            video_id = int(data.get("video_id"))
+            start    = float(data.get("start"))
+            end      = float(data.get("end"))
+        except (TypeError, ValueError):
+            return jsonify({"error": "video_id, start, end required"}), 400
+        if end <= start:
+            return jsonify({"error": "end must be greater than start"}), 400
+        text = (data.get("text") or "").strip()
+        v = get_video_by_id(video_id)
+        if not v:
+            return jsonify({"error": "video not found"}), 404
+        vk = list(v.keys())
+        dur = v["duration"] if "duration" in vk else 0
+        if dur and end > dur:
+            end = dur
+        import sqlite3 as _sqlite3
+        try:
+            scene_id = db.create_scene(video_id, start, end, tags=["custom"])
+        except _sqlite3.IntegrityError:
+            # A scene with this exact span already exists — reuse it so the
+            # Builder still gets a usable handle.
             conn = get_db()
-            conn.execute(
-                "INSERT INTO moments (video_id, at_time, note, dialog) "
-                "VALUES (?, ?, ?, ?)",
-                (video_id, start, text[:80], text),
-            )
-            conn.commit()
+            row = conn.execute(
+                "SELECT id FROM scenes WHERE video_id=? "
+                "AND ROUND(start_time,2)=ROUND(?,2) "
+                "AND ROUND(end_time,2)=ROUND(?,2)",
+                (video_id, start, end),
+            ).fetchone()
             conn.close()
-        except Exception:
-            pass
-    # Enrich with the source video's filename + wide flag so the Builder can
-    # append this scene to its timeline without a second round-trip.
-    vk = v.keys()
-    return jsonify({
-        "scene_id": scene_id,
-        "start":    start,
-        "end":      end,
-        "duration": round(end - start, 2),
-        "wide":     bool(v["wide"]) if "wide" in vk else False,
-        "filename": v["filename"] if "filename" in vk else "",
-        "video_file": v["path"] if "path" in vk else "",
-    })
+            if not row:
+                raise
+            scene_id = row["id"]
+        if text:
+            try:
+                conn = get_db()
+                conn.execute(
+                    "INSERT INTO moments (video_id, at_time, note, dialog) "
+                    "VALUES (?, ?, ?, ?)",
+                    (video_id, start, text[:80], text),
+                )
+                conn.commit()
+                conn.close()
+            except Exception:
+                pass
+        return jsonify({
+            "scene_id": scene_id,
+            "start":    start,
+            "end":      end,
+            "duration": round(end - start, 2),
+            "wide":     bool(v["wide"]) if "wide" in vk else False,
+            "filename": v["filename"] if "filename" in vk else "",
+            "video_file": v["path"] if "path" in vk else "",
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": "server error: " + str(e)}), 500
 
 
 @analyzer_bp.route("/analyze/api/scene/<int:scene_id>", methods=["DELETE"])
@@ -2503,8 +2521,34 @@ async function cutSceneFromSelection() {
 // Cut the selected scene and append it to the end of Layer I of the
 // builder's saved timeline. Stays on the current page — the change is
 // written directly into the same localStorage key the builder restores
-// from on next open.
+// from on next open, and broadcast on a BroadcastChannel so any open
+// Builder tab can append the new clip live.
 var BUILDER_STATE_KEY = 'pg-builder-state-v1';
+var BUILDER_CHANNEL_NAME = 'pg-builder';
+
+function _pgToast(msg, kind, onClick) {
+  var t = document.getElementById('pg-toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'pg-toast';
+    t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);'
+      + 'padding:10px 18px;border-radius:8px;font:600 13px system-ui,sans-serif;'
+      + 'color:#fff;z-index:99999;box-shadow:0 6px 20px rgba(0,0,0,.4);'
+      + 'opacity:0;transition:opacity .2s ease;';
+    document.body.appendChild(t);
+  }
+  t.style.background = (kind === 'error') ? '#c62828' : '#2e7d32';
+  t.textContent = msg;
+  t.style.opacity = '1';
+  t.style.cursor = onClick ? 'pointer' : 'default';
+  t.style.pointerEvents = onClick ? 'auto' : 'none';
+  t.onclick = onClick || null;
+  clearTimeout(_pgToast._h);
+  _pgToast._h = setTimeout(function(){
+    t.style.opacity = '0';
+    t.style.pointerEvents = 'none';
+  }, 4500);
+}
 
 function _builderEmptySnapshot() {
   return {
@@ -2540,66 +2584,50 @@ async function addSelectionToBuilder() {
         text:     _vtxState.selectionText,
       }),
     });
+    var ct = r.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) {
+      var body = await r.text();
+      var snippet = body.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160);
+      throw new Error('HTTP ' + r.status + ' (' + (ct || 'no content-type') + '): ' + snippet);
+    }
     var data = await r.json();
-    if (!r.ok) throw new Error(data.error || 'failed');
+    if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
 
-    // Load the builder snapshot (or seed an empty one).
-    var snap = null;
+    // Push onto a pending-append queue. The Builder drains this queue —
+    // either live (if a tab is open and listening on BroadcastChannel) or
+    // on its next load — and appends each scene to the current end of
+    // Layer I. We deliberately do NOT rewrite BUILDER_STATE_KEY here, so
+    // we can't accidentally clobber the Builder's current timeline with
+    // an older snapshot.
+    var PENDING_KEY = 'pg-builder-pending-scenes-v1';
     try {
-      var raw = localStorage.getItem(BUILDER_STATE_KEY);
-      if (raw) snap = JSON.parse(raw);
-    } catch (e) { snap = null; }
-    if (!snap || typeof snap !== 'object') snap = _builderEmptySnapshot();
-    if (!Array.isArray(snap.video_track))   snap.video_track = [];
-    if (!Array.isArray(snap.track_settings) || snap.track_settings.length < 3) {
-      snap.track_settings = _builderEmptySnapshot().track_settings;
-    }
+      var q = [];
+      var raw = localStorage.getItem(PENDING_KEY);
+      if (raw) { try { q = JSON.parse(raw) || []; } catch (e) { q = []; } }
+      if (!Array.isArray(q)) q = [];
+      if (q.indexOf(data.scene_id) < 0) q.push(data.scene_id);
+      localStorage.setItem(PENDING_KEY, JSON.stringify(q));
+    } catch (e) { /* localStorage unavailable — broadcast still works */ }
 
-    // End of Layer I = max(start_time + duration) over track 0. We don't
-    // store duration on the saved entry, so build a {id: duration} map from
-    // /api/clips. New entries get a fallback duration from the response.
-    var durById = {};
+    // Live-notify any open Builder tab so it can append the new clip
+    // to its current in-memory timeline without a reload.
     try {
-      var cr = await fetch('/api/clips');
-      var clips = await cr.json();
-      for (var i = 0; i < clips.length; i++) durById[clips[i].id] = clips[i].duration;
-    } catch (e) { /* fall through with empty map */ }
-    var endOfLayer1 = 0;
-    for (var j = 0; j < snap.video_track.length; j++) {
-      var it = snap.video_track[j];
-      if (it.type !== 'clip') continue;
-      if ((it.track || 0) !== 0) continue;
-      var d = (it.id !== undefined && durById[it.id] !== undefined)
-              ? durById[it.id]
-              : ((it.end != null && it.start != null) ? (it.end - it.start) : 0);
-      var endT = (it.start_time || 0) + (d || 0);
-      if (endT > endOfLayer1) endOfLayer1 = endT;
-    }
+      var bc = new BroadcastChannel(BUILDER_CHANNEL_NAME);
+      bc.postMessage({type: 'add_scene', scene_id: data.scene_id});
+      bc.close();
+    } catch (e) { /* BroadcastChannel unsupported — cold load will pick it up */ }
 
-    // Append the new clip at end of Layer I.
-    snap.video_track.push({
-      type: 'clip',
-      id: data.scene_id,
-      start_time: endOfLayer1,
-      track: 0,
-      wide: !!data.wide,
-      stack_order: 0,
-      volume: 5,
-      muted: false,
-      position: null,
-      trans_in: null,
-      trans_out: null,
-      crop_x_frac: null,
-      captions: 'inherit',
-    });
-
-    localStorage.setItem(BUILDER_STATE_KEY, JSON.stringify(snap));
-
+    var durStr = (data.duration || (data.end - data.start)).toFixed(1);
     document.getElementById('vtx-sel-info').innerHTML =
       'Added scene <b>#' + data.scene_id + '</b> to Builder Layer I '
-      + '(' + (data.duration || (data.end - data.start)).toFixed(1) + 's).';
+      + '(' + durStr + 's). <span style="color:#90caf9">Click toast to open Builder.</span>';
+    _pgToast('Added scene #' + data.scene_id + ' to Builder Layer I ('
+      + durStr + 's) — click to open', 'success', function() {
+        window.location.href = '/builder?scroll_end=1';
+      });
   } catch (e) {
     document.getElementById('vtx-sel-info').textContent = 'Add failed: ' + e.message;
+    _pgToast('Add to Builder failed: ' + e.message, 'error');
   } finally {
     btn.textContent = orig;
     btn.disabled = false;

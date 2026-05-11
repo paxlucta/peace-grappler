@@ -2427,6 +2427,8 @@ async function init() {
       renderTrackHeaders(); /* reflect restored layer mute/captions/crop */
     }
   }
+  /* Restore is done — autosave on subsequent mutations is now safe. */
+  _builderSaveEnabled = true;
 
   /* Append a scene to the end of Layer I via ?add_scene=<id> — handoff from
    * the Analyze page's transcript modal. Runs after restore so the new clip
@@ -2439,6 +2441,120 @@ async function init() {
     }
     window.history.replaceState({}, '', '/builder');
   }
+
+  /* Drain the pending-append queue written by the Analyze page's
+   * "Add to Builder" button. Each id gets appended to the end of Layer I
+   * (the current end — so we always extend the *current* timeline, never
+   * a stale snapshot). Done after restore so order is: existing timeline
+   * + new scenes in the order the user added them. */
+  var PENDING_KEY = 'pg-builder-pending-scenes-v1';
+  var _drainedAdded = 0, _drainedDup = 0, _drainedMissing = 0, _lastDrainedId = null;
+  try {
+    var praw = localStorage.getItem(PENDING_KEY);
+    if (praw) {
+      var pq = JSON.parse(praw) || [];
+      localStorage.removeItem(PENDING_KEY);
+      for (var pi = 0; pi < pq.length; pi++) {
+        var pid = pq[pi];
+        var pc = allClips.find(function(x){ return x.id === pid; });
+        if (!pc) { _drainedMissing++; continue; }
+        if (addVideoItem(pc, undefined, 0)) {
+          _drainedAdded++;
+          _lastDrainedId = pid;
+        } else {
+          _drainedDup++;
+        }
+      }
+    }
+  } catch (e) { /* ignore */ }
+
+  /* Live handoff from the Analyze page. While this tab is open, the
+   * analyzer broadcasts {type:'add_scene', scene_id} after creating a
+   * scene; we refresh the clip cache, append to the current end of Layer
+   * I, drop that id from the pending queue, scroll to the new end, and
+   * show a toast. */
+  try {
+    var _bc = new BroadcastChannel('pg-builder');
+    _bc.onmessage = async function(ev) {
+      var m = ev.data || {};
+      if (m.type !== 'add_scene' || typeof m.scene_id !== 'number') return;
+      try {
+        allClips = await fetch('/api/clips').then(function(r){return r.json()});
+      } catch (e) { return; }
+      var nc = allClips.find(function(x){ return x.id === m.scene_id; });
+      // Always drop this id from the persisted queue — whether we add or
+      // not — so a stale queue entry can't haunt the next cold load.
+      try {
+        var raw2 = localStorage.getItem(PENDING_KEY);
+        if (raw2) {
+          var q2 = JSON.parse(raw2) || [];
+          q2 = q2.filter(function(x){ return x !== m.scene_id; });
+          if (q2.length) localStorage.setItem(PENDING_KEY, JSON.stringify(q2));
+          else localStorage.removeItem(PENDING_KEY);
+        }
+      } catch (e) { /* ignore */ }
+      if (!nc) {
+        _pgBuilderToast('Add to Builder: scene #' + m.scene_id + ' not found');
+        return;
+      }
+      var added = addVideoItem(nc, undefined, 0);
+      renderGrid();
+      if (added) {
+        scrollTimelineToEnd();
+        _pgBuilderToast('Added scene #' + m.scene_id + ' to Layer I');
+      } else {
+        _pgBuilderToast('Scene #' + m.scene_id + ' is already on the timeline');
+      }
+    };
+  } catch (e) { /* BroadcastChannel unsupported */ }
+
+  /* Cold-load feedback: if the queue had pending scenes, surface what
+   * happened — added vs duplicate vs missing. Silent drains were leaving
+   * users with no idea why their click "didn't work". */
+  if (_drainedAdded || _drainedDup || _drainedMissing) {
+    var parts = [];
+    if (_drainedAdded)   parts.push('added ' + _drainedAdded);
+    if (_drainedDup)     parts.push(_drainedDup + ' already on timeline');
+    if (_drainedMissing) parts.push(_drainedMissing + ' not found');
+    _pgBuilderToast('Add to Builder: ' + parts.join(', '));
+  }
+
+  /* Hand-off scroll: when navigated from Analyze "Add to Builder" toast,
+   * scroll the horizontal timeline to its end so the user lands on the
+   * newly-appended clip. Runs after queue drain + restore. */
+  if (params.get('scroll_end') === '1' || _drainedAdded) {
+    scrollTimelineToEnd();
+    if (params.get('scroll_end') === '1') {
+      window.history.replaceState({}, '', '/builder');
+    }
+  }
+}
+
+function scrollTimelineToEnd() {
+  var el = document.getElementById('multi-timeline');
+  if (!el) return;
+  /* Defer one frame so any just-added clip has been laid out. */
+  requestAnimationFrame(function() {
+    el.scrollLeft = el.scrollWidth;
+  });
+}
+
+function _pgBuilderToast(msg) {
+  var t = document.getElementById('pg-toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'pg-toast';
+    t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);'
+      + 'padding:10px 18px;border-radius:8px;font:600 13px system-ui,sans-serif;'
+      + 'color:#fff;background:#2e7d32;z-index:99999;'
+      + 'box-shadow:0 6px 20px rgba(0,0,0,.4);opacity:0;transition:opacity .2s ease;'
+      + 'pointer-events:none;';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.opacity = '1';
+  clearTimeout(_pgBuilderToast._h);
+  _pgBuilderToast._h = setTimeout(function(){ t.style.opacity = '0'; }, 2800);
 }
 
 function renderMusicLabels() {
@@ -3494,8 +3610,9 @@ window.addEventListener('resize', function() {
 window.addEventListener('beforeunload', function() { saveBuilderState(); });
 
 function addVideoItem(clip, startTime, trackIdx) {
-  /* Prevent adding the same scene twice */
-  if (clip.id !== undefined && getTlClipIds().indexOf(clip.id) >= 0) return;
+  /* Prevent adding the same scene twice. Returns false so callers can tell
+   * the difference between "appended" and "skipped (duplicate)". */
+  if (clip.id !== undefined && getTlClipIds().indexOf(clip.id) >= 0) return false;
   var t = trackIdx !== undefined ? trackIdx : 0;
   var dur = clip.duration;
   var trackItems = videoItems.filter(function(v) { return (v.track || 0) === t; });
@@ -3519,6 +3636,7 @@ function addVideoItem(clip, startTime, trackIdx) {
     resolveVideoOverlaps(videoItems.length - 1);
   }
   syncTl();
+  return true;
 }
 
 function removeVideoItem(idx) {
@@ -3732,9 +3850,17 @@ function getTlClipIds() {
 }
 
 function clearTimeline() {
-  if (!videoItems.length && !soundItems.length && !textItems.length) return;
+  if (!videoItems.length && !soundItems.length && !textItems.length) {
+    // Even if in-memory is empty, nuke any stale persisted state so legacy
+    // entries from earlier sessions can't resurface on the next load.
+    clearBuilderState();
+    try { localStorage.removeItem('pg-builder-pending-scenes-v1'); } catch (e) {}
+    return;
+  }
   if (!window.confirm('Clear the entire timeline?')) return;
   videoItems = []; soundItems = []; textItems = [];
+  clearBuilderState();
+  try { localStorage.removeItem('pg-builder-pending-scenes-v1'); } catch (e) {}
   syncTl();
 }
 
@@ -4032,8 +4158,14 @@ function buildTimeline() {
  * so handoffs like ?add_scene=<id> append to the saved timeline rather than
  * starting from scratch. */
 var BUILDER_STATE_KEY = 'pg-builder-state-v1';
+/* Guard: setupTracks() calls syncTl() which calls saveBuilderState() before
+ * init's restoreBuilderState() runs. Without this flag, the initial empty
+ * snapshot wipes any saved timeline on every page load. Flipped to true
+ * once init() finishes restoring (or deciding not to). */
+var _builderSaveEnabled = false;
 
 function saveBuilderState() {
+  if (!_builderSaveEnabled) return;
   try {
     var snap = buildTimeline();
     localStorage.setItem(BUILDER_STATE_KEY, JSON.stringify(snap));
