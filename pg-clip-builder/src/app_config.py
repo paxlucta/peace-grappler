@@ -55,6 +55,41 @@ DEFAULT_WHISPER_TRANSLATE = False  # if True, transcript is forced to English
 
 SOCIAL_PLATFORMS = ("instagram", "tiktok", "youtube")
 
+# Defaults for the burn-in caption style used by AI Builder. Persisted with
+# the brand profile so each brand can have its own caption look.
+DEFAULT_CAPTIONS = {
+    "font":     "sans",       # sans | serif | mono
+    "color":    "#ffffff",
+    "bg_on":    False,
+    "bg_color": "#000000",
+    "position": "bottom",     # bottom | middle | top
+}
+CAPTION_FONTS    = ("sans", "serif", "mono")
+CAPTION_POSITIONS = ("bottom", "middle", "top")
+
+
+def _validate_captions(value):
+    """Normalize the captions sub-config. Falls back to DEFAULT_CAPTIONS for
+    any missing/invalid field so the UI always has every key to render."""
+    if not isinstance(value, dict):
+        return deepcopy(DEFAULT_CAPTIONS)
+    def _color(v, fallback):
+        v = str(v or "").strip()
+        return v if re.match(r"^#[0-9a-fA-F]{6}$", v) else fallback
+    font = (str(value.get("font") or "").strip().lower() or DEFAULT_CAPTIONS["font"])
+    if font not in CAPTION_FONTS:
+        font = DEFAULT_CAPTIONS["font"]
+    pos  = (str(value.get("position") or "").strip().lower() or DEFAULT_CAPTIONS["position"])
+    if pos not in CAPTION_POSITIONS:
+        pos = DEFAULT_CAPTIONS["position"]
+    return {
+        "font":     font,
+        "color":    _color(value.get("color"),    DEFAULT_CAPTIONS["color"]),
+        "bg_on":    bool(value.get("bg_on", False)),
+        "bg_color": _color(value.get("bg_color"), DEFAULT_CAPTIONS["bg_color"]),
+        "position": pos,
+    }
+
 
 def _validate_socials(value):
     """Sanitize a socials dict. Accepts unknown platforms but normalizes the
@@ -277,6 +312,10 @@ def _fill_defaults(raw, profile_name):
                           or DEFAULT_SOURCE_FOLDER,
         "output_folder":  (raw.get("output_folder") or "").strip()
                           or DEFAULT_OUTPUT_FOLDER,
+        # Per-brand intro/outro override. Empty = fall back to the legacy
+        # assets/videos/intro* scan in find_asset().
+        "intro_video":    (raw.get("intro_video") or "").strip(),
+        "outro_video":    (raw.get("outro_video") or "").strip(),
         "tag_schema":     _validate_tags(raw.get("tag_schema"))
                           or deepcopy(DEFAULT_TAGS),
         "socials":        socials,
@@ -285,6 +324,7 @@ def _fill_defaults(raw, profile_name):
         "whisper_model":     whisper_model,
         "whisper_language":  (raw.get("whisper_language") or "").strip(),
         "whisper_translate": bool(raw.get("whisper_translate", False)),
+        "captions":          _validate_captions(raw.get("captions")),
     }
 
 
@@ -315,6 +355,7 @@ def set_config(**fields):
 
     for k in ("brand_name", "content_domain",
               "source_folder", "output_folder",
+              "intro_video", "outro_video",
               "whisper_language"):
         if k in fields and fields[k] is not None:
             raw[k] = (fields[k] or "").strip()
@@ -358,6 +399,9 @@ def set_config(**fields):
         if not isinstance(fields["ai"], dict):
             raise ValueError("ai must be a dict")
         raw["ai"] = fields["ai"]
+
+    if "captions" in fields and fields["captions"] is not None:
+        raw["captions"] = _validate_captions(fields["captions"])
 
     # Handle rename / fork last so we know which path to write to.
     new_name = fields.get("profile_name")

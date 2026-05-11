@@ -59,11 +59,58 @@ _analysis_state = {
     "queued": [],       # list of {"id": int, "force": bool}
     "completed": 0,
     "total": 0,
+    # Per-video progress so the UI can render a bar inside the analyzing
+    # badge instead of a vague "analyzing…". Reset on each video start.
+    "pct": 0.0,
+    "stage": "",
+    # Cooperative cancel — flipped by POST /analyze/cancel. The worker +
+    # analyze_full / analyze_speech check it at major boundaries and
+    # raise AnalysisCancelled so we exit cleanly.
+    "cancel": False,
 }
+
+
+class AnalysisCancelled(Exception):
+    """Raised when a cancel was requested mid-analysis. Worker catches it
+    and emits VIDEO:<id>:cancelled + drains the queue."""
+    pass
+
+
+def _check_cancel():
+    """Raise ``AnalysisCancelled`` if a cancel was requested. Cheap, safe
+    to call from every batch / hot loop."""
+    with _analysis_lock:
+        if _analysis_state.get("cancel"):
+            raise AnalysisCancelled()
+
+
+# Thread-local provider/model override so analyze_full / analyze_speech can
+# route their AI calls through a per-run choice without threading the args
+# through every helper. The popover on /analyze sets these before kicking
+# off the worker; reset to None at the end.
+_ai_call_override = threading.local()
 
 
 def emit_progress(msg):
     progress_queue.put(msg)
+
+
+def emit_pct(frac, stage=""):
+    """Update the running-video progress bar. *frac* is 0.0-1.0;
+    *stage* is a short human label (e.g. "frames", "tagging 3/8")
+    shown alongside the bar. Pushes a PCT: message onto the SSE stream
+    so live clients update without polling, and also stores the value
+    in ``_analysis_state`` so a page reload mid-analysis can re-attach."""
+    try:
+        f = max(0.0, min(1.0, float(frac)))
+    except (TypeError, ValueError):
+        f = 0.0
+    with _analysis_lock:
+        _analysis_state["pct"] = f
+        _analysis_state["stage"] = stage or ""
+    # Payload format: "PCT:<frac>:<stage>" — the client splits on the first
+    # two colons so the stage label can contain colons safely.
+    progress_queue.put(f"PCT:{f:.4f}:{stage or ''}")
 
 
 def _get_status_snapshot():
@@ -76,6 +123,8 @@ def _get_status_snapshot():
             "queued": len(_analysis_state["queued"]),
             "completed": _analysis_state["completed"],
             "total": _analysis_state["total"],
+            "pct": _analysis_state.get("pct", 0.0),
+            "stage": _analysis_state.get("stage", ""),
         }
 
 
@@ -123,7 +172,9 @@ def call_claude(frames, prompt_text):
     """Send frames + prompt to the active AI CLI, return raw text response.
 
     Function name retained for callers; the underlying provider is chosen on
-    the /settings page (claude / codex / gemini).
+    the /settings page (claude / codex / gemini) but a per-run override on
+    ``_ai_call_override`` wins when set (used by the ⚙ popover on /analyze
+    so the user can pick visual vs audio LLMs independently).
 
     Raises ``ai_cli.AIQuotaError`` when the provider hits a hard quota /
     billing limit — analyze_speech / analyze_full both catch it and bail
@@ -132,6 +183,8 @@ def call_claude(frames, prompt_text):
     return ai_cli.call_ai(
         prompt_text, task="analysis", frames=frames,
         timeout=120, on_log=emit_progress,
+        provider=getattr(_ai_call_override, "provider", None) or None,
+        model=getattr(_ai_call_override, "model", None) or None,
     )
 
 
@@ -230,12 +283,16 @@ RULES:
 
 def analyze_full(video_path, duration):
     """Full tag-centric analysis of a video."""
+    emit_pct(0.05, "extracting frames")
     emit_progress(f"Extracting frames from {Path(video_path).name}...")
+    _check_cancel()
     frames = extract_frames(video_path, duration)
     if not frames:
         emit_progress(f"No frames extracted from {Path(video_path).name}")
         return None
+    _check_cancel()
 
+    emit_pct(0.25, f"tagging ({len(frames)} frames)")
     emit_progress(f"Extracted {len(frames)} frames, sending to Claude (full analysis)...")
 
     tag_list = ""
@@ -290,6 +347,7 @@ def analyze_full(video_path, duration):
                 "dialog": m_item.get("dialog"),
             })
 
+    emit_pct(0.95, "saving")
     emit_progress(f"Got {len(clean_tags)} tags, {len(clean_moments)} moments")
     return {"tags": clean_tags, "moments": clean_moments}
 
@@ -368,10 +426,12 @@ def analyze_speech(video_path, duration, overrides=None):
     translate = bool(o["whisper_translate"]) if "whisper_translate" in o \
                 else bool(cfg.get("whisper_translate", False))
 
+    emit_pct(0.05, "transcribing audio")
     result = audio_analysis.transcribe(
         video_path, model=model, language=language, translate=translate,
         on_log=emit_progress,
     )
+    emit_pct(0.25, "transcript ready")
     segments = result.get("segments", [])
     detected_language = (result.get("language") or "").strip().lower()
     if not segments:
@@ -453,11 +513,19 @@ def analyze_speech(video_path, duration, overrides=None):
     all_tags = {}    # tag_name -> [{start, end}, ...]
     all_moments = []
 
-    for batch_start in range(0, len(segments), BATCH):
+    _total_segs = len(segments)
+    for batch_start in range(0, _total_segs, BATCH):
+        _check_cancel()
         batch = segments[batch_start:batch_start + BATCH]
+        # Map batch progress into the 0.25–0.95 portion of the overall bar
+        # (transcription owned the first 25%; saving owns the last 5%).
+        _done_pct = 0.25 + 0.70 * (batch_start / max(1, _total_segs))
+        emit_pct(_done_pct,
+                 f"tagging {batch_start + 1}-{batch_start + len(batch)}"
+                 f"/{_total_segs}")
         emit_progress(
             f"Tagging scenes {batch_start + 1}-{batch_start + len(batch)} "
-            f"of {len(segments)}..."
+            f"of {_total_segs}..."
         )
 
         # Extract one frame per segment (midpoint).
@@ -655,6 +723,20 @@ def _analyze_one(video_id, force, overrides=None):
     with _analysis_lock:
         _analysis_state["video_id"] = video_id
         _analysis_state["video_name"] = video["filename"]
+        _analysis_state["pct"] = 0.0
+        _analysis_state["stage"] = "starting"
+
+    # Apply per-run AI provider/model override (set by the ⚙ popover) on
+    # this worker thread so every call_claude in analyze_full/analyze_speech
+    # routes through the user's choice. Clean up in the finally so a
+    # follow-up video without an override reverts to the configured default.
+    _ai_call_override.provider = (overrides.get("ai_provider") or "").strip() or None
+    _ai_call_override.model    = (overrides.get("ai_model")    or "").strip() or None
+    if _ai_call_override.provider or _ai_call_override.model:
+        emit_progress(
+            f"AI override → provider={_ai_call_override.provider or '(default)'},"
+            f" model={_ai_call_override.model or '(default)'}"
+        )
 
     try:
         video_path = video["path"]
@@ -707,6 +789,7 @@ def _analyze_one(video_id, force, overrides=None):
                 return False
             save_analysis(video_id, result["tags"], result["moments"],
                           list(ALL_TAG_SET), provider=provider, mode=mode)
+            emit_pct(1.0, "done")
             emit_progress(f"Saved {len(result['tags'])} tags")
 
         elif new_tags:
@@ -733,9 +816,18 @@ def _analyze_one(video_id, force, overrides=None):
             emit_progress(f"Auto-hide skipped: {e}")
 
         return True
+    except AnalysisCancelled:
+        # Surface cancellation to the worker loop so it can clear the
+        # queue and emit a clean status. Don't double-log here — the
+        # worker prints the cancel banner once.
+        raise
     except Exception as e:
         emit_progress(f"Error: {e}")
         return False
+    finally:
+        # Reset the per-run override so the next video doesn't inherit it.
+        _ai_call_override.provider = None
+        _ai_call_override.model    = None
 
 
 # ── Auto-hide ────────────────────────────────────────────────────────────────
@@ -856,6 +948,15 @@ def _worker_loop():
         emit_progress(f"--- Video {_analysis_state['completed'] + 1}/{_analysis_state['total']} ---")
         try:
             ok = _analyze_one(vid_id, force, overrides=overrides)
+        except AnalysisCancelled:
+            with _analysis_lock:
+                _analysis_state["completed"] += 1
+                _analysis_state["queued"].clear()
+                _analysis_state["cancel"] = False  # consume the flag
+            emit_pct(0.0, "cancelled")
+            emit_progress(f"VIDEO:{vid_id}:cancelled")
+            emit_progress("Analysis cancelled by user.")
+            continue
         except ai_cli.AIQuotaError:
             # Hard provider failure — drain the queue and stop. Anything
             # already saved stays; the user can re-run later or switch
@@ -891,6 +992,9 @@ def _start_worker(items):
         _analysis_state["queued"] = list(items)
         _analysis_state["completed"] = 0
         _analysis_state["total"] = len(items)
+        _analysis_state["cancel"] = False
+        _analysis_state["pct"] = 0.0
+        _analysis_state["stage"] = ""
     # Drain any stale messages
     while not progress_queue.empty():
         try:
@@ -927,12 +1031,57 @@ def run_analysis(video_id):
         overrides["whisper_language"] = (data.get("whisper_language") or "").strip()
     if "whisper_translate" in data:
         overrides["whisper_translate"] = bool(data["whisper_translate"])
+    # Per-video LLM override picked in the ⚙ popover. Either may be set
+    # alone (override just provider, or just model) — _analyze_one passes
+    # both straight through to ai_cli.call_ai which knows what to do.
+    if data.get("ai_provider"):
+        overrides["ai_provider"] = data["ai_provider"].strip()
+    if data.get("ai_model"):
+        overrides["ai_model"] = data["ai_model"].strip()
 
     item = {"id": video_id, "force": force}
     if overrides:
         item["overrides"] = overrides
     _start_worker([item])
     return jsonify({"status": "started"})
+
+
+@analyzer_bp.route("/analyze/cancel", methods=["POST"])
+def cancel_analysis():
+    """Request a cooperative cancel of the currently-running analysis.
+    Worker checks the flag at major boundaries and raises
+    ``AnalysisCancelled`` to exit cleanly + drain the queue. Returns
+    immediately; the actual cancellation may take a few seconds to
+    propagate through whatever phase is in flight."""
+    with _analysis_lock:
+        running = _analysis_state["running"]
+        if running:
+            _analysis_state["cancel"] = True
+    if not running:
+        return jsonify({"ok": False, "error": "Nothing is analyzing right now"}), 409
+    emit_progress("Cancel requested — finishing current step…")
+    return jsonify({"ok": True})
+
+
+@analyzer_bp.route("/analyze/api/models")
+def analyze_api_models():
+    """Cross-provider model catalog for the /analyze ⚙ popover. Mirrors
+    /wizard/api/models so the visual / audio dropdowns can list every
+    available model grouped by provider."""
+    cfg = ai_cli.get_config()
+    groups = []
+    for key, p in cfg["providers"].items():
+        groups.append({
+            "provider":  key,
+            "label":     p.get("label", key),
+            "bin_found": bool(p.get("bin_found")),
+            "default":   p.get("model"),
+            "models":    list(p.get("models") or []),
+        })
+    return jsonify({
+        "groups": groups,
+        "task_default": cfg["tasks"].get("analysis"),
+    })
 
 
 @analyzer_bp.route("/analyze/run-all", methods=["POST"])
@@ -1065,7 +1214,7 @@ def _import_worker(platform, external_id, page_url, title):
 @analyzer_bp.route("/analyze/imports/<platform>/<path:external_id>",
                    methods=["POST"])
 def analyze_imports_one(platform, external_id):
-    if platform not in ("youtube", "tiktok", "instagram"):
+    if platform not in ("youtube", "tiktok", "instagram", "url"):
         return jsonify({"ok": False, "error": "Unknown platform"}), 400
     cur = _import_state.get(external_id)
     if cur and cur.get("running"):
@@ -1083,6 +1232,95 @@ def analyze_imports_one(platform, external_id):
     )
     t.start()
     return jsonify({"ok": True})
+
+
+@analyzer_bp.route("/analyze/imports/url", methods=["POST"])
+def analyze_imports_url():
+    """Generic "From URL" import — kicks off the same yt-dlp pipeline used
+    for socials. If the URL points at a known social (YouTube, TikTok,
+    Instagram), routes it through that platform's specific handling so
+    cookies + 403 messaging match what the social-channel flow does.
+    Otherwise uses the synthetic ``"url"`` platform with no platform
+    rewriting (works for any site yt-dlp supports)."""
+    data = request.get_json(silent=True) or {}
+    url = (data.get("url") or "").strip()
+    if not url:
+        return jsonify({"ok": False, "error": "url is required"}), 400
+    if not (url.startswith("http://") or url.startswith("https://")):
+        return jsonify({"ok": False,
+                        "error": "url must start with http:// or https://"}), 400
+    # Sniff the platform from the host so YouTube live links etc. get the
+    # YouTube-specific cookies + 403-with-context error path. Falls back to
+    # the synthetic "url" platform for sites we don't have first-class
+    # handling for.
+    low = url.lower()
+    if "youtube.com" in low or "youtu.be" in low:
+        platform = "youtube"
+    elif "tiktok.com" in low:
+        platform = "tiktok"
+    elif "instagram.com" in low:
+        platform = "instagram"
+    else:
+        platform = "url"
+    # Stable id derived from the URL so re-importing the same URL is a no-op
+    # and import status polling has a deterministic key.
+    import hashlib
+    external_id = hashlib.md5(url.encode("utf-8")).hexdigest()[:16]
+    cur = _import_state.get(external_id)
+    if cur and cur.get("running"):
+        return jsonify({"ok": False, "error": "Already running",
+                        "external_id": external_id}), 409
+    import threading
+    threading.Thread(
+        target=_import_worker,
+        args=(platform, external_id, url, url),
+        daemon=True,
+    ).start()
+    return jsonify({"ok": True, "external_id": external_id,
+                    "platform": platform})
+
+
+@analyzer_bp.route("/analyze/imports/upload", methods=["POST"])
+def analyze_imports_upload():
+    """Accept a video file uploaded from the user's machine. Saves it into
+    the source folder, registers it, and queues it for analysis."""
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify({"ok": False, "error": "No file uploaded"}), 400
+    # Sanitize the filename so a malicious name (../, leading /) can't escape
+    # the source folder.
+    from werkzeug.utils import secure_filename
+    safe = secure_filename(f.filename)
+    if not safe:
+        return jsonify({"ok": False, "error": "Invalid filename"}), 400
+    if Path(safe).suffix.lower() not in VIDEO_EXTENSIONS:
+        return jsonify({"ok": False,
+                        "error": f"Unsupported file type: {Path(safe).suffix}"}), 400
+    VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+    # If a file with that name already exists, append a numeric suffix so we
+    # don't silently clobber an earlier import.
+    dest = VIDEO_DIR / safe
+    if dest.exists():
+        stem, suffix = dest.stem, dest.suffix
+        n = 2
+        while (VIDEO_DIR / f"{stem}-{n}{suffix}").exists():
+            n += 1
+        dest = VIDEO_DIR / f"{stem}-{n}{suffix}"
+    f.save(str(dest))
+    try:
+        from db import register_video as _rv
+        video_id = _rv(dest)
+    except Exception as e:
+        try:
+            dest.unlink()
+        except Exception:
+            pass
+        return jsonify({"ok": False, "error": f"Register failed: {e}"}), 500
+    # Queue for analysis using the same worker the row-level "Visual"/"Audio"
+    # buttons use.
+    _start_worker([{"id": video_id, "force": False}])
+    return jsonify({"ok": True, "video_id": video_id,
+                    "filename": dest.name})
 
 
 @analyzer_bp.route("/analyze/imports/status/<path:external_id>")
@@ -1237,7 +1475,7 @@ ANALYZE_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ClipBuilder - Video Analysis</title>
+<title>ClipBuilder - Input Videos</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{
@@ -1282,8 +1520,23 @@ td{font-size:13px}
 
 /* -- Per-mode status badges (Visual / Audio) -- */
 .status-stack{display:flex;flex-direction:column;gap:4px;align-items:flex-start}
-.status-line{display:inline-flex;align-items:center;gap:6px}
+.status-line{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
 .status-line .status-prov{display:inline-flex;align-items:center}
+/* Inline progress bar that lives alongside the analyzing badge so the
+ * user can see how far through extraction / tagging / transcription
+ * the current pass is. Width is animated live from PCT: SSE messages. */
+.status-line .status-bar{
+  width:90px;height:5px;background:#1a1a22;border-radius:3px;
+  overflow:hidden;flex-shrink:0;
+}
+.status-line .status-bar-fill{
+  height:100%;
+  background:linear-gradient(90deg,#1976d2,#42a5f5);
+  transition:width .25s ease;
+}
+.status-line .status-stage{
+  font-size:10px;color:#90caf9;font-weight:600;
+}
 .status-stack .status-badge{
   display:inline-flex;align-items:center;gap:5px;
   padding:2px 8px 2px 6px;
@@ -1511,6 +1764,30 @@ td{font-size:13px}
   line-height:1;cursor:pointer;padding:0 6px;
 }
 .imp-close:hover{color:#fff}
+.imp-back{
+  background:#1a1a22;border:1px solid #2e2e3e;color:#aaa;
+  font-size:12px;font-weight:600;cursor:pointer;
+  padding:6px 12px;border-radius:6px;margin-right:10px;
+}
+.imp-back:hover{color:#fff;border-color:#666}
+.imp-source-picker{
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
+  gap:12px;padding:8px 20px 20px;
+}
+.imp-source-btn{
+  background:#15151c;border:1px solid #2e2e3e;border-radius:10px;
+  padding:18px 14px;cursor:pointer;color:#ddd;
+  display:flex;flex-direction:column;align-items:center;gap:10px;
+  transition:background .15s,border-color .15s,transform .12s;
+  text-align:center;
+}
+.imp-source-btn:hover{background:#1a1a22;border-color:#666;transform:translateY(-1px)}
+.imp-source-btn .imp-src-icon{
+  width:36px;height:36px;display:flex;align-items:center;justify-content:center;
+}
+.imp-source-btn .imp-src-icon svg{width:36px;height:36px}
+.imp-source-btn .imp-src-label{font-size:13px;font-weight:600;color:#fff}
+.imp-source-btn .imp-src-sub{font-size:10px;color:#888}
 .imp-help{padding:0 20px;color:#888;font-size:12px;margin:10px 0}
 .imp-status{padding:0 20px;font-size:12px;min-height:18px;color:#888}
 .imp-status.err{color:#ef4444}
@@ -1616,7 +1893,8 @@ td{font-size:13px}
           title="Hide low-quality scenes and ones similar to your down-voted scenes">
     Auto Hide
   </button>
-  <button class="primary" id="analyze-all-btn" onclick="analyzeAll()" style="display:none">Analyze All</button>
+  <button class="primary" id="analyze-all-btn" onclick="analyzeAll()" style="display:none">✨ Analyze All</button>
+  <button id="analyze-cancel-btn" onclick="cancelAnalysis()" style="display:none;background:#c62828;border:1px solid #c62828;color:#fff;padding:7px 14px;border-radius:6px;cursor:pointer;font-weight:600">Cancel Analysis</button>
   <span id="scan-status" style="font-size:13px;color:#888"></span>
 </div>
 
@@ -1627,15 +1905,39 @@ td{font-size:13px}
 <div id="imp-overlay" class="imp-overlay" onclick="if(event.target===this)closeImports()">
   <div class="imp-modal">
     <div class="imp-header">
-      <h2>Import Videos</h2>
+      <h2 id="imp-title">Import Videos</h2>
+      <button id="imp-back-btn" class="imp-back" onclick="impGoToPicker()"
+              style="display:none">&larr; Back</button>
       <button class="imp-close" onclick="closeImports()" title="Close">&times;</button>
     </div>
-    <p class="imp-help">
-      Lists videos from the IG / TikTok / YouTube channels in your Settings.
-      Already-imported videos are hidden. Click <b>Import</b> to download +
-      auto-analyze.
+    <p id="imp-help" class="imp-help">
+      Pick a source. Configured social channels come from your
+      <a href="/settings" style="color:#1976d2">Settings</a> page.
     </p>
     <div id="imp-status" class="imp-status muted"></div>
+
+    <!-- Source picker (step 1) -->
+    <div id="imp-source-picker" class="imp-source-picker"></div>
+
+    <!-- URL entry (step 2 for "From URL") -->
+    <div id="imp-url-form" style="display:none;padding:0 20px 20px 20px">
+      <label style="font-size:12px;color:#888;display:block;margin-bottom:6px">Video URL</label>
+      <input id="imp-url-input" type="url"
+             placeholder="https://… (YouTube, TikTok, Vimeo, Twitter, etc.)"
+             style="width:100%;padding:10px 12px;background:#0c0c14;border:1px solid #2e2e3e;color:#eee;border-radius:6px;font-size:13px;box-sizing:border-box">
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
+        <button onclick="impGoToPicker()"
+                style="background:#1a1a22;border:1px solid #2e2e3e;color:#aaa;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:12px">Cancel</button>
+        <button class="primary" onclick="impDownloadFromUrl()"
+                style="background:#1976d2;border:1px solid #1976d2;color:#fff;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600">Download</button>
+      </div>
+    </div>
+
+    <!-- Hidden file input for "From Disk" — triggers Finder. -->
+    <input id="imp-file-input" type="file" accept="video/*,.mp4,.mov,.avi,.mkv,.webm,.m4v"
+           style="display:none" onchange="impUploadFromDisk(event)">
+
+    <!-- Platform-specific listings (step 2 for social channels) -->
     <div id="imp-platforms"></div>
   </div>
 </div>
@@ -1707,7 +2009,48 @@ var videos = [];
 var analyzing = false;
 var analyzingVideoId = null;
 var analyzingMode = null;       // 'visual' | 'speech' | null
+var analyzingPct = 0;           // 0.0-1.0 progress within the current video
+var analyzingStage = '';        // short label shown next to the bar
 var evtSource = null;
+
+// Toggle the Cancel-Analysis button in the controls bar in lockstep with
+// the `analyzing` flag. Kept separate so every place that flips
+// `analyzing` doesn't have to remember the button.
+function _updateCancelBtn() {
+  var btn = document.getElementById('analyze-cancel-btn');
+  if (!btn) return;
+  btn.style.display = analyzing ? '' : 'none';
+  btn.disabled = false;
+  if (analyzing) btn.textContent = 'Cancel Analysis';
+}
+
+async function cancelAnalysis() {
+  var btn = document.getElementById('analyze-cancel-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Cancelling…'; }
+  try {
+    var r = await fetch('/analyze/cancel', {method:'POST'});
+    var d = await r.json();
+    if (d.ok === false) addLine(d.error || 'Cancel failed', 'error');
+  } catch (e) {
+    addLine('Cancel failed: ' + e.message, 'error');
+  }
+}
+
+// Update the analyzing badge's progress bar + stage text without rebuilding
+// the whole table. Looks up the row's mode-specific badge by data attrs.
+function _updateProgressBadge() {
+  if (!analyzingVideoId) return;
+  var bar = document.querySelector(
+    '.status-line[data-vid="' + analyzingVideoId + '"]'
+    + '[data-kind="' + (analyzingMode || '') + '"] .status-bar-fill');
+  var lbl = document.querySelector(
+    '.status-line[data-vid="' + analyzingVideoId + '"]'
+    + '[data-kind="' + (analyzingMode || '') + '"] .status-stage');
+  if (bar) bar.style.width = Math.round((analyzingPct || 0) * 100) + '%';
+  if (lbl) lbl.textContent = analyzingStage
+    ? ' (' + analyzingStage + ' · ' + Math.round((analyzingPct || 0) * 100) + '%)'
+    : '';
+}
 
 async function scanVideos() {
   document.getElementById('scan-status').textContent = 'Scanning...';
@@ -1731,16 +2074,186 @@ var IMP_PLATFORM_LABEL = {
   instagram: 'Instagram',
 };
 
+// Step-1 source picker. When this is non-empty, loadImports() filters its
+// rendering to only this platform. "url" and "disk" use bespoke flows
+// instead of /analyze/imports.
+var _impSelectedSource = null;
+
 function openImports(){
   document.getElementById('imp-overlay').classList.add('active');
-  document.getElementById('imp-platforms').innerHTML =
-    '<div class="imp-empty">Querying your channels…</div>';
   setImpStatus('', '');
-  loadImports();
+  impGoToPicker();
 }
 
 function closeImports(){
   document.getElementById('imp-overlay').classList.remove('active');
+}
+
+// Switch the modal back to the source-picker view. Renders the buttons
+// from the active brand profile's socials + the universal URL/Disk options.
+function impGoToPicker(){
+  _impSelectedSource = null;
+  document.getElementById('imp-title').textContent = 'Import Videos';
+  document.getElementById('imp-help').innerHTML =
+    'Pick a source. Configured social channels come from your '
+    + '<a href="/settings" style="color:#1976d2">Settings</a> page.';
+  document.getElementById('imp-back-btn').style.display = 'none';
+  document.getElementById('imp-url-form').style.display = 'none';
+  document.getElementById('imp-platforms').innerHTML = '';
+  setImpStatus('', '');
+  renderImpSourcePicker();
+}
+
+// Inline SVG icons keyed by source. Kept simple/recognizable, brand colors.
+var IMP_SOURCE_ICONS = {
+  instagram: '<svg viewBox="0 0 24 24" fill="#E4405F"><path d="M7.8 2h8.4C19.4 2 22 4.6 22 7.8v8.4a5.8 5.8 0 0 1-5.8 5.8H7.8C4.6 22 2 19.4 2 16.2V7.8A5.8 5.8 0 0 1 7.8 2m-.2 2A3.6 3.6 0 0 0 4 7.6v8.8C4 18.39 5.61 20 7.6 20h8.8a3.6 3.6 0 0 0 3.6-3.6V7.6C20 5.61 18.39 4 16.4 4H7.6m9.65 1.5a1.25 1.25 0 1 1 0 2.5a1.25 1.25 0 0 1 0-2.5M12 7a5 5 0 1 1 0 10a5 5 0 0 1 0-10m0 2a3 3 0 1 0 0 6a3 3 0 0 0 0-6z"/></svg>',
+  tiktok:    '<svg viewBox="0 0 24 24"><path fill="#25F4EE" d="M19.6 6.3a4.8 4.8 0 0 1-2.5-2.3h-2.4v12.5a2.6 2.6 0 1 1-2.5-2.7v-2.5a5 5 0 1 0 5 5V8.1a7 7 0 0 0 4 1.3V7a4.8 4.8 0 0 1-1.6-.7z"/><path fill="#FE2C55" d="M21.6 5.6a4.8 4.8 0 0 1-2.5-2.3h-2.4v12.5a2.6 2.6 0 1 1-2.5-2.7v-2.5a5 5 0 1 0 5 5V7.4a7 7 0 0 0 4 1.3V6.3a4.8 4.8 0 0 1-1.6-.7z" opacity=".6"/></svg>',
+  youtube:   '<svg viewBox="0 0 24 24" fill="#FF0000"><path d="M23 7.2a2.8 2.8 0 0 0-2-2C19.3 4.8 12 4.8 12 4.8s-7.3 0-9 .4a2.8 2.8 0 0 0-2 2C0.7 8.8 0.7 12 0.7 12s0 3.2.4 4.8c.2.9 1 1.7 2 2C2.7 19.2 12 19.2 12 19.2s7.3 0 9-.4a2.8 2.8 0 0 0 2-2c.4-1.6.4-4.8.4-4.8s0-3.2-.4-4.8zM9.6 15.4V8.6L15.6 12l-6 3.4z"/></svg>',
+  url:       '<svg viewBox="0 0 24 24" fill="#4dabf7"><path d="M3.9 12a3.1 3.1 0 0 1 3.1-3.1h4V7H7a5 5 0 0 0 0 10h4v-1.9H7A3.1 3.1 0 0 1 3.9 12zM8 13h8v-2H8v2zm9-6h-4v1.9h4a3.1 3.1 0 0 1 0 6.2h-4V17h4a5 5 0 0 0 0-10z"/></svg>',
+  disk:      '<svg viewBox="0 0 24 24" fill="#fbb938"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>',
+};
+
+async function renderImpSourcePicker(){
+  var picker = document.getElementById('imp-source-picker');
+  picker.style.display = '';
+  picker.innerHTML = '<div class="imp-empty" style="grid-column:1/-1">Loading sources…</div>';
+
+  // Read configured socials from /settings so the picker only shows
+  // platforms the user actually filled in.
+  var cfg = null;
+  try {
+    cfg = await fetch('/settings/api/app').then(function(r){return r.json()});
+  } catch (e) { /* fall back to no socials */ }
+  var socials = (cfg && cfg.socials) || {};
+
+  var buttons = [];
+  ['instagram','tiktok','youtube'].forEach(function(plat) {
+    var slot = socials[plat] || {};
+    var has = (slot.handle && slot.handle.trim())
+           || (slot.url    && slot.url.trim());
+    if (!has) return;
+    var label = (IMP_PLATFORM_LABEL[plat] || plat);
+    var sub = slot.handle || slot.url || '';
+    buttons.push({
+      kind: 'platform', key: plat, label: label, sub: sub,
+    });
+  });
+  buttons.push({kind:'url',  key:'url',  label:'From URL',  sub:'Paste any video link'});
+  buttons.push({kind:'disk', key:'disk', label:'From Disk', sub:'Pick a local file'});
+
+  var html = '';
+  for (var i = 0; i < buttons.length; i++) {
+    var b = buttons[i];
+    var icon = IMP_SOURCE_ICONS[b.key] || '';
+    html += '<button class="imp-source-btn" data-source="' + b.key
+         +  '" data-kind="' + b.kind + '">'
+         +    '<span class="imp-src-icon">' + icon + '</span>'
+         +    '<span class="imp-src-label">' + escImp(b.label) + '</span>'
+         +    (b.sub ? '<span class="imp-src-sub">' + escImp(b.sub) + '</span>' : '')
+         +  '</button>';
+  }
+  picker.innerHTML = html;
+
+  // Wire clicks. Using event delegation since the buttons are re-rendered.
+  picker.querySelectorAll('.imp-source-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var kind = btn.dataset.kind;
+      var key  = btn.dataset.source;
+      if (kind === 'platform')   impShowPlatform(key);
+      else if (kind === 'url')   impShowUrlForm();
+      else if (kind === 'disk')  document.getElementById('imp-file-input').click();
+    });
+  });
+}
+
+function impShowPlatform(platform){
+  _impSelectedSource = platform;
+  document.getElementById('imp-source-picker').style.display = 'none';
+  document.getElementById('imp-back-btn').style.display = '';
+  document.getElementById('imp-title').textContent =
+    'Import from ' + (IMP_PLATFORM_LABEL[platform] || platform);
+  document.getElementById('imp-help').textContent =
+    'Click Import to download + auto-analyze. Already-imported videos are hidden.';
+  document.getElementById('imp-platforms').innerHTML =
+    '<div class="imp-empty">Querying your channel…</div>';
+  loadImports();
+}
+
+function impShowUrlForm(){
+  _impSelectedSource = 'url';
+  document.getElementById('imp-source-picker').style.display = 'none';
+  document.getElementById('imp-back-btn').style.display = '';
+  document.getElementById('imp-title').textContent = 'Import from URL';
+  document.getElementById('imp-help').textContent =
+    'Paste the URL of a video on any site yt-dlp supports (YouTube, Vimeo, Twitter/X, etc.).';
+  document.getElementById('imp-url-form').style.display = '';
+  var input = document.getElementById('imp-url-input');
+  input.value = '';
+  setTimeout(function(){ input.focus(); }, 50);
+}
+
+async function impDownloadFromUrl(){
+  var url = (document.getElementById('imp-url-input').value || '').trim();
+  if (!url) { setImpStatus('Enter a URL first.', 'err'); return; }
+  setImpStatus('Starting download…', '');
+  try {
+    var r = await fetch('/analyze/imports/url', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({url: url}),
+    });
+    var d = await r.json();
+    if (!r.ok || d.ok === false) {
+      setImpStatus('Failed: ' + (d.error || 'unknown'), 'err');
+      return;
+    }
+    setImpStatus('Downloading… (continuing in background)', 'ok');
+    // Poll the existing import-status endpoint for completion so the user
+    // sees a clear success/error before we close the modal.
+    _pollUrlImport(d.external_id);
+  } catch (e) {
+    setImpStatus('Failed: ' + e.message, 'err');
+  }
+}
+
+function _pollUrlImport(extId){
+  var poll = setInterval(function(){
+    fetch('/analyze/imports/status/' + encodeURIComponent(extId))
+      .then(function(r){ return r.json(); })
+      .then(function(s){
+        if (s.done) {
+          clearInterval(poll);
+          if (s.ok) {
+            setImpStatus('Downloaded — analysis queued.', 'ok');
+            scanVideos();
+          } else {
+            setImpStatus('Failed: ' + (s.error || 'unknown'), 'err');
+          }
+        } else if (s.log && s.log.length) {
+          setImpStatus(s.log[s.log.length - 1], '');
+        }
+      }).catch(function(){});
+  }, 1500);
+}
+
+async function impUploadFromDisk(ev){
+  var f = ev.target.files && ev.target.files[0];
+  ev.target.value = '';   // allow re-picking the same file
+  if (!f) return;
+  setImpStatus('Uploading ' + f.name + '…', '');
+  try {
+    var fd = new FormData();
+    fd.append('file', f);
+    var r = await fetch('/analyze/imports/upload', {method:'POST', body: fd});
+    var d = await r.json();
+    if (!r.ok || d.ok === false) {
+      setImpStatus('Upload failed: ' + (d.error || 'unknown'), 'err');
+      return;
+    }
+    setImpStatus('Imported ' + d.filename + ' — analysis queued.', 'ok');
+    scanVideos();
+  } catch (e) {
+    setImpStatus('Upload failed: ' + e.message, 'err');
+  }
 }
 
 function setImpStatus(text, cls){
@@ -1821,13 +2334,28 @@ async function loadImports(){
     var root = document.getElementById('imp-platforms');
     root.innerHTML = '';
 
-    var keys = Object.keys(d.platforms || {});
+    var allKeys = Object.keys(d.platforms || {});
     var errors = d.errors || {};
     var warnings = d.warnings || {};
+    // When a single platform was picked in the source-picker, filter
+    // everything (sections, errors, warnings) to just that platform so
+    // the user isn't shown noise from unrelated channels.
+    var keys = _impSelectedSource
+      ? allKeys.filter(function(k){ return k === _impSelectedSource; })
+      : allKeys;
+    if (_impSelectedSource) {
+      var fe = {}; if (errors[_impSelectedSource]) fe[_impSelectedSource] = errors[_impSelectedSource];
+      errors = fe;
+      var fw = {}; if (warnings[_impSelectedSource]) fw[_impSelectedSource] = warnings[_impSelectedSource];
+      warnings = fw;
+    }
     if (!keys.length && !Object.keys(errors).length) {
       root.innerHTML = '<div class="imp-empty">'
-        + 'No social channels configured. Open <a href="/settings" style="color:#ff5252">Settings</a> '
-        + 'and fill in at least an IG, TikTok, or YouTube handle.</div>';
+        + (_impSelectedSource
+            ? 'No videos available for this channel.'
+            : 'No social channels configured. Open <a href="/settings" style="color:#ff5252">Settings</a> '
+              + 'and fill in at least an IG, TikTok, or YouTube handle.')
+        + '</div>';
       return;
     }
 
@@ -2061,7 +2589,8 @@ function _modeStatus(v, kind) {
     ? !!(v.speech_analyzed_at || v.has_transcript)
     : !!v.visual_analyzed_at;
   var cls, text;
-  if (analyzing && analyzingVideoId === v.id && analyzingMode === kind) {
+  var isThisAnalyzing = (analyzing && analyzingVideoId === v.id && analyzingMode === kind);
+  if (isThisAnalyzing) {
     cls = 'status-analyzing';
     text = label + ' analyzing\u2026';
   } else if (kind === 'speech') {
@@ -2083,13 +2612,26 @@ function _modeStatus(v, kind) {
     ? ' <span class="status-prov" title="Tagged by ' + prov + '">'
       + window.pgAiBadge(prov, {size:13}) + '</span>'
     : '';
-  return '<div class="status-line">'
+  // Inline progress bar — visible only while THIS badge represents the
+  // running analysis. Width is updated live by _updateProgressBadge()
+  // from PCT: SSE messages so we don't re-render the whole table.
+  var pctNow = isThisAnalyzing ? Math.round((analyzingPct || 0) * 100) : 0;
+  var stageText = (isThisAnalyzing && analyzingStage)
+    ? ' (' + analyzingStage + ' · ' + pctNow + '%)' : '';
+  var barHtml = isThisAnalyzing
+    ? '<div class="status-bar"><div class="status-bar-fill" style="width:'
+        + pctNow + '%"></div></div>'
+        + '<span class="status-stage">' + stageText + '</span>'
+    : '';
+  return '<div class="status-line" data-vid="' + v.id
+    + '" data-kind="' + kind + '">'
     + '<span class="status-badge ' + cls + '">' + icon + text + '</span>'
-    + aiInline
+    + aiInline + barHtml
     + '</div>';
 }
 
 function renderList() {
+  _updateCancelBtn();
   var tbody = document.getElementById('video-list');
   tbody.innerHTML = '';
   if (videos.length === 0) {
@@ -2118,10 +2660,10 @@ function renderList() {
         '<div class="row-actions">'
       +   '<button class="ra-btn"' + disabled
       +   ' onclick="analyzeVideoMode(' + v.id + ',\'visual\')"'
-      +   ' title="Visual analysis (frame sampling)">Visual</button>'
+      +   ' title="Visual analysis (frame sampling)">✨ Visual</button>'
       +   '<button class="ra-btn"' + disabled
       +   ' onclick="analyzeVideoMode(' + v.id + ',\'speech\')"'
-      +   ' title="Speech analysis (Whisper transcript)">Audio</button>'
+      +   ' title="Speech analysis (Whisper transcript)">✨ Audio</button>'
       +   txBtn
       +   '<button class="ra-cog ra-cog-end"' + disabled
       +   ' onclick="openAnalyzeOpts(event,' + v.id + ',\'both\')"'
@@ -2168,15 +2710,34 @@ function connectSSE() {
       analyzing = false;
       analyzingVideoId = null;
       analyzingMode = null;
+      analyzingPct = 0; analyzingStage = '';
+      _updateCancelBtn();
       addLine('All done!', 'done');
       scanVideos();
       return;
     }
-    var m = msg.match(/^VIDEO:(\d+):(ok|error)$/);
+    var m = msg.match(/^VIDEO:(\d+):(ok|error|cancelled)$/);
     if (m) {
-      var ok = m[2] === 'ok';
-      addLine(ok ? 'Video complete' : 'Video failed', ok ? 'done' : 'error');
+      var status = m[2];
+      var line = status === 'ok' ? 'Video complete'
+                : status === 'cancelled' ? 'Video cancelled'
+                : 'Video failed';
+      var cls = status === 'ok' ? 'done' : status === 'cancelled' ? '' : 'error';
+      addLine(line, cls);
+      analyzingPct = 0; analyzingStage = '';
+      _updateProgressBadge();
       scanVideos();
+      return;
+    }
+    // PCT:<frac>:<stage> — granular per-video progress. Server emits this
+    // at each phase boundary so we can render a bar inside the row's
+    // analyzing badge.
+    if (msg.indexOf('PCT:') === 0) {
+      var rest = msg.slice(4);
+      var sep = rest.indexOf(':');
+      analyzingPct = parseFloat(sep >= 0 ? rest.slice(0, sep) : rest) || 0;
+      analyzingStage = sep >= 0 ? rest.slice(sep + 1) : '';
+      _updateProgressBadge();
       return;
     }
     if (msg !== 'waiting...') addLine(msg);
@@ -2212,6 +2773,8 @@ function analyzeVideoMode(videoId, mode, opts) {
     if (opts.whisper_model)    body.whisper_model    = opts.whisper_model;
     if ('whisper_language' in opts) body.whisper_language = opts.whisper_language;
     if ('whisper_translate' in opts) body.whisper_translate = !!opts.whisper_translate;
+    if (opts.ai_provider) body.ai_provider = opts.ai_provider;
+    if (opts.ai_model)    body.ai_model    = opts.ai_model;
   }
 
   fetch('/analyze/run/' + videoId, {
@@ -2243,9 +2806,50 @@ async function _aoptsLoadProfile() {
   return _aoptsProfile;
 }
 
+// Cached AI model catalog (loaded once, refreshed if the popover is
+// reopened so Settings changes propagate). Shape: see /analyze/api/models.
+var _aoptsModelCatalog = null;
+async function _aoptsLoadModels() {
+  if (_aoptsModelCatalog) return _aoptsModelCatalog;
+  try {
+    _aoptsModelCatalog = await fetch('/analyze/api/models')
+      .then(function(r){ return r.json(); });
+  } catch (e) {
+    _aoptsModelCatalog = {groups: [], task_default: ''};
+  }
+  return _aoptsModelCatalog;
+}
+
+// Build the <select> markup for an "LLM" model picker. Value encodes
+// provider+model as "provider::model" so we can split it on submit.
+// An empty value means "use the configured default (Task → Provider on
+// /settings)" so the user can opt out of the override per-run.
+function _aoptsBuildModelSelect(elId, catalog) {
+  var html = '<select id="' + elId + '">'
+    + '<option value="">Configured default ('
+    +   (catalog.task_default || 'n/a') + ')</option>';
+  var groups = catalog.groups || [];
+  for (var gi = 0; gi < groups.length; gi++) {
+    var g = groups[gi];
+    var label = g.label + (g.bin_found ? '' : '  (binary missing)');
+    html += '<optgroup label="' + label + '">';
+    var models = g.models || [];
+    for (var mi = 0; mi < models.length; mi++) {
+      var m = models[mi];
+      var optLabel = m + (m === g.default ? '   (provider default)' : '');
+      html += '<option value="' + g.provider + '::' + m + '">'
+            + optLabel + '</option>';
+    }
+    html += '</optgroup>';
+  }
+  html += '</select>';
+  return html;
+}
+
 async function openAnalyzeOpts(evt, videoId, _mode) {
   evt.stopPropagation();
   var prof = await _aoptsLoadProfile();
+  var catalog = await _aoptsLoadModels();
   var pop = document.getElementById('aopts');
 
   // Combined Visual + Audio settings popover. Each section has its own
@@ -2261,16 +2865,24 @@ async function openAnalyzeOpts(evt, videoId, _mode) {
   // ── Visual section ──
   html += '<div class="aopts-section">'
     + '<div class="aopts-section-title">Visual</div>'
-    + '<div class="aopts-help" style="margin:0">'
-    + 'Frame-sampling is fixed for now — no tunables yet.</div>'
+    + '<label class="field">LLM (frame tagging)</label>'
+    + _aoptsBuildModelSelect('aopts-visual-llm', catalog)
+    + '<div class="aopts-help" style="margin-top:6px">'
+    + 'Picks which model tags frames for this video. Defaults to the '
+    + '<b>analysis</b> task provider on /settings.</div>'
     + '<div class="aopts-section-action">'
-    + '<button class="go" onclick="runAnalyzeOpts(' + videoId + ',\'visual\')">Run Visual</button>'
+    + '<button class="go" onclick="runAnalyzeOpts(' + videoId + ',\'visual\')">✨ Run Visual</button>'
     + '</div>'
     + '</div>';
 
   // ── Audio section ──
   html += '<div class="aopts-section">'
     + '<div class="aopts-section-title">Audio (Speech)</div>'
+    + '<label class="field">LLM (scene tagging)</label>'
+    + _aoptsBuildModelSelect('aopts-audio-llm', catalog)
+    + '<div class="aopts-help" style="margin-top:6px;margin-bottom:8px">'
+    + 'Whisper handles transcription; this LLM tags each transcript '
+    + 'segment with scene tags.</div>'
     + '<label class="field">Whisper model</label>'
     + '<select id="aopts-model">'
     + '  <option value="tiny">tiny — 39 MB</option>'
@@ -2284,7 +2896,7 @@ async function openAnalyzeOpts(evt, videoId, _mode) {
     + '<label class="tog"><input type="checkbox" id="aopts-translate"> '
     + 'Translate transcript to English</label>'
     + '<div class="aopts-section-action">'
-    + '<button class="go" onclick="runAnalyzeOpts(' + videoId + ',\'speech\')">Run Audio</button>'
+    + '<button class="go" onclick="runAnalyzeOpts(' + videoId + ',\'speech\')">✨ Run Audio</button>'
     + '</div>'
     + '</div>';
 
@@ -2321,6 +2933,17 @@ function closeAnalyzeOpts() {
 
 function runAnalyzeOpts(videoId, mode) {
   var opts = {force: !!document.getElementById('aopts-force').checked};
+  // Per-mode LLM override. Stored as "provider::model" so the empty value
+  // ("Configured default") cleanly produces no override.
+  var llmEl = document.getElementById(
+    mode === 'speech' ? 'aopts-audio-llm' : 'aopts-visual-llm');
+  if (llmEl && llmEl.value) {
+    var sep = llmEl.value.indexOf('::');
+    if (sep > 0) {
+      opts.ai_provider = llmEl.value.slice(0, sep);
+      opts.ai_model    = llmEl.value.slice(sep + 2);
+    }
+  }
   if (mode === 'speech') {
     var m = document.getElementById('aopts-model');
     var l = document.getElementById('aopts-lang');
@@ -2727,6 +3350,10 @@ async function checkState() {
       analyzing = true;
       analyzingVideoId = state.video_id;
       analyzingMode = state.mode || null;
+      // Re-attach to the in-flight pct/stage so the progress bar paints
+      // immediately on reload instead of waiting for the next PCT: tick.
+      analyzingPct = typeof state.pct === 'number' ? state.pct : 0;
+      analyzingStage = state.stage || '';
       var prog = document.getElementById('progress');
       prog.classList.add('active');
       addLine('Reconnected — analyzing ' + (state.video_name || 'video') +

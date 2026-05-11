@@ -381,6 +381,13 @@ nav a.active{color:#e53935;border-color:#e53935}
     <span class="search-status" id="search-status"></span>
     <button class="search-clear" id="search-clear" onclick="clearSearch()" style="display:none">Clear</button>
   </div>
+  <div class="search-row" style="margin-top:-4px">
+    <label for="file-filter" style="font-size:12px;color:#888;flex-shrink:0">Filter by file:</label>
+    <select id="file-filter" class="search-input" onchange="setFileFilter(this.value)"
+            style="flex:1;cursor:pointer">
+      <option value="">All files</option>
+    </select>
+  </div>
   <div class="tag-bar" id="tag-bar"></div>
   <div class="scene-count" id="scene-count"></div>
   <div class="scene-grid" id="scene-grid"></div>
@@ -407,13 +414,43 @@ nav a.active{color:#e53935;border-color:#e53935}
 <script>
 var allScenes = [];
 var activeTag = '';
+var activeFile = '';         // filename selected in the file-filter dropdown; '' = all
 var searchQuery = '';        // current text query
 var searchHitIds = null;     // null = no search active; Set of scene_ids when active
 var searchTimer = null;
 
 async function init() {
   allScenes = await fetch('/rate/api/scenes').then(function(r){return r.json()});
+  renderFileFilter();
   renderTagBar();
+  renderGrid();
+}
+
+function renderFileFilter() {
+  var sel = document.getElementById('file-filter');
+  if (!sel) return;
+  // Count scenes per source file so the dropdown shows useful context.
+  var counts = {};
+  for (var i = 0; i < allScenes.length; i++) {
+    var fn = allScenes[i].filename || '';
+    counts[fn] = (counts[fn] || 0) + 1;
+  }
+  var names = Object.keys(counts).sort(function(a, b){
+    return a.localeCompare(b);
+  });
+  var html = '<option value="">All files (' + allScenes.length + ')</option>';
+  for (var k = 0; k < names.length; k++) {
+    var n = names[k];
+    html += '<option value="' + n.replace(/"/g, '&quot;') + '">'
+          + n + ' (' + counts[n] + ')</option>';
+  }
+  sel.innerHTML = html;
+  sel.value = activeFile;
+}
+
+function setFileFilter(name) {
+  activeFile = name || '';
+  renderTagBar();   // counts may shrink to scenes in this file
   renderGrid();
 }
 
@@ -483,6 +520,9 @@ function getFiltered() {
   if (searchHitIds) {
     base = base.filter(function(s) { return searchHitIds.has(s.id); });
   }
+  if (activeFile) {
+    base = base.filter(function(s) { return s.filename === activeFile; });
+  }
   return base;
 }
 
@@ -496,7 +536,7 @@ function renderGrid() {
     if (allScenes.length === 0) {
       msg = '<h2 style="font-size:18px;color:#888;margin-bottom:6px">No scenes yet</h2>'
         + '<p style="color:#666;font-size:13px">Run analysis on the '
-        + '<a href="/analyze" style="color:#1976d2">Analyze</a> page to break videos into scenes.</p>';
+        + '<a href="/analyze" style="color:#1976d2">Input Videos</a> page to break videos into scenes.</p>';
     } else if (searchHitIds) {
       msg = '<p style="color:#666;font-size:13px">No scenes match your search.</p>';
     } else {

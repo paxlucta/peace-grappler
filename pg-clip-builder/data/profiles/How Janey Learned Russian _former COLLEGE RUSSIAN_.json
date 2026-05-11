@@ -88,7 +88,7 @@
   },
   "ai": {
     "tasks": {
-      "analysis": "gemini",
+      "analysis": "minimax",
       "captions": "claude",
       "wizard": "claude"
     },
@@ -104,6 +104,10 @@
       "gemini": {
         "bin": "gemini",
         "model": "gemini-2.5-flash"
+      },
+      "minimax": {
+        "bin": "",
+        "model": "MiniMax-M1"
       }
     }
   },
@@ -127,5 +131,14 @@
   "whisper_language": "",
   "analysis_mode": "speech",
   "whisper_model": "large-v3",
-  "whisper_translate": true
+  "whisper_translate": true,
+  "captions": {
+    "font": "sans",
+    "color": "#ffffff",
+    "bg_on": false,
+    "bg_color": "#000000",
+    "position": "bottom"
+  },
+  "intro_video": "",
+  "outro_video": ""
 }

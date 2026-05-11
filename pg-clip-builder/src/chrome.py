@@ -16,27 +16,44 @@ styles ``header``/``nav``/``a`` — that part is intentionally still duplicated
 because each page tweaks colors slightly.
 """
 
-# Order here is the order users see in every page header. Settings + Drive
-# were missing before; Drive is hidden client-side when the feature flag
-# is off (window.PG_FEATURES.drive), matching the existing pattern for
-# Drive-gated buttons elsewhere.
+# Each top-level nav entry: (key, href, label, sub_tabs_or_None).
+# When sub_tabs is provided, the entry is highlighted whenever *active* is
+# either the parent key OR any sub-tab key, and a tab strip is rendered
+# under the header so the user can jump between the sub-pages.
 NAV_LINKS = [
-    ("wizard",   "/wizard",   "AI Wizard"),
-    ("builder",  "/builder",  "Builder"),
-    ("library",  "/library",  "Library"),
-    ("rate",     "/rate",     "Scenes"),
-    ("analyze",  "/analyze",  "Analyze"),
-    ("settings", "/settings", "Settings"),
-    ("drive",    "/drive",    "Drive"),
+    ("wizard",   "/wizard",   "AI Builder", None),
+    ("builder",  "/builder",  "Builder",   None),
+    ("library",  "/library",  "Generated Videos", None),
+    ("analyze",  "/analyze",  "Input Videos", [
+        ("analyze", "/analyze", "Files"),
+        ("rate",    "/rate",    "Scenes"),
+    ]),
+    ("settings", "/settings", "Settings", None),
+    ("drive",    "/drive",    "Drive",    None),
 ]
+
+
+def _find_active_group(active):
+    """Return ``(parent_key, sub_tabs)`` if *active* belongs to a group with
+    sub-tabs, else ``(active, None)``."""
+    for key, _href, _label, subs in NAV_LINKS:
+        if subs and any(sub[0] == active for sub in subs):
+            return key, subs
+        if key == active and subs:
+            # Default the child highlight to the parent's own key when the
+            # caller passes only the parent (e.g. ``active="analyze"``).
+            return key, subs
+    return active, None
 
 
 def header_html(active: str = "") -> str:
     """Return the ``<header>...</header>`` block. *active* is the key from
     NAV_LINKS that should render with class="active" (red underline)."""
+    parent_active, sub_tabs = _find_active_group(active)
+
     parts = ["<header>", "<h1>Clip<span>Builder</span></h1>", "<nav>"]
-    for key, href, label in NAV_LINKS:
-        cls = ' class="active"' if key == active else ""
+    for key, href, label, _subs in NAV_LINKS:
+        cls = ' class="active"' if key == parent_active else ""
         # Drive link is hidden on pages where the feature flag is off; the
         # tiny inline script at the bottom of the header takes care of it
         # so server-side rendering doesn't have to know feature state.
@@ -44,6 +61,26 @@ def header_html(active: str = "") -> str:
         parts.append(f'<a href="{href}"{cls}{extra}>{label}</a>')
     parts.append("</nav>")
     parts.append("</header>")
+
+    if sub_tabs:
+        parts.append('<div class="pg-subnav">')
+        for sub_key, sub_href, sub_label in sub_tabs:
+            cls = ' class="active"' if sub_key == active else ""
+            parts.append(f'<a href="{sub_href}"{cls}>{sub_label}</a>')
+        parts.append("</div>")
+        parts.append(
+            "<style>"
+            ".pg-subnav{display:flex;gap:4px;padding:6px 20px;"
+            "background:#101015;border-bottom:1px solid #2a2a2a;"
+            "flex-shrink:0}"
+            ".pg-subnav a{color:#888;text-decoration:none;font-size:12px;"
+            "font-weight:600;padding:6px 14px;border-radius:6px;"
+            "transition:background .15s,color .15s}"
+            ".pg-subnav a:hover{color:#fff;background:#1a1a22}"
+            ".pg-subnav a.active{color:#fff;background:#e53935}"
+            "</style>"
+        )
+
     # Hide the Drive link unless window.PG_FEATURES.drive is true. Doing
     # this inline avoids a flash-of-wrong-state when the page first paints.
     parts.append(

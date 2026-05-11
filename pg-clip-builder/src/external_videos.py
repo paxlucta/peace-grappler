@@ -37,8 +37,23 @@ def _cookies_opt(cookies_hint):
     return {"cookiefile": str(p)}
 
 
-def _platform_cookies_hint(platform):
-    """Look up the cookies field for a platform from the active brand profile."""
+def _platform_cookies_hint(platform, url=None):
+    """Look up the cookies field for a platform from the active brand profile.
+
+    The synthetic ``"url"`` platform (used by the "From URL" import flow)
+    has no socials slot of its own. When *url* is provided, sniff its
+    domain and reuse the matching social platform's cookies — so a
+    YouTube link uses the YouTube cookies the user already configured,
+    even though the import wasn't initiated from the YouTube source button.
+    """
+    if platform == "url" and url:
+        u = url.lower()
+        if "youtube.com" in u or "youtu.be" in u:
+            platform = "youtube"
+        elif "tiktok.com" in u:
+            platform = "tiktok"
+        elif "instagram.com" in u:
+            platform = "instagram"
     try:
         import app_config
         slot = (app_config.get_config().get("socials") or {}).get(platform) or {}
@@ -64,6 +79,12 @@ def _download_opts(dest_dir):
     return {
         "quiet": True,
         "no_warnings": True,
+        # Don't load third-party yt-dlp plugins. A stale bgutil-pot-provider
+        # plugin once crashed every download here with
+        # ``debug() got an unexpected keyword argument 'once'`` because its
+        # logger interface drifted from yt-dlp's. We don't rely on any
+        # plugin so disabling them outright is the safe default.
+        "plugin_dirs": [],
         # Use the video's actual title as the filename, with the platform
         # ID appended in brackets to guarantee uniqueness even if two
         # videos share the same title. UTF-8 (Russian, Japanese, …) is
@@ -224,7 +245,7 @@ def download_video(platform, page_url_or_id, dest_dir, on_log=None):
     url = _ensure_video_url(platform, page_url_or_id)
 
     base_opts = _download_opts(dest)
-    base_opts.update(_cookies_opt(_platform_cookies_hint(platform)))
+    base_opts.update(_cookies_opt(_platform_cookies_hint(platform, url)))
 
     def hook(d):
         if d.get("status") == "downloading":
@@ -258,7 +279,7 @@ def download_video(platform, page_url_or_id, dest_dir, on_log=None):
     else:
         attempts.append(base_opts)
 
-    cookies_set = bool(_platform_cookies_hint(platform))
+    cookies_set = bool(_platform_cookies_hint(platform, url))
     last_err = None
     last_raw = None     # full unredacted yt-dlp error (for triage in log footer)
     info = None

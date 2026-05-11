@@ -25,7 +25,8 @@ from db import (
 from video import (
     ASSETS_DIR, AUDIO_EXTENSIONS, OUTPUT_DIR, TRANSITIONS, XFADE_DUR,
     add_text_overlay, concatenate_clips, detect_beats, extract_subclip,
-    extract_wide_split, find_asset, get_video_duration, normalize_clip,
+    extract_wide_split, extract_wide_subclip_autocrop,
+    find_asset, get_video_duration, normalize_clip,
     overlay_music,
 )
 
@@ -208,6 +209,17 @@ def _get_wizard_history(limit=20):
 _call_ctx = threading.local()
 
 
+def _active_provider_name(task="wizard"):
+    """Return the provider name that will actually handle *task* right now —
+    threadlocal override (set by the wizard pipeline) wins, otherwise the
+    configured task→provider mapping. Use this whenever recording who
+    produced a piece of generated content, so attribution matches the
+    actual run (e.g. minimax → minimax badge) instead of always the
+    default."""
+    override = getattr(_call_ctx, "provider", None)
+    return override or ai_cli.get_provider_for_task(task)
+
+
 def _active_provider_label(task="wizard"):
     """Friendly label for the provider that will actually be used —
     threadlocal override wins, otherwise the task→provider config. Used in
@@ -319,7 +331,7 @@ def _run_research(model):
             emit("Research returned empty — using defaults")
             return _default_research()
         result = _parse_json(raw)
-        _save_research(result, provider=ai_cli.get_provider_for_task("wizard"))
+        _save_research(result, provider=_active_provider_name("wizard"))
         emit("Research complete — cached for future runs")
         return result
     except Exception as e:
@@ -657,7 +669,7 @@ def _validate_plan(plan, scenes, music_files):
 
 def _assemble_video(plan, music_files, video_num, total,
                     mute_source=False, add_captions=False,
-                    caption_style=None):
+                    caption_style=None, auto_crop_wide=False):
     """Assemble a video from Claude's plan. Returns output path or None.
 
     *add_captions* — when True, burn each scene's transcript onto the
@@ -728,6 +740,18 @@ def _assemble_video(plan, music_files, video_num, total,
                 emit(f"Video {video_num}/{total}: clip {i+1}/{len(clips)} "
                      f"[{start:.1f}s +{duration:.1f}s] from {src} (split-screen)")
                 ok = extract_wide_split(scene["video_path"], start, duration, clip_out)
+            elif auto_crop_wide and is_wide:
+                emit(f"Video {video_num}/{total}: clip {i+1}/{len(clips)} "
+                     f"[{start:.1f}s +{duration:.1f}s] from {src} (auto-crop)")
+                ok = extract_wide_subclip_autocrop(
+                    scene["video_path"], start, duration, clip_out,
+                )
+                if not ok:
+                    emit(f"  Auto-crop failed for clip {i+1}, "
+                         f"falling back to letterboxed extract")
+                    ok = extract_subclip(
+                        scene["video_path"], start, duration, clip_out,
+                    )
             else:
                 emit(f"Video {video_num}/{total}: clip {i+1}/{len(clips)} "
                      f"[{start:.1f}s +{duration:.1f}s] from {src}")
@@ -847,7 +871,7 @@ def _assemble_video(plan, music_files, video_num, total,
     final_dur = get_video_duration(str(out_file))
     save_generated_video(
         str(out_file), round(final_dur, 1), timeline,
-        wizard_provider=ai_cli.get_provider_for_task("wizard"),
+        wizard_provider=_active_provider_name("wizard"),
     )
 
     return {
@@ -990,7 +1014,8 @@ def _auto_analyze_folders(model, folders):
 def _generate(model, num_videos, num_variations=1, folders=None,
               mute_source=False, enable_text_overlays=False,
               music_folders=None, include_wide=True, provider=None,
-              no_music=False, add_captions=False, caption_style=None):
+              no_music=False, add_captions=False, caption_style=None,
+              auto_crop_wide=False):
     """Full wizard generation flow. Runs in a background thread.
 
     *no_music* — when True, the AI plans without a music track and the
@@ -1115,7 +1140,8 @@ def _generate(model, num_videos, num_variations=1, folders=None,
                 result = _assemble_video(plan, music_files, vid_num, num_videos,
                                         mute_source=mute_source,
                                         add_captions=add_captions,
-                                        caption_style=caption_style)
+                                        caption_style=caption_style,
+                                        auto_crop_wide=auto_crop_wide)
                 if result:
                     # Generate caption
                     emit("Generating Instagram caption...")
@@ -1130,7 +1156,7 @@ def _generate(model, num_videos, num_variations=1, folders=None,
                             None,
                         )
                         if match:
-                            update_video_caption(match["id"], caption, provider=ai_cli.get_provider_for_task("captions"))
+                            update_video_caption(match["id"], caption, provider=_active_provider_name("captions"))
                         result["caption"] = caption
                         emit("Caption generated!")
 
@@ -1224,6 +1250,7 @@ def api_generate():
     include_wide = data.get("include_wide", True)
     no_music = bool(data.get("no_music", False))
     add_captions = bool(data.get("add_captions", False))
+    auto_crop_wide = bool(data.get("auto_crop_wide", False))
     caption_style = data.get("caption_style") or {}
 
     threading.Thread(
@@ -1241,6 +1268,7 @@ def api_generate():
             "no_music": no_music,
             "add_captions": add_captions,
             "caption_style": caption_style,
+            "auto_crop_wide": auto_crop_wide,
         },
         daemon=True,
     ).start()
@@ -1294,7 +1322,7 @@ def api_regenerate_caption(video_id):
 
     caption = _generate_caption(model, plan, video["duration"])
     if caption:
-        update_video_caption(video_id, caption, provider=ai_cli.get_provider_for_task("captions"))
+        update_video_caption(video_id, caption, provider=_active_provider_name("captions"))
         return jsonify({"status": "ok", "caption": caption})
     return jsonify({"error": "Caption generation failed"}), 500
 
@@ -1517,7 +1545,7 @@ WIZARD_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ClipBuilder - AI Wizard</title>
+<title>ClipBuilder - AI Builder</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{
@@ -1766,7 +1794,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
 <!-- pg-chrome -->
 
 <div class="content">
-  <h2>AI Wizard</h2>
+  <h2>AI Builder</h2>
   <p class="subtitle">Autonomous reel generator — AI researches best practices, picks scenes, music, and transitions to maximize engagement.</p>
 
   <div class="config">
@@ -1806,71 +1834,107 @@ button:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="config-row" style="margin-top:12px">
       <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#aaa;cursor:pointer">
-        <input type="checkbox" id="mute-source"> Mute source audio (music only)
+        <input type="checkbox" id="mute-source"> Mute source audio
       </label>
       <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#aaa;cursor:pointer"
              title="Skip the music overlay entirely. Original audio (speech) is preserved.">
         <input type="checkbox" id="no-music"> No music
       </label>
       <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#aaa;cursor:pointer">
-        <input type="checkbox" id="text-overlays"> Enable text overlays
+        <input type="checkbox" id="text-overlays"> Enable AI text overlays
       </label>
       <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#aaa;cursor:pointer">
         <input type="checkbox" id="include-wide" checked> Include widescreen scenes
       </label>
       <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#aaa;cursor:pointer"
-             title="Burn the spoken transcript onto each scene as on-screen captions.">
-        <input type="checkbox" id="add-captions" onchange="toggleCaptionsPanel()"> Add captions
+             title="For widescreen scenes, auto-detect the most visually interesting region and crop to 9:16 (1080x1920) instead of letterboxing.">
+        <input type="checkbox" id="auto-crop-wide"> Auto-crop wide videos
       </label>
-      <div class="btn-row">
-        <button class="btn-primary" id="gen-btn" onclick="startGeneration()">Generate</button>
+      <div style="display:flex;align-items:center;gap:4px">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#aaa;cursor:pointer"
+               title="Burn the spoken transcript onto each scene as on-screen captions.">
+          <input type="checkbox" id="add-captions"> Add captions
+        </label>
+        <button type="button" id="cap-cfg-btn" onclick="openCaptionConfig()"
+                title="Customize caption style for this run"
+                style="background:transparent;border:1px solid #2e2e3e;color:#aaa;
+                       cursor:pointer;border-radius:4px;width:24px;height:22px;
+                       display:inline-flex;align-items:center;justify-content:center;
+                       font-size:13px;line-height:1;padding:0">⚙</button>
       </div>
     </div>
 
-    <!-- Caption styling — visible when "Add captions" is checked. -->
-    <div class="config-row caption-cfg" id="caption-cfg" style="display:none">
-      <div class="field" style="min-width:120px">
-        <label>Font</label>
-        <select id="cap-font">
-          <option value="sans" selected>Sans-serif</option>
-          <option value="serif">Serif</option>
-          <option value="mono">Monospace</option>
-        </select>
-      </div>
-      <div class="field" style="min-width:90px">
-        <label>Text color</label>
-        <input type="color" id="cap-color" value="#ffffff">
-      </div>
-      <div class="field" style="min-width:90px">
-        <label>Background</label>
-        <input type="color" id="cap-bg" value="#000000">
-      </div>
-      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#aaa;cursor:pointer;margin-bottom:6px"
-             title="Show a colored box behind the caption text">
-        <input type="checkbox" id="cap-bg-on"> Show background
-      </label>
-      <div class="field" style="min-width:120px">
-        <label>Position</label>
-        <select id="cap-pos">
-          <option value="bottom" selected>Bottom</option>
-          <option value="middle">Middle</option>
-          <option value="top">Top</option>
-        </select>
+    <!-- Generate button on its own row. -->
+    <div class="config-row" style="margin-top:14px;justify-content:flex-end">
+      <button class="btn-primary" id="gen-btn" onclick="startGeneration()">✨ Generate Video</button>
+    </div>
+
+    <!-- Caption settings modal — opens via ⚙ button next to "Add captions".
+         Defaults come from the active brand profile; tweaks apply to this
+         run only unless the user clicks "Save as default". -->
+    <div id="cap-cfg-overlay"
+         style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);
+                z-index:9000;align-items:center;justify-content:center;
+                padding:20px;box-sizing:border-box">
+      <div style="background:#15151c;border:1px solid #2e2e3e;border-radius:10px;
+                  width:440px;max-width:100%;padding:18px;
+                  box-shadow:0 12px 40px rgba(0,0,0,.6);
+                  box-sizing:border-box;overflow:hidden">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+          <h3 style="font-size:14px;font-weight:600;color:#fff;flex:1;margin:0">Caption settings</h3>
+          <button onclick="closeCaptionConfig()"
+                  style="background:none;border:none;color:#888;font-size:20px;
+                         cursor:pointer;padding:0 4px;line-height:1">&times;</button>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;width:100%">
+          <div style="min-width:0">
+            <label style="font-size:11px;color:#888;display:block;margin-bottom:4px">Font</label>
+            <select id="cap-font" style="width:100%;padding:6px 8px;background:#0c0c14;border:1px solid #2e2e3e;color:#eee;border-radius:5px;font-size:12px;box-sizing:border-box">
+              <option value="sans">Sans-serif</option>
+              <option value="serif">Serif</option>
+              <option value="mono">Monospace</option>
+            </select>
+          </div>
+          <div style="min-width:0">
+            <label style="font-size:11px;color:#888;display:block;margin-bottom:4px">Position</label>
+            <select id="cap-pos" style="width:100%;padding:6px 8px;background:#0c0c14;border:1px solid #2e2e3e;color:#eee;border-radius:5px;font-size:12px;box-sizing:border-box">
+              <option value="bottom">Bottom</option>
+              <option value="middle">Middle</option>
+              <option value="top">Top</option>
+            </select>
+          </div>
+          <div style="min-width:0">
+            <label style="font-size:11px;color:#888;display:block;margin-bottom:4px">Text color</label>
+            <input type="color" id="cap-color" value="#ffffff"
+                   style="width:100%;height:32px;padding:2px;background:#0c0c14;border:1px solid #2e2e3e;border-radius:5px;box-sizing:border-box">
+          </div>
+          <div style="min-width:0">
+            <label style="font-size:11px;color:#888;display:block;margin-bottom:4px">Background color</label>
+            <input type="color" id="cap-bg" value="#000000"
+                   style="width:100%;height:32px;padding:2px;background:#0c0c14;border:1px solid #2e2e3e;border-radius:5px;box-sizing:border-box">
+          </div>
+        </div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#aaa;cursor:pointer;margin-top:10px">
+          <input type="checkbox" id="cap-bg-on"> Show colored background behind text
+        </label>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+          <button onclick="captionConfigSaveDefault()"
+                  style="background:#1a1a22;border:1px solid #2e2e3e;color:#aaa;
+                         padding:7px 14px;border-radius:6px;cursor:pointer;font-size:12px">
+            Save as default
+          </button>
+          <button onclick="closeCaptionConfig()"
+                  style="background:#e53935;border:1px solid #e53935;color:#fff;
+                         padding:7px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600">
+            Done
+          </button>
+        </div>
+        <div id="cap-cfg-msg" style="font-size:11px;color:#888;margin-top:8px;min-height:14px"></div>
       </div>
     </div>
   </div>
 
   <!-- Research data was moved to /settings (Strategy Research section). -->
-
-  <div class="excluded-panel" id="excluded-panel" style="display:none">
-    <div class="excluded-toggle" onclick="toggleExcluded()">
-      <h3>Excluded Scenes <span class="exc-count" id="exc-count"></span></h3>
-      <span class="arrow" id="exc-arrow">&#9654;</span>
-    </div>
-    <div class="excluded-body" id="exc-body">
-      <div class="excluded-grid" id="exc-grid"></div>
-    </div>
-  </div>
 
   <div class="progress" id="progress">
     <div id="progress-lines"></div>
@@ -1879,11 +1943,6 @@ button:disabled{opacity:.5;cursor:not-allowed}
   <div class="results" id="results">
     <h3>Generated Reels</h3>
     <div id="result-cards"></div>
-  </div>
-
-  <div class="history" id="history">
-    <h3>Recent Reels</h3>
-    <div id="history-cards"></div>
   </div>
 </div>
 
@@ -1894,12 +1953,100 @@ var generatedVideos = [];
 
 var currentResearch = null;
 
+// Caption defaults from the active brand profile. Populated by loadAppCfg()
+// on init and re-loaded after "Save as default" so the modal reflects what
+// the wizard will actually use for this run.
+var captionDefaults = {
+  font: 'sans', color: '#ffffff',
+  bg_on: false, bg_color: '#000000',
+  position: 'bottom',
+};
+
 async function init() {
   await loadModels();
-  loadExcluded();
   loadFolders();
   loadMusicFolders();
-  loadHistory();
+  await loadAppCfg();
+}
+
+async function loadAppCfg() {
+  try {
+    var cfg = await fetch('/settings/api/app').then(function(r){return r.json()});
+    if (cfg && cfg.captions) {
+      captionDefaults = {
+        font:     cfg.captions.font     || 'sans',
+        color:    cfg.captions.color    || '#ffffff',
+        bg_on:    !!cfg.captions.bg_on,
+        bg_color: cfg.captions.bg_color || '#000000',
+        position: cfg.captions.position || 'bottom',
+      };
+    }
+    applyCaptionDefaultsToModal();
+  } catch (e) { /* keep built-in defaults */ }
+}
+
+function applyCaptionDefaultsToModal() {
+  var f = document.getElementById('cap-font');     if (f) f.value     = captionDefaults.font;
+  var c = document.getElementById('cap-color');    if (c) c.value     = captionDefaults.color;
+  var b = document.getElementById('cap-bg');       if (b) b.value     = captionDefaults.bg_color;
+  var o = document.getElementById('cap-bg-on');    if (o) o.checked   = captionDefaults.bg_on;
+  var p = document.getElementById('cap-pos');      if (p) p.value     = captionDefaults.position;
+}
+
+function openCaptionConfig() {
+  // Pre-fill from the active brand profile so the user sees current defaults
+  // each time they open the modal. They can override for this run.
+  applyCaptionDefaultsToModal();
+  document.getElementById('cap-cfg-msg').textContent = '';
+  document.getElementById('cap-cfg-overlay').style.display = 'flex';
+}
+
+function closeCaptionConfig() {
+  document.getElementById('cap-cfg-overlay').style.display = 'none';
+}
+
+function currentCaptionStyle() {
+  return {
+    font:     document.getElementById('cap-font').value,
+    color:    document.getElementById('cap-color').value,
+    bg_on:    document.getElementById('cap-bg-on').checked,
+    bg_color: document.getElementById('cap-bg').value,
+    position: document.getElementById('cap-pos').value,
+  };
+}
+
+async function captionConfigSaveDefault() {
+  var msg = document.getElementById('cap-cfg-msg');
+  msg.textContent = 'Saving...';
+  try {
+    // Read current config first so we don't clobber other fields.
+    var cfg = await fetch('/settings/api/app').then(function(r){return r.json()});
+    var body = {
+      profile_name:   cfg.profile_name,
+      brand_name:     cfg.brand_name,
+      content_domain: cfg.content_domain,
+      source_folder:  cfg.source_folder,
+      output_folder:  cfg.output_folder,
+      intro_video:    cfg.intro_video,
+      outro_video:    cfg.outro_video,
+      tag_schema:     cfg.tag_schema,
+      socials:        cfg.socials,
+      analysis_mode:  cfg.analysis_mode,
+      whisper_model:  cfg.whisper_model,
+      whisper_language:  cfg.whisper_language,
+      whisper_translate: cfg.whisper_translate,
+      ai:             cfg.ai,
+      captions:       currentCaptionStyle(),
+    };
+    var r = await fetch('/settings/api/app', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body),
+    });
+    var d = await r.json();
+    if (d.ok === false) { msg.textContent = 'Save failed: ' + (d.error || 'unknown'); return; }
+    captionDefaults = body.captions;
+    msg.textContent = 'Saved as default for this brand.';
+  } catch (e) { msg.textContent = 'Save failed: ' + e.message; }
 }
 
 async function loadModels() {
@@ -1946,83 +2093,6 @@ function getSelectedModel() {
     return {provider: raw.slice(0, sep), model: raw.slice(sep + 2)};
   }
   return {provider: '', model: raw};
-}
-
-async function loadHistory() {
-  var history = await fetch('/wizard/api/history').then(function(r){return r.json()});
-  var container = document.getElementById('history-cards');
-  if (!history.length) {
-    container.innerHTML = '<p style="color:#555;font-size:13px">No reels yet — hit Generate above to make one.</p>';
-    return;
-  }
-
-  var html = '';
-  for (var i = 0; i < history.length; i++) {
-    var v = history[i];
-    if (!v.exists) continue;
-    var fbSummary = '';
-    if (v.feedback && v.feedback.length) {
-      fbSummary = '<div class="hist-fb">"' + escHtml(v.feedback[0].text) + '"</div>';
-    } else {
-      fbSummary = '<div class="hist-no-fb">No feedback yet</div>';
-    }
-
-    var fbBodyHtml = '';
-    if (v.feedback && v.feedback.length) {
-      for (var j = 0; j < v.feedback.length; j++) {
-        fbBodyHtml += '<div class="hist-fb">"' + escHtml(v.feedback[j].text) + '"</div>';
-      }
-    }
-
-    var date = formatDate(v.generated_at);
-    var wizBadge = (window.pgAiBadge && v.wizard_provider)
-      ? ' ' + window.pgAiBadge(v.wizard_provider, {size:13, title:'Reel composed by ' + v.wizard_provider}) : '';
-    var capBadge = (window.pgAiBadge && v.caption_provider && v.caption_provider !== v.wizard_provider)
-      ? ' ' + window.pgAiBadge(v.caption_provider, {size:11, title:'Caption by ' + v.caption_provider}) : '';
-    html += '<div class="hist-card" id="hc-' + v.id + '">'
-      + '<div class="hist-header" onclick="toggleHistCard(' + v.id + ')">'
-      + '<div class="hist-info">'
-      + '<div class="hist-name">' + escHtml(v.filename) + wizBadge + capBadge + '</div>'
-      + '<div class="hist-meta">' + v.duration + 's &middot; ' + date + '</div>'
-      + fbSummary
-      + '</div>'
-      + '<span class="hist-expand-arrow" id="hc-arrow-' + v.id + '">&#9654;</span>'
-      + '</div>'
-      + '<div class="hist-body" id="hc-body-' + v.id + '">'
-      + '<div class="hist-layout">'
-      + '<div class="hist-video">'
-      + '<video controls preload="none" src="/wizard/api/video/' + v.id + '"></video>'
-      + '</div>'
-      + '<div class="hist-detail">'
-      + buildCaptionBox(v.caption || '', v.id)
-      + buildSceneChips(v.scenes || [])
-      + fbBodyHtml
-      + '<div class="feedback-form">'
-      + '<textarea id="fb-' + v.id + '" placeholder="Add feedback for this video..."></textarea>'
-      + '<div class="fb-row">'
-      + '<button onclick="submitFeedback(' + v.id + ')">Submit Feedback</button>'
-      + '<span class="fb-status" id="fb-status-' + v.id + '"></span>'
-      + '</div></div>'
-      + '<div class="hist-actions">'
-      + '<button class="btn-edit" onclick="editInBuilder(\'' + escHtml(v.filename) + '\')">'
-      + '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>'
-      + 'Edit</button>'
-      + '<button class="btn-email" onclick="emailVideo(' + v.id + ',\'' + escHtml(v.filename) + '\')">'
-      + '<svg viewBox="0 0 24 24"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/></svg>'
-      + 'Email Video</button>'
-      + '</div>'
-      + '</div></div>'
-      + '</div>'
-      + '</div>';
-  }
-  container.innerHTML = html;
-}
-
-function toggleHistCard(id) {
-  var body = document.getElementById('hc-body-' + id);
-  var arrow = document.getElementById('hc-arrow-' + id);
-  body.classList.toggle('open');
-  arrow.classList.toggle('open');
 }
 
 // ── Folder & Music pickers ──
@@ -2095,11 +2165,6 @@ function getSelectedFromPicker(ddId) {
   return selected;
 }
 
-function toggleCaptionsPanel() {
-  var on = document.getElementById('add-captions').checked;
-  document.getElementById('caption-cfg').style.display = on ? '' : 'none';
-}
-
 function startGeneration() {
   if (generating) return;
   generating = true;
@@ -2120,7 +2185,7 @@ function startGeneration() {
   results.classList.remove('active');
   document.getElementById('result-cards').innerHTML = '';
 
-  addLine('Starting AI Wizard...', 'phase');
+  addLine('Starting AI Builder...', 'phase');
 
   fetch('/wizard/api/generate', {
     method: 'POST',
@@ -2136,6 +2201,7 @@ function startGeneration() {
       no_music: document.getElementById('no-music').checked,
       text_overlays: document.getElementById('text-overlays').checked,
       include_wide: document.getElementById('include-wide').checked,
+      auto_crop_wide: document.getElementById('auto-crop-wide').checked,
       add_captions: document.getElementById('add-captions').checked,
       caption_style: {
         font:     document.getElementById('cap-font').value,
@@ -2163,7 +2229,6 @@ function startGeneration() {
         if (generatedVideos.length) {
           showResults();
         }
-        loadHistory();
 
       } else if (msg.startsWith('VIDEO:')) {
         var parts = msg.split(':');
@@ -2210,10 +2275,21 @@ function showResults() {
       }
       if (!match) continue;
 
+      // Inline provider badges so the user sees which AI composed the
+      // reel (e.g. minimax logo when minimax was selected) and which one
+      // wrote the caption, when they differ.
+      var wizBadge = (window.pgAiBadge && match.wizard_provider)
+        ? ' ' + window.pgAiBadge(match.wizard_provider,
+            {size:13, title:'Reel composed by ' + match.wizard_provider}) : '';
+      var capBadge = (window.pgAiBadge && match.caption_provider
+                      && match.caption_provider !== match.wizard_provider)
+        ? ' ' + window.pgAiBadge(match.caption_provider,
+            {size:11, title:'Caption by ' + match.caption_provider}) : '';
+
       var card = document.createElement('div');
       card.className = 'result-card';
       card.innerHTML = '<div class="result-header">'
-        + '<span class="filename">' + escHtml(match.filename) + '</span>'
+        + '<span class="filename">' + escHtml(match.filename) + wizBadge + capBadge + '</span>'
         + '<span class="dur">' + match.duration + 's</span>'
         + '</div>'
         + '<div class="result-layout">'
@@ -2258,7 +2334,6 @@ async function submitFeedback(videoId) {
   if (res.ok) {
     status.textContent = 'Feedback saved! This will inform future generations.';
     textarea.disabled = true;
-    loadHistory();
   } else {
     status.textContent = 'Failed to save feedback';
     status.style.color = '#ef5350';
@@ -2272,14 +2347,14 @@ function buildCaptionBox(caption, videoId) {
     return '<div class="caption-box"><div class="cap-label">Caption</div>'
       + '<div class="cap-text" style="color:#555">No caption generated</div>'
       + '<div class="cap-actions">'
-      + '<button class="cap-btn" onclick="regenCaption(' + videoId + ')">Generate Caption</button>'
+      + '<button class="cap-btn" onclick="regenCaption(' + videoId + ')">✨ Generate Caption</button>'
       + '</div></div>';
   }
   return '<div class="caption-box"><div class="cap-label">Instagram Caption</div>'
     + '<div class="cap-text" id="cap-text-' + videoId + '">' + escHtml(caption) + '</div>'
     + '<div class="cap-actions">'
     + '<button class="cap-btn" id="cap-copy-' + videoId + '" onclick="copyCaption(' + videoId + ')">Copy</button>'
-    + '<button class="cap-btn" onclick="regenCaption(' + videoId + ')">Regenerate</button>'
+    + '<button class="cap-btn" onclick="regenCaption(' + videoId + ')">✨ Regenerate</button>'
     + '</div></div>';
 }
 
@@ -2386,56 +2461,6 @@ async function voteScene(sceneId, action) {
       upBtn.classList.add('active');
     }
   }
-  loadExcluded();
-}
-
-function toggleExcluded() {
-  var body = document.getElementById('exc-body');
-  var arrow = document.getElementById('exc-arrow');
-  body.classList.toggle('open');
-  arrow.classList.toggle('open');
-}
-
-async function loadExcluded() {
-  var res = await fetch('/wizard/api/excluded-scenes');
-  var scenes = await res.json();
-  var panel = document.getElementById('excluded-panel');
-  var count = document.getElementById('exc-count');
-  var grid = document.getElementById('exc-grid');
-
-  if (!scenes.length) {
-    panel.style.display = 'none';
-    return;
-  }
-
-  panel.style.display = '';
-  count.textContent = '(' + scenes.length + ')';
-
-  var html = '';
-  for (var i = 0; i < scenes.length; i++) {
-    var s = scenes[i];
-    var tags = s.tags.length ? s.tags.join(', ') : 'no tags';
-    html += '<div class="scene-chip" id="exc-sc-' + s.id + '">'
-      + '<img src="/api/thumbnail/' + s.id + '" loading="lazy"/>'
-      + '<div class="sc-info">'
-      + '<span class="sc-name">' + escHtml(s.filename) + '</span>'
-      + '<span class="sc-tags">' + escHtml(tags) + ' &middot; ' + s.duration + 's</span>'
-      + '</div>'
-      + '<button class="sc-exclude" style="border-color:#4caf50;color:#4caf50" '
-      + 'onclick="unblockScene(' + s.id + ')">Unblock</button>'
-      + '</div>';
-  }
-  grid.innerHTML = html;
-}
-
-async function unblockScene(sceneId) {
-  await fetch('/wizard/api/exclude', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({scene_id: sceneId, exclude: false}),
-  });
-  loadExcluded();
-  loadHistory();
 }
 
 function editInBuilder(filename) {

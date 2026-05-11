@@ -37,6 +37,8 @@ def api_app_set():
             content_domain=data.get("content_domain"),
             source_folder=data.get("source_folder"),
             output_folder=data.get("output_folder"),
+            intro_video=data.get("intro_video"),
+            outro_video=data.get("outro_video"),
             tag_schema=data.get("tag_schema"),
             socials=data.get("socials"),
             analysis_mode=data.get("analysis_mode"),
@@ -44,6 +46,7 @@ def api_app_set():
             whisper_language=data.get("whisper_language"),
             whisper_translate=data.get("whisper_translate"),
             ai=data.get("ai"),
+            captions=data.get("captions"),
         )
     except ValueError as e:
         return jsonify({"ok": False, "error": str(e)}), 400
@@ -542,7 +545,7 @@ SETTINGS_PAGE = """<!doctype html>
       <div id="wiz-status" class="muted" style="min-height:18px;margin-top:10px"></div>
       <div style="margin-top:14px;display:flex;justify-content:flex-end;gap:8px">
         <button onclick="closeWizard()" class="prof-btn">Cancel</button>
-        <button id="wiz-go" onclick="runWizard()" class="save">Run</button>
+        <button id="wiz-go" onclick="runWizard()" class="save">✨ Run</button>
       </div>
     </div>
   </div>
@@ -579,7 +582,7 @@ SETTINGS_PAGE = """<!doctype html>
   <div class="card">
     <p class="muted" style="margin:0 0 12px 0">
       Per-platform handles, URLs, and (optionally) cookies for downloads.
-      Used by the AI Wizard for caption generation and by <b>Import Videos</b>
+      Used by the AI Builder for caption generation and by <b>Import Videos</b>
       on /analyze.
     </p>
     <div id="socials-rows"></div>
@@ -611,6 +614,26 @@ SETTINGS_PAGE = """<!doctype html>
         <input type="text" id="output-folder" placeholder="output">
         <div class="muted" style="margin-top:4px">
           Where generated reels are written. Restart the app after changing.
+        </div>
+      </div>
+      <div>
+        <label>Intro Video</label>
+        <input type="text" id="intro-video"
+               placeholder="e.g. assets/videos/intro.mp4 (leave blank for auto-detect)">
+        <div class="muted" style="margin-top:4px">
+          Optional path to a clip prepended to every generated reel.
+          Relative paths resolve against the project root. Leave blank to
+          fall back to scanning <code>assets/videos/</code> for a file
+          whose name starts with <code>intro</code>.
+        </div>
+      </div>
+      <div>
+        <label>Outro Video</label>
+        <input type="text" id="outro-video"
+               placeholder="e.g. assets/videos/outro.mp4 (leave blank for auto-detect)">
+        <div class="muted" style="margin-top:4px">
+          Optional path to a clip appended to every generated reel. Same
+          rules as the intro path.
         </div>
       </div>
     </div>
@@ -679,6 +702,49 @@ SETTINGS_PAGE = """<!doctype html>
     </div>
   </div>
 
+  <div class="section-title">Caption Defaults</div>
+  <div class="card">
+    <p class="muted" style="margin:0 0 10px 0">
+      Default style for burned-in transcript captions. The AI Builder picks
+      these up automatically; tweak per-run via the ⚙ button next to its
+      "Add captions" checkbox.
+    </p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px">
+      <div>
+        <label>Font</label>
+        <select id="cap-def-font"
+                style="width:100%;padding:8px 10px;background:#0c0c14;border:1px solid #2e2e3e;color:#eee;border-radius:5px;font-size:12px">
+          <option value="sans">Sans-serif</option>
+          <option value="serif">Serif</option>
+          <option value="mono">Monospace</option>
+        </select>
+      </div>
+      <div>
+        <label>Text color</label>
+        <input type="color" id="cap-def-color" value="#ffffff"
+               style="width:100%;height:34px;padding:2px;background:#0c0c14;border:1px solid #2e2e3e;border-radius:5px">
+      </div>
+      <div>
+        <label>Background color</label>
+        <input type="color" id="cap-def-bg" value="#000000"
+               style="width:100%;height:34px;padding:2px;background:#0c0c14;border:1px solid #2e2e3e;border-radius:5px">
+      </div>
+      <div>
+        <label>Position</label>
+        <select id="cap-def-pos"
+                style="width:100%;padding:8px 10px;background:#0c0c14;border:1px solid #2e2e3e;color:#eee;border-radius:5px;font-size:12px">
+          <option value="bottom">Bottom</option>
+          <option value="middle">Middle</option>
+          <option value="top">Top</option>
+        </select>
+      </div>
+    </div>
+    <label class="tl-check" style="display:flex;align-items:center;gap:8px;margin-top:10px">
+      <input type="checkbox" id="cap-def-bg-on">
+      <span>Show colored background behind text</span>
+    </label>
+  </div>
+
   <div class="section-title">Strategy Research</div>
   <div class="card">
     <p class="muted" style="margin:0 0 10px 0">
@@ -697,7 +763,7 @@ SETTINGS_PAGE = """<!doctype html>
       <select id="research-model"
               style="padding:8px 10px;background:#0c0c14;border:1px solid #2e2e3e;color:#eee;border-radius:5px;font-size:12px;font-family:'JetBrains Mono',monospace">
       </select>
-      <button class="prof-btn" onclick="refreshResearch()">Re-generate with AI</button>
+      <button class="prof-btn" onclick="refreshResearch()">✨ Re-generate with AI</button>
       <span id="research-msg" class="muted"></span>
     </div>
   </div>
@@ -778,6 +844,8 @@ function fillFromAppCfg(){
   document.getElementById('content-domain').value = appCfg.content_domain || '';
   document.getElementById('source-folder').value  = appCfg.source_folder || '';
   document.getElementById('output-folder').value  = appCfg.output_folder || '';
+  document.getElementById('intro-video').value    = appCfg.intro_video || '';
+  document.getElementById('outro-video').value    = appCfg.outro_video || '';
   document.getElementById('profile-name').value   = appCfg.profile_name || '';
   document.getElementById('tag-schema').value     =
     JSON.stringify(appCfg.tag_schema || {}, null, 2);
@@ -791,6 +859,13 @@ function fillFromAppCfg(){
     appCfg.whisper_language || '';
   document.getElementById('whisper-translate').checked =
     !!appCfg.whisper_translate;
+  // Caption defaults
+  var caps = appCfg.captions || {};
+  document.getElementById('cap-def-font').value  = caps.font || 'sans';
+  document.getElementById('cap-def-color').value = caps.color || '#ffffff';
+  document.getElementById('cap-def-bg').value    = caps.bg_color || '#000000';
+  document.getElementById('cap-def-bg-on').checked = !!caps.bg_on;
+  document.getElementById('cap-def-pos').value   = caps.position || 'bottom';
 }
 
 function selectAnalysisMode(mode){
@@ -1283,6 +1358,8 @@ async function saveAll(){
     content_domain: document.getElementById('content-domain').value,
     source_folder:  document.getElementById('source-folder').value,
     output_folder:  document.getElementById('output-folder').value,
+    intro_video:    document.getElementById('intro-video').value,
+    outro_video:    document.getElementById('outro-video').value,
     tag_schema:     tagSchema,
     socials:        _collectSocials(),
     analysis_mode:     _currentAnalysisMode(),
@@ -1290,6 +1367,13 @@ async function saveAll(){
     whisper_language:  document.getElementById('whisper-language').value,
     whisper_translate: document.getElementById('whisper-translate').checked,
     ai: { tasks: cfg.tasks, providers: aiProviders },
+    captions: {
+      font:     document.getElementById('cap-def-font').value,
+      color:    document.getElementById('cap-def-color').value,
+      bg_on:    document.getElementById('cap-def-bg-on').checked,
+      bg_color: document.getElementById('cap-def-bg').value,
+      position: document.getElementById('cap-def-pos').value,
+    },
   };
   const r = await fetch('/settings/api/app', {
     method:'POST', headers:{'Content-Type':'application/json'},

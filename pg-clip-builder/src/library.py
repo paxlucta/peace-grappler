@@ -167,7 +167,7 @@ LIBRARY_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ClipBuilder - Library</title>
+<title>ClipBuilder - Generated Videos</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{
@@ -367,7 +367,7 @@ select:focus{outline:none;border-color:#e53935}
   <div class="empty" id="empty-state" style="display:none">
     <h2>No reels yet</h2>
     <p>Generate one from the <a href="/builder">Builder</a> or
-       <a href="/wizard">AI Wizard</a> and it'll show up here.</p>
+       <a href="/wizard">AI Builder</a> and it'll show up here.</p>
   </div>
 </div>
 

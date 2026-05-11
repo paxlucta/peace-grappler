@@ -92,9 +92,32 @@ def is_wide_video(path):
 
 
 def find_asset(prefix, extensions=None):
-    """Find an asset file by prefix (e.g. 'intro' -> assets/videos/intro.mp4)."""
+    """Find an asset file by prefix (e.g. 'intro' -> assets/videos/intro.mp4).
+
+    For ``prefix`` "intro" / "outro", an explicit path from the active brand
+    profile (``intro_video`` / ``outro_video`` on /settings) wins. If empty
+    or missing, falls back to scanning ``assets/videos/`` for files whose
+    stem starts with the prefix — the legacy behavior."""
     if extensions is None:
         extensions = VIDEO_EXTENSIONS
+
+    if prefix in ("intro", "outro"):
+        try:
+            import app_config as _ac
+            cfg = _ac.get_config()
+            override = (cfg.get(f"{prefix}_video") or "").strip()
+        except Exception:
+            override = ""
+        if override:
+            p = Path(override)
+            if not p.is_absolute():
+                p = ROOT_DIR / p
+            if p.exists() and p.is_file():
+                return p
+            # Configured path is set but missing — log nothing and fall
+            # through to the legacy scan so a broken override doesn't
+            # silently disable intro/outro entirely.
+
     asset_vid_dir = ASSETS_DIR / "videos"
     if not asset_vid_dir.exists():
         return None
@@ -110,6 +133,135 @@ def extract_subclip(video_path, start, duration, out_path):
     vf = ("scale=1080:1920:force_original_aspect_ratio=decrease,"
           "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black,"
           "setsar=1,fps=30")
+
+    if _has_audio:
+        cmd = ["ffmpeg", "-y", "-ss", f"{start:.2f}", "-i", str(video_path),
+               "-t", f"{duration:.2f}", "-vf", vf,
+               "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+               "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "128k",
+               "-pix_fmt", "yuv420p", "-movflags", "+faststart", out_path]
+    else:
+        cmd = ["ffmpeg", "-y", "-ss", f"{start:.2f}", "-i", str(video_path),
+               "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
+               "-filter_complex", f"[0:v]{vf}[vout]",
+               "-map", "[vout]", "-map", "1:a",
+               "-t", f"{duration:.2f}",
+               "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+               "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "128k",
+               "-pix_fmt", "yuv420p", "-movflags", "+faststart", out_path]
+
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=60)
+        return r.returncode == 0 and os.path.exists(out_path)
+    except Exception:
+        return False
+
+
+def auto_crop_x_frac(video_path, start, duration, samples=7):
+    """Pick a horizontal crop center for a wide clip so a 9:16 window
+    captures the most visually interesting content.
+
+    Samples *samples* frames evenly across the clip, scores per-column
+    "interest" as the sum of grayscale stdev (detail) and inter-frame
+    motion (subject movement), then slides a 9:16-wide window across the
+    aggregated score and returns the window center as x_frac in [0,1].
+
+    Returns ``None`` if frame extraction or scoring fails — callers
+    should fall back to a centered crop (x_frac=0.5).
+    """
+    try:
+        import numpy as np
+        from PIL import Image
+    except Exception:
+        return None
+
+    if duration <= 0:
+        return None
+
+    SAMPLE_W = 384  # downscaled width — per-column work stays cheap
+    with tempfile.TemporaryDirectory() as tmp:
+        frames = []
+        # Skip the first/last 5% so transitions don't bias the crop.
+        for i in range(samples):
+            t = start + duration * (0.05 + 0.9 * (i / max(1, samples - 1)))
+            fp = os.path.join(tmp, f"f{i:02d}.jpg")
+            try:
+                r = subprocess.run(
+                    ["ffmpeg", "-y", "-ss", f"{t:.3f}",
+                     "-i", str(video_path),
+                     "-frames:v", "1",
+                     "-vf", f"scale={SAMPLE_W}:-2",
+                     "-q:v", "5", fp],
+                    capture_output=True, timeout=20,
+                )
+                if r.returncode == 0 and os.path.exists(fp):
+                    frames.append(np.asarray(Image.open(fp).convert("L"),
+                                             dtype=np.float32))
+            except Exception:
+                continue
+
+        if len(frames) < 2:
+            return None
+
+        h, w = frames[0].shape
+        for f in frames[1:]:
+            if f.shape != (h, w):
+                return None
+        target_w = max(1, int(round(h * 9.0 / 16.0)))
+        if target_w >= w:
+            # Source is already ≤ 9:16 — nothing to crop.
+            return 0.5
+
+        # Detail per column: stdev along vertical axis, averaged across frames.
+        detail = np.zeros(w, dtype=np.float32)
+        for f in frames:
+            detail += f.std(axis=0)
+        detail /= len(frames)
+
+        # Motion per column: mean abs diff between consecutive frames.
+        motion = np.zeros(w, dtype=np.float32)
+        for a, b in zip(frames, frames[1:]):
+            motion += np.abs(a - b).mean(axis=0)
+        motion /= max(1, len(frames) - 1)
+
+        # Normalize and combine — motion weighted higher (subject tracking).
+        def _norm(v):
+            m = float(v.max()) or 1.0
+            return v / m
+        score = 0.4 * _norm(detail) + 0.6 * _norm(motion)
+
+        # Slide a target_w window; pick the center with the highest sum.
+        kernel = np.ones(target_w, dtype=np.float32)
+        sums = np.convolve(score, kernel, mode="valid")  # len = w - target_w + 1
+        best_left = int(np.argmax(sums))
+        center_px = best_left + target_w / 2.0
+        # The render filter expects x_frac in [0,1] where 0 = left edge of
+        # the source and 1 = right edge of the *valid* crop range. ffmpeg's
+        # crop=ih*9/16:ih:(iw-ih*9/16)*frac:0 maps frac=0 → x=0 and frac=1
+        # → x=iw-ih*9/16 (=> right edge of frame). Convert center_px to that.
+        max_left = w - target_w
+        x_frac = best_left / max_left if max_left > 0 else 0.5
+        return float(max(0.0, min(1.0, x_frac)))
+
+
+def extract_wide_subclip_autocrop(video_path, start, duration, out_path,
+                                  x_frac=None):
+    """Like extract_subclip but for wide sources: crops a 9:16 window
+    around the auto-detected subject region (or *x_frac* if provided)
+    and outputs 1080x1920@30fps. No black bars.
+
+    Falls back to a centered crop if detection fails.
+    """
+    if x_frac is None:
+        x_frac = auto_crop_x_frac(video_path, start, duration)
+        if x_frac is None:
+            x_frac = 0.5
+    x_frac = max(0.0, min(1.0, float(x_frac)))
+
+    _has_audio = has_audio_stream(video_path)
+    # ih*9/16 = target portrait width; offset interpolates from 0 to (iw - that).
+    vf = (f"crop=ih*9/16:ih:(iw-ih*9/16)*{x_frac:.4f}:0,"
+          "scale=1080:1920,setsar=1,fps=30")
 
     if _has_audio:
         cmd = ["ffmpeg", "-y", "-ss", f"{start:.2f}", "-i", str(video_path),
