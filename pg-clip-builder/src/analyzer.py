@@ -1198,7 +1198,14 @@ def _import_worker(platform, external_id, page_url, title):
         import app_config
         import external_videos as ev
         dest = app_config.get_source_dir()
-        log(f"Downloading from {platform}...")
+        # Surface the engine + its version so users (and bug reports)
+        # can see at a glance that yt-dlp ran and which build did.
+        try:
+            import yt_dlp as _ytdlp
+            _ver = _ytdlp.version.__version__
+        except Exception:
+            _ver = "?"
+        log(f"Downloading from {platform} via yt-dlp {_ver}…")
         local = ev.download_video(platform, page_url or external_id, dest,
                                    on_log=log)
         log(f"Downloaded → {local.name}")

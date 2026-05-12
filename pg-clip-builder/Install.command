@@ -75,6 +75,19 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -q -r requirements.txt
 
+# yt-dlp powers every "Import Video" path (YouTube, TikTok, Instagram, and
+# generic "From URL"). YouTube's anti-bot defenses change frequently, so we
+# always upgrade to the latest release here even when the venv exists —
+# stale yt-dlp is the #1 reason imports start failing months after install.
+echo "  • Ensuring yt-dlp is up to date for YouTube / TikTok / Instagram imports…"
+if pip install -q --upgrade yt-dlp; then
+    YT_DLP_VERSION="$(python -c 'import yt_dlp,sys;print(yt_dlp.version.__version__)' 2>/dev/null || echo unknown)"
+    echo "    yt-dlp $YT_DLP_VERSION ✓"
+else
+    echo "    ⚠  yt-dlp upgrade failed — YouTube imports may not work until you run:"
+    echo "        source .venv/bin/activate && pip install -U yt-dlp"
+fi
+
 # Create runtime directories
 mkdir -p videos assets/music assets/videos output data .cache/thumbnails
 

@@ -22,13 +22,24 @@ _BROWSERS = {"chrome", "chromium", "brave", "edge", "firefox", "safari",
 
 def _cookies_opt(cookies_hint):
     """Translate a user-provided cookies setting into a partial yt-dlp opts
-    dict. Empty hint → empty dict (no cookies)."""
+    dict. Empty hint → empty dict (no cookies).
+
+    When the user types just a browser name (``chrome``/``brave``/...),
+    we pin the lookup to the ``Default`` profile so yt-dlp's
+    auto-discovery can't pick up a Chrome extension's cookies database
+    (e.g. ``Storage/ext/<id>/Cookies``) — that bug was loading ~20
+    extension-only cookies instead of the user's YouTube session and
+    quietly causing every import to fail with 403.
+    """
     s = (cookies_hint or "").strip()
     if not s:
         return {}
     low = s.lower()
     if low in _BROWSERS:
-        return {"cookiesfrombrowser": (low,)}
+        # yt-dlp signature: (BROWSER, PROFILE, KEYRING, CONTAINER). Passing
+        # ``"Default"`` for the second slot stops the glob walk that picks
+        # extension-folder Cookies files on macOS Chrome.
+        return {"cookiesfrombrowser": (low, "Default", None, None)}
     # Treat anything else as a path to a cookies.txt file.
     p = Path(s).expanduser()
     if p.exists() and p.is_file():
@@ -94,13 +105,15 @@ def _download_opts(dest_dir):
         # Cap title to 180 chars so the filename stays under macOS HFS+'s
         # 255-byte limit even after the suffix is appended.
         "trim_file_name": 180,
-        # Format selector tuned for YouTube's late-2025 SABR rollout:
-        # DASH (bestvideo+bestaudio) streams now ship with empty URLs on the
-        # web/web_safari clients and 403 if forced. Progressive formats with
-        # both audio+video in one file (most notably YT format 18, 360p mp4)
-        # still download cleanly with cookies. Prefer those, fall back to
-        # any HLS/m3u8 stream, then anything yt-dlp picks last.
-        "format": "b[ext=mp4][protocol^=http][acodec!=none][vcodec!=none]/b[ext=mp4][acodec!=none][vcodec!=none]/b",
+        # Output container preference. We DON'T constrain ``format``
+        # anymore — the terminal yt-dlp downloads the same YouTube URLs
+        # cleanly using its defaults (it cycles through android / ios /
+        # tv player clients and accepts webm-audio + mp4-video combos
+        # that we were filtering out). Setting an aggressive format
+        # selector here was the reason imports failed while the bare
+        # CLI worked. ``merge_output_format`` still asks yt-dlp to
+        # remux the picked streams into an .mp4 for downstream ffmpeg
+        # compatibility, but format selection itself is left to yt-dlp.
         "merge_output_format": "mp4",
         "noprogress": True,
         "writeinfojson": False,
@@ -232,11 +245,20 @@ def download_video(platform, page_url_or_id, dest_dir, on_log=None):
     applied to every attempt.
     """
     log = on_log or (lambda m: None)
+    # yt-dlp is the engine behind every "Import Video" path (YouTube,
+    # TikTok, Instagram, generic URLs). Surface a clear, actionable
+    # install hint when it's missing — the bare ImportError message is
+    # opaque to users who don't already know what yt-dlp is.
     try:
         from yt_dlp import YoutubeDL
         from yt_dlp.utils import DownloadError
     except ImportError as e:
-        raise ExternalDownloadError(f"yt-dlp not installed: {e}")
+        raise ExternalDownloadError(
+            "yt-dlp is not installed. Activate the project venv and run "
+            "`pip install -U yt-dlp`, or re-run Install.command to set "
+            "up the environment from scratch.",
+            detail=str(e),
+        )
 
     dest = Path(dest_dir)
     dest.mkdir(parents=True, exist_ok=True)
@@ -417,7 +439,8 @@ def _youtube_403_message(cookies_hint, url):
     user gets a different actionable hint depending on what they currently
     have configured."""
     low = (cookies_hint or "").lower()
-    base = "YouTube blocked this download (HTTP 403)."
+    base = ("yt-dlp attempted the download and YouTube blocked it "
+            "(HTTP 403).")
     if not cookies_hint:
         body = (
             "No cookies configured. In /settings → YouTube, set the "
