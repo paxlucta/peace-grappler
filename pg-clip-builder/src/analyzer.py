@@ -2021,6 +2021,12 @@ td{font-size:13px}
   </button>
   <button onclick="pullFromDrive()" id="drive-pull-btn" style="display:none">Pull from Drive</button>
   <button id="analyze-cancel-btn" onclick="cancelAnalysis()" style="display:none;background:#c62828;border:1px solid #c62828;color:#fff;padding:7px 14px;border-radius:6px;cursor:pointer;font-weight:600">Cancel Analysis</button>
+  <!-- Bulk-delete: appears only when one or more rows are checked.
+       Wired by _updateBulkDeleteBtn() in renderList + on each toggle. -->
+  <button id="bulk-delete-btn" onclick="deleteSelectedVideos()"
+          style="display:none;background:#c62828;border:1px solid #c62828;color:#fff;padding:7px 14px;border-radius:6px;cursor:pointer;font-weight:600">
+    Delete <span id="bulk-delete-count">0</span> files
+  </button>
   <span id="scan-status" style="font-size:13px;color:#888"></span>
 </div>
 
@@ -2119,6 +2125,17 @@ td{font-size:13px}
 <table>
   <thead>
     <tr>
+      <!-- Master select-all checkbox lives in the header. Wrapped in a
+           <label> so clicking the cell anywhere toggles it; the
+           indeterminate state is set by JS when only some rows are
+           selected. -->
+      <th style="width:36px;text-align:center">
+        <label style="display:inline-flex;align-items:center;cursor:pointer;margin:0">
+          <input type="checkbox" id="sel-all"
+                 onchange="toggleSelectAll(this)"
+                 style="accent-color:#e53935;cursor:pointer">
+        </label>
+      </th>
       <th>Filename</th>
       <th>Duration</th>
       <th>Size</th>
@@ -2152,6 +2169,104 @@ function _updateCancelBtn() {
   btn.style.display = analyzing ? '' : 'none';
   btn.disabled = false;
   if (analyzing) btn.textContent = 'Cancel Analysis';
+}
+
+// ── Multi-select + bulk delete ───────────────────────────────────────
+// Selection is kept in a Set keyed by video.id so the state survives
+// renderList() (which rebuilds the <tbody> on every refresh). renderList
+// also prunes ids that disappear after a scan/delete.
+var _selectedVideoIds = new Set();
+
+function onRowSelectToggle(input){
+  var id = parseInt(input.dataset.vid, 10);
+  if (isNaN(id)) return;
+  if (input.checked) _selectedVideoIds.add(id);
+  else               _selectedVideoIds.delete(id);
+  _refreshSelectAll();
+  _updateBulkDeleteBtn();
+}
+
+function toggleSelectAll(input){
+  if (input.checked) {
+    for (var i = 0; i < videos.length; i++) _selectedVideoIds.add(videos[i].id);
+  } else {
+    _selectedVideoIds.clear();
+  }
+  // Reflect the new state on every visible row without rebuilding the
+  // whole table — keeps focus/scroll position stable on big lists.
+  var rowChecks = document.querySelectorAll('.row-sel');
+  for (var j = 0; j < rowChecks.length; j++) {
+    rowChecks[j].checked = input.checked;
+  }
+  _updateBulkDeleteBtn();
+}
+
+function _refreshSelectAll(){
+  var head = document.getElementById('sel-all');
+  if (!head) return;
+  var total = videos.length;
+  var sel = _selectedVideoIds.size;
+  head.checked = total > 0 && sel === total;
+  // Indeterminate state when only some rows are selected. Reset
+  // explicitly when none/all so the dash doesn't linger.
+  head.indeterminate = sel > 0 && sel < total;
+}
+
+function _updateBulkDeleteBtn(){
+  var btn  = document.getElementById('bulk-delete-btn');
+  var cnt  = document.getElementById('bulk-delete-count');
+  if (!btn) return;
+  var n = _selectedVideoIds.size;
+  btn.style.display = n > 0 ? '' : 'none';
+  if (cnt) cnt.textContent = n;
+}
+
+async function deleteSelectedVideos(){
+  var ids = Array.from(_selectedVideoIds);
+  if (!ids.length) return;
+  // Friendly confirmation that shows the actual list (capped) so the
+  // user can sanity-check before nuking files off disk.
+  var names = videos
+    .filter(function(v){ return _selectedVideoIds.has(v.id); })
+    .map(function(v){ return v.filename; });
+  var preview = names.slice(0, 8).join('\\n  • ');
+  if (names.length > 8) preview += '\\n  • …and ' + (names.length - 8) + ' more';
+  var ok = window.confirm(
+    'Delete ' + ids.length + ' file'
+    + (ids.length === 1 ? '' : 's')
+    + ' and every scene/moment/transcript associated with them?\\n\\n  • '
+    + preview
+    + '\\n\\nThe files will be removed from disk too. This cannot be undone.'
+  );
+  if (!ok) return;
+  var btn = document.getElementById('bulk-delete-btn');
+  if (btn) { btn.disabled = true; }
+  // Fire deletes in parallel — the endpoint is idempotent and refuses
+  // if a target is currently being analyzed (409); we collect those
+  // separately so the user can see what didn't go through.
+  var results = await Promise.all(ids.map(function(id){
+    return fetch('/analyze/api/video/' + id, {method:'DELETE'})
+      .then(function(r){ return r.json().then(function(d){ return {id: id, http: r.status, body: d}; }); })
+      .catch(function(e){ return {id: id, http: 0, body: {ok:false, error: e.message}}; });
+  }));
+  var okCount = 0, scenes = 0, fails = [];
+  for (var k = 0; k < results.length; k++) {
+    var r = results[k];
+    if (r.body && r.body.ok) {
+      okCount++;
+      scenes += (r.body.scenes_removed || 0);
+    } else {
+      fails.push((r.body && r.body.error) || ('HTTP ' + r.http));
+    }
+  }
+  _selectedVideoIds.clear();
+  if (btn) { btn.disabled = false; }
+  addLine('Deleted ' + okCount + ' file'
+    + (okCount === 1 ? '' : 's')
+    + (scenes ? ' (' + scenes + ' scene' + (scenes === 1 ? '' : 's') + ' removed)' : '')
+    + (fails.length ? ' — ' + fails.length + ' failed: ' + fails.join('; ') : ''),
+    fails.length ? 'error' : 'done');
+  scanVideos();
 }
 
 async function deleteVideo(videoId, filename) {
@@ -2768,9 +2883,12 @@ function renderList() {
   var tbody = document.getElementById('video-list');
   tbody.innerHTML = '';
   if (videos.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:36px 0;color:#666">'
+    // colspan bumped to 7 to cover the new select-all checkbox column.
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:36px 0;color:#666">'
       + 'No source videos yet. Click <b>Import Video</b> above '
       + 'to add files from your social channels, a URL, or disk.</td></tr>';
+    _refreshSelectAll();
+    _updateBulkDeleteBtn();
     return;
   }
   for (var i = 0; i < videos.length; i++) {
@@ -2778,6 +2896,7 @@ function renderList() {
     var dims = v.width + 'x' + v.height;
     if (v.wide) dims += ' (wide)';
     var disabled = analyzing ? ' disabled' : '';
+    var rowChecked = _selectedVideoIds.has(v.id) ? ' checked' : '';
     // Transcript icon is now its own column; only rendered when the
     // video actually has a saved transcript so a glance at the column
     // tells the user which files are searchable / cuttable.
@@ -2803,6 +2922,11 @@ function renderList() {
       +   '</button>'
       + '</div>';
     tbody.innerHTML += '<tr>'
+      + '<td style="text-align:center">'
+      +   '<input type="checkbox" class="row-sel" data-vid="' + v.id + '"'
+      +     rowChecked + ' onchange="onRowSelectToggle(this)"'
+      +     ' style="accent-color:#e53935;cursor:pointer">'
+      + '</td>'
       + '<td>' + v.filename + '</td>'
       + '<td>' + v.duration + 's</td>'
       + '<td>' + dims + '</td>'
@@ -2814,7 +2938,14 @@ function renderList() {
       + '<td>' + actionCell + '</td>'
       + '</tr>';
   }
-
+  // Prune stale entries (videos that no longer exist after a scan/delete)
+  // and reflect the new state in the header checkbox + bulk-delete pill.
+  var ids = new Set(videos.map(function(v){return v.id}));
+  var stale = [];
+  _selectedVideoIds.forEach(function(id){ if (!ids.has(id)) stale.push(id); });
+  for (var s = 0; s < stale.length; s++) _selectedVideoIds.delete(stale[s]);
+  _refreshSelectAll();
+  _updateBulkDeleteBtn();
 }
 
 function connectSSE() {
