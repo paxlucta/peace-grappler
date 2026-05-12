@@ -1253,7 +1253,8 @@ select:focus,button:focus{outline:none;border-color:#e53935}
 .file-filter .ff-caret{font-size:10px;color:#888}
 .ff-pop{
   display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:200;
-  width:320px;background:#15151c;border:1px solid #2e2e3e;border-radius:8px;
+  width:max-content;min-width:320px;max-width:min(90vw,900px);
+  background:#15151c;border:1px solid #2e2e3e;border-radius:8px;
   box-shadow:0 12px 32px rgba(0,0,0,.6);padding:10px;
 }
 .ff-pop.open{display:block}
@@ -1277,7 +1278,7 @@ select:focus,button:focus{outline:none;border-color:#e53935}
 .ff-item:hover{background:#1a1a24}
 .ff-item input{accent-color:#e53935;flex-shrink:0}
 .ff-item .ff-name{
-  flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  flex:1;white-space:nowrap;
 }
 .ff-item .ff-count{color:#666;font-size:10px;flex-shrink:0}
 nav{display:flex;gap:8px;margin-left:auto;flex-shrink:0}

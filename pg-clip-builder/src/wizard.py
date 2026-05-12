@@ -1667,10 +1667,10 @@ input[type="number"]{width:80px}
 .folder-btn:hover{border-color:#666}
 .folder-btn .arrow{font-size:10px;color:#888}
 .folder-dropdown{
-  display:none;position:absolute;top:100%;left:0;right:0;
+  display:none;position:absolute;top:100%;left:0;
   background:#222;border:1px solid #444;border-radius:6px;
   margin-top:4px;max-height:250px;overflow-y:auto;z-index:20;
-  padding:4px 0;min-width:220px;
+  padding:4px 0;width:max-content;min-width:220px;max-width:min(90vw,900px);
 }
 .folder-dropdown.open{display:block}
 .folder-item{
@@ -1679,8 +1679,7 @@ input[type="number"]{width:80px}
 }
 .folder-item:hover{background:#333}
 .folder-item input{accent-color:#e53935}
-.folder-item .fi-name{flex:1;overflow:hidden;text-overflow:ellipsis;
-  white-space:nowrap}
+.folder-item .fi-name{flex:1;white-space:nowrap}
 .folder-item .fi-count{color:#777;font-size:10px;margin-left:8px;flex-shrink:0}
 .folder-actions .folder-act-btn{
   flex:1;font-size:11px;padding:5px 10px;background:#1a1a1a;

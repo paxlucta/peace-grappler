@@ -224,20 +224,21 @@ select:focus{outline:none;border-color:#e53935}
 }
 .video-card{
   background:#1a1a1a;border-radius:10px;overflow:hidden;
-  transition:transform .15s,box-shadow .15s;cursor:pointer;
+  transition:transform .15s,box-shadow .15s;
 }
 .video-card:hover{transform:translateY(-3px);box-shadow:0 6px 20px rgba(0,0,0,.5)}
 .video-card .thumb-wrap{
   position:relative;width:100%;aspect-ratio:9/16;background:#111;overflow:hidden;
 }
-.video-card .thumb-wrap img{
-  width:100%;height:100%;object-fit:cover;display:block;
+.video-card .thumb-wrap video{
+  width:100%;height:100%;object-fit:cover;display:block;background:#000;
 }
 .video-card .thumb-wrap .play-btn{
   position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-  background:rgba(0,0,0,.4);opacity:0;transition:opacity .2s;
+  background:rgba(0,0,0,.4);opacity:0;transition:opacity .2s;cursor:pointer;
 }
 .video-card:hover .play-btn{opacity:1}
+.video-card.is-playing .play-btn{display:none}
 .play-btn .play-icon{
   width:56px;height:56px;background:rgba(229,57,53,.9);border-radius:50%;
   display:flex;align-items:center;justify-content:center;
@@ -246,10 +247,32 @@ select:focus{outline:none;border-color:#e53935}
 .play-btn .play-icon:hover{transform:scale(1.1);background:#e53935}
 .play-btn .play-icon svg{width:24px;height:24px;fill:#fff;margin-left:3px}
 .video-card .card-ai-badges{
-  position:absolute;top:6px;left:6px;display:flex;gap:3px;
+  position:absolute;bottom:8px;left:8px;display:flex;gap:3px;
   padding:2px 4px;border-radius:4px;
   background:rgba(0,0,0,.55);align-items:center;
 }
+.video-card .card-check{
+  position:absolute;top:6px;left:6px;z-index:3;
+  width:22px;height:22px;border-radius:4px;
+  background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.25);
+  display:flex;align-items:center;justify-content:center;cursor:pointer;
+  padding:0;
+}
+.video-card .card-check input{
+  width:14px;height:14px;margin:0;cursor:pointer;accent-color:#e53935;
+}
+.video-card.selected{outline:2px solid #e53935;outline-offset:-2px}
+
+/* -- Bulk-action buttons in the toolbar -- */
+.bulk-actions{display:flex;gap:6px;align-items:center}
+.bulk-btn{
+  background:#1a1a1a;color:#ddd;border:1px solid #333;border-radius:6px;
+  padding:6px 12px;font-size:12px;cursor:pointer;
+}
+.bulk-btn:hover{border-color:#666;color:#fff}
+.bulk-btn.danger{border-color:#e53935;color:#e53935}
+.bulk-btn.danger:hover{background:#e53935;color:#fff}
+.bulk-btn[hidden]{display:none}
 .video-card .dur-badge{
   position:absolute;bottom:8px;right:8px;
   background:rgba(0,0,0,.8);color:#fff;font-size:12px;font-weight:600;
@@ -264,7 +287,37 @@ select:focus{outline:none;border-color:#e53935}
 }
 .video-card:hover .card-del{display:block}
 .video-card .card-del:hover{background:#e53935;border-color:#e53935}
-.video-card .meta{padding:10px 12px}
+.video-card .meta{padding:10px 12px;cursor:pointer}
+.video-card .meta-row{
+  display:flex;align-items:center;gap:8px;
+}
+.video-card .meta .date{flex:1}
+.video-card .actions{display:flex;gap:2px;align-items:center}
+.video-card .act-btn{
+  width:26px;height:26px;border-radius:5px;
+  background:transparent;border:none;color:#999;
+  display:inline-flex;align-items:center;justify-content:center;cursor:pointer;
+  transition:background .12s,color .12s;
+}
+.video-card .act-btn:hover{background:#2a2a2a;color:#fff}
+.video-card .act-btn.danger:hover{background:#e53935;color:#fff}
+.video-card .act-btn svg{width:15px;height:15px;fill:currentColor}
+
+/* Share picker popup (rendered into document.body, positioned at runtime). */
+.share-pop{
+  position:absolute;z-index:300;background:#15151c;
+  border:1px solid #2e2e3e;border-radius:8px;
+  box-shadow:0 12px 32px rgba(0,0,0,.6);
+  padding:4px;min-width:170px;display:none;
+}
+.share-pop.open{display:block}
+.share-pop button{
+  display:flex;align-items:center;gap:10px;width:100%;
+  background:transparent;border:none;color:#ddd;
+  padding:8px 10px;font-size:12px;text-align:left;cursor:pointer;border-radius:5px;
+}
+.share-pop button:hover{background:#1a1a24;color:#fff}
+.share-pop svg{width:14px;height:14px;flex-shrink:0;fill:currentColor}
 .video-card .meta .filename{
   font-size:13px;font-weight:600;color:#e0e0e0;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
@@ -359,6 +412,12 @@ select:focus{outline:none;border-color:#e53935}
     <option value="dur-desc">Longest First</option>
     <option value="dur-asc">Shortest First</option>
   </select>
+  <div class="bulk-actions">
+    <button type="button" class="bulk-btn" onclick="selectAllVisible()">Select all</button>
+    <button type="button" class="bulk-btn" onclick="deselectAll()">Deselect all</button>
+    <button type="button" class="bulk-btn danger" id="bulk-delete-btn"
+            onclick="deleteSelected()" hidden>Delete videos</button>
+  </div>
   <span class="video-count" id="video-count"></span>
 </div>
 
@@ -387,6 +446,8 @@ select:focus{outline:none;border-color:#e53935}
 var allVideos = [];
 var allTags = [];
 var activeTag = '';
+var selectedIds = new Set();
+var lastFilteredIds = [];   // ids currently shown (drives Select-all scope)
 
 async function init() {
   var res = await fetch('/library/api/videos');
@@ -465,8 +526,75 @@ function applyFilters() {
     return 0;
   });
 
+  lastFilteredIds = filtered.map(function(v){ return v.id; });
+  // Drop selections that are no longer visible.
+  var visible = new Set(lastFilteredIds);
+  selectedIds.forEach(function(id){ if (!visible.has(id)) selectedIds.delete(id); });
+
   renderGrid(filtered);
   document.getElementById('video-count').textContent = filtered.length + ' video' + (filtered.length !== 1 ? 's' : '');
+  updateBulkUI();
+}
+
+function toggleSelect(id, on) {
+  if (on) selectedIds.add(id); else selectedIds.delete(id);
+  var card = document.querySelector('.video-card[data-id="' + id + '"]');
+  if (card) card.classList.toggle('selected', on);
+  updateBulkUI();
+}
+
+function selectAllVisible() {
+  for (var i = 0; i < lastFilteredIds.length; i++) selectedIds.add(lastFilteredIds[i]);
+  syncCheckboxes();
+}
+
+function deselectAll() {
+  selectedIds.clear();
+  syncCheckboxes();
+}
+
+function syncCheckboxes() {
+  var boxes = document.querySelectorAll('.card-check input[data-id]');
+  for (var i = 0; i < boxes.length; i++) {
+    var id = parseInt(boxes[i].getAttribute('data-id'), 10);
+    var on = selectedIds.has(id);
+    boxes[i].checked = on;
+    var card = boxes[i].closest('.video-card');
+    if (card) card.classList.toggle('selected', on);
+  }
+  updateBulkUI();
+}
+
+function updateBulkUI() {
+  var btn = document.getElementById('bulk-delete-btn');
+  if (!btn) return;
+  var n = selectedIds.size;
+  btn.hidden = (n === 0);
+  btn.textContent = n > 1 ? ('Delete ' + n + ' videos') : 'Delete video';
+}
+
+async function deleteSelected() {
+  var ids = Array.from(selectedIds);
+  if (!ids.length) return;
+  var msg = ids.length === 1
+    ? 'Delete this video permanently?'
+    : 'Delete ' + ids.length + ' videos permanently?';
+  if (!confirm(msg)) return;
+  var btn = document.getElementById('bulk-delete-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Deleting…'; }
+  var failed = 0;
+  for (var i = 0; i < ids.length; i++) {
+    try {
+      var r = await fetch('/library/api/delete/' + ids[i], {method:'POST'});
+      var d = await r.json();
+      if (!d.ok) failed++;
+      else allVideos = allVideos.filter(function(v){ return v.id !== ids[i]; });
+    } catch (e) { failed++; }
+  }
+  selectedIds.clear();
+  if (btn) { btn.disabled = false; }
+  applyFilters();
+  if (failed) alert(failed + ' video' + (failed !== 1 ? 's' : '') + ' could not be deleted.');
 }
 
 function formatDuration(sec) {
@@ -525,19 +653,39 @@ function renderGrid(videos) {
           title: 'Caption by ' + v.caption_provider
                 + (capModel ? ' · ' + capModel : ''),
         }) : '';
-    html += '<div class="video-card" onclick="playVideo(' + v.id + ',\'' + escHtml(v.filename) + '\')">'
+    var isSel = selectedIds.has(v.id);
+    var safeName = escHtml(v.filename);
+    html += '<div class="video-card' + (isSel ? ' selected' : '') + '" data-id="' + v.id + '">'
       + '<div class="thumb-wrap">'
-      + '<img src="/library/api/thumbnail/' + v.id + '" loading="lazy" alt=""/>'
-      + '<div class="play-btn">'
+      + '<video data-id="' + v.id + '" preload="none" playsinline'
+      +   ' poster="/library/api/thumbnail/' + v.id + '"'
+      +   ' src="/library/api/video/' + v.id + '"></video>'
+      + '<label class="card-check" onclick="event.stopPropagation()">'
+      + '<input type="checkbox" data-id="' + v.id + '"' + (isSel ? ' checked' : '')
+      + ' onchange="toggleSelect(' + v.id + ', this.checked)">'
+      + '</label>'
+      + '<div class="play-btn" onclick="playInline(' + v.id + ')">'
       + '<div class="play-icon"><svg viewBox="0 0 24 24"><polygon points="8,5 19,12 8,19"/></svg></div>'
       + '</div>'
       + '<span class="dur-badge">' + formatDuration(v.duration) + '</span>'
       + ((wizBadge || capBadge) ? '<span class="card-ai-badges">' + wizBadge + capBadge + '</span>' : '')
-      + '<button class="card-del" onclick="event.stopPropagation();deleteVideo(' + v.id + ')" title="Delete">&times;</button>'
       + '</div>'
-      + '<div class="meta">'
-      + '<div class="filename">' + escHtml(v.filename) + '</div>'
-      + '<div class="date">' + formatDate(v.generated_at) + '</div>'
+      + '<div class="meta" onclick="playVideo(' + v.id + ',\'' + safeName + '\')">'
+      + '<div class="meta-row">'
+      +   '<div class="date">' + formatDate(v.generated_at) + '</div>'
+      +   '<div class="actions" onclick="event.stopPropagation()">'
+      +     '<button class="act-btn" title="Share" onclick="shareToggle(event,' + v.id + ')">'
+      +       '<svg viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/></svg>'
+      +     '</button>'
+      +     '<button class="act-btn" title="Edit in Builder"'
+      +       ' onclick="editInBuilder(\'' + safeName + '\')">'
+      +       '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>'
+      +     '</button>'
+      +     '<button class="act-btn danger" title="Delete" onclick="deleteVideo(' + v.id + ')">'
+      +       '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>'
+      +     '</button>'
+      +   '</div>'
+      + '</div>'
       + '<div class="card-tags">' + tagsHtml + '</div>'
       + '</div>'
       + '</div>';
@@ -549,6 +697,25 @@ function escHtml(s) {
   var d = document.createElement('div');
   d.textContent = s;
   return d.innerHTML;
+}
+
+function playInline(id) {
+  // Pause any other inline videos currently playing.
+  document.querySelectorAll('.video-card video').forEach(function(el){
+    var card = el.closest('.video-card');
+    if (!card || parseInt(card.getAttribute('data-id'),10) === id) return;
+    if (!el.paused) el.pause();
+    el.removeAttribute('controls');
+    card.classList.remove('is-playing');
+  });
+  var card = document.querySelector('.video-card[data-id="' + id + '"]');
+  if (!card) return;
+  var vid = card.querySelector('video');
+  if (!vid) return;
+  vid.setAttribute('controls', '');
+  card.classList.add('is-playing');
+  var p = vid.play();
+  if (p && typeof p.catch === 'function') p.catch(function(){});
 }
 
 function playVideo(id, filename) {
@@ -613,6 +780,9 @@ function playVideo(id, filename) {
       + '<svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>'
       + 'Copy Caption</button>';
   }
+  html += '<button class="pd-btn" onclick="editInBuilder(\'' + escHtml(v.filename) + '\')">'
+    + '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>'
+    + 'Edit in Builder</button>';
   html += '<button class="pd-btn ig" onclick="postToInstagram(' + v.id + ')">'
     + '<svg viewBox="0 0 24 24"><path d="M7.8 2h8.4C19.4 2 22 4.6 22 7.8v8.4a5.8 5.8 0 0 1-5.8 5.8H7.8C4.6 22 2 19.4 2 16.2V7.8A5.8 5.8 0 0 1 7.8 2m-.2 2A3.6 3.6 0 0 0 4 7.6v8.8C4 18.39 5.61 20 7.6 20h8.8a3.6 3.6 0 0 0 3.6-3.6V7.6C20 5.61 18.39 4 16.4 4H7.6m9.65 1.5a1.25 1.25 0 0 1 1.25 1.25A1.25 1.25 0 0 1 17.25 8 1.25 1.25 0 0 1 16 6.75a1.25 1.25 0 0 1 1.25-1.25M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/></svg>'
     + 'Post to Instagram</button>';
@@ -646,6 +816,10 @@ function closePlayer() {
   video.pause();
   video.src = '';
   overlay.classList.remove('active');
+}
+
+function editInBuilder(filename) {
+  window.location.href = '/builder?load=' + encodeURIComponent(filename);
 }
 
 function deleteVideo(id) {
@@ -733,6 +907,91 @@ async function uploadToDrive(videoId) {
     }
   };
   poll();
+}
+
+// -- Share picker (per-card) --
+var SHARE_TARGETS = [
+  {key:'email',     label:'Email',
+   svg:'<svg viewBox="0 0 24 24"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/></svg>'},
+  {key:'imessage',  label:'iMessage',
+   svg:'<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.04 2 11c0 2.52 1.16 4.79 3.03 6.39-.11 1.16-.5 2.62-1.43 3.61 1.71-.16 3.36-.91 4.71-1.91 1.16.34 2.4.52 3.69.52 5.52 0 10-4.04 10-9S17.52 2 12 2z"/></svg>'},
+  {key:'instagram', label:'Instagram',
+   svg:'<svg viewBox="0 0 24 24"><path d="M7.8 2h8.4C19.4 2 22 4.6 22 7.8v8.4a5.8 5.8 0 0 1-5.8 5.8H7.8C4.6 22 2 19.4 2 16.2V7.8A5.8 5.8 0 0 1 7.8 2m-.2 2A3.6 3.6 0 0 0 4 7.6v8.8C4 18.39 5.61 20 7.6 20h8.8a3.6 3.6 0 0 0 3.6-3.6V7.6C20 5.61 18.39 4 16.4 4H7.6m9.65 1.5a1.25 1.25 0 0 1 1.25 1.25A1.25 1.25 0 0 1 17.25 8 1.25 1.25 0 0 1 16 6.75a1.25 1.25 0 0 1 1.25-1.25M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/></svg>'},
+  {key:'youtube',   label:'YouTube',
+   svg:'<svg viewBox="0 0 24 24"><path d="M23 12s0-3.6-.46-5.33a2.78 2.78 0 0 0-1.96-1.96C18.85 4.25 12 4.25 12 4.25s-6.85 0-8.58.46A2.78 2.78 0 0 0 1.46 6.67C1 8.4 1 12 1 12s0 3.6.46 5.33c.25.94.97 1.66 1.96 1.91 1.73.46 8.58.46 8.58.46s6.85 0 8.58-.46c.99-.25 1.71-.97 1.96-1.91C23 15.6 23 12 23 12zM9.75 15.5v-7l6 3.5-6 3.5z"/></svg>'},
+  {key:'tiktok',    label:'TikTok',
+   svg:'<svg viewBox="0 0 24 24"><path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64 2.93 2.93 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.05A6.33 6.33 0 0 0 5.8 20.1a6.34 6.34 0 0 0 10.86-4.43V9.07a8.32 8.32 0 0 0 4.86 1.55V7.18a4.85 4.85 0 0 1-1.93-.49z"/></svg>'},
+];
+
+function shareToggle(ev, id) {
+  ev.stopPropagation();
+  var existing = document.getElementById('share-pop');
+  if (existing && existing.classList.contains('open')
+      && existing.dataset.id === String(id)) {
+    existing.classList.remove('open');
+    return;
+  }
+  var pop = existing;
+  if (!pop) {
+    pop = document.createElement('div');
+    pop.id = 'share-pop';
+    pop.className = 'share-pop';
+    document.body.appendChild(pop);
+  }
+  pop.dataset.id = String(id);
+  var html = '';
+  for (var i = 0; i < SHARE_TARGETS.length; i++) {
+    var t = SHARE_TARGETS[i];
+    html += '<button onclick="shareTo(\'' + t.key + '\',' + id + ')">'
+      + t.svg + '<span>' + t.label + '</span></button>';
+  }
+  pop.innerHTML = html;
+  pop.classList.add('open');
+  // Position below the button, right-aligned to it.
+  var btn = ev.currentTarget;
+  var r = btn.getBoundingClientRect();
+  var popW = pop.offsetWidth || 170;
+  var left = window.scrollX + r.right - popW;
+  if (left < 8) left = 8;
+  pop.style.top = (window.scrollY + r.bottom + 4) + 'px';
+  pop.style.left = left + 'px';
+}
+
+document.addEventListener('click', function(e) {
+  var pop = document.getElementById('share-pop');
+  if (!pop || !pop.classList.contains('open')) return;
+  if (pop.contains(e.target)) return;
+  pop.classList.remove('open');
+});
+
+async function shareTo(target, id) {
+  var pop = document.getElementById('share-pop');
+  if (pop) pop.classList.remove('open');
+  var v = allVideos.find(function(x){ return x.id === id; });
+  if (!v) return;
+
+  if (target === 'email')     { emailFromLibrary(id, v.filename); return; }
+  if (target === 'instagram') { postToInstagram(id);              return; }
+
+  // For iMessage / YouTube / TikTok: copy caption, reveal file in Finder,
+  // open the app/site so the user can drop the file into the upload area.
+  if (v.caption) {
+    try { await navigator.clipboard.writeText(v.caption); } catch (e) {}
+  }
+  fetch('/api/open', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({path: v.path, reveal: true}),
+  });
+  var urls = {
+    imessage: 'messages://',
+    youtube:  'https://studio.youtube.com/',
+    tiktok:   'https://www.tiktok.com/upload',
+  };
+  var labels = {imessage:'Messages', youtube:'YouTube Studio', tiktok:'TikTok'};
+  if (urls[target]) window.open(urls[target], '_blank');
+  alert((v.caption ? 'Caption copied to clipboard.\n\n' : '')
+    + labels[target] + ' opened. Drag the video from Finder into the upload area.');
 }
 
 async function emailFromLibrary(videoId, filename) {

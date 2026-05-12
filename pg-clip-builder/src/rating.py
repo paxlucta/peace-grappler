@@ -226,6 +226,44 @@ nav a.active{color:#e53935;border-color:#e53935}
 .search-clear:hover{color:#fff;border-color:#666}
 .search-status{font-size:11px;color:#1976d2;font-weight:600;white-space:nowrap}
 
+/* -- File filter (multi-select dropdown, mirrors Builder/Wizard) -- */
+.file-filter{position:relative;display:inline-block}
+.file-filter > button{
+  display:inline-flex;align-items:center;gap:6px;
+  background:#1a1a1a;color:#e0e0e0;border:1px solid #333;
+  border-radius:6px;padding:7px 10px;font-size:13px;cursor:pointer;
+}
+.file-filter > button:hover{border-color:#666}
+.file-filter .ff-caret{font-size:10px;color:#888}
+.ff-pop{
+  display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:200;
+  width:max-content;min-width:320px;max-width:min(90vw,900px);
+  background:#15151c;border:1px solid #2e2e3e;border-radius:8px;
+  box-shadow:0 12px 32px rgba(0,0,0,.6);padding:10px;
+}
+.ff-pop.open{display:block}
+.ff-actions{display:flex;gap:6px;margin-bottom:8px}
+.ff-actions button{
+  flex:1;font-size:11px;padding:5px 10px;background:#1a1a1a;
+  border:1px solid #333;color:#ddd;border-radius:4px;cursor:pointer;
+}
+.ff-actions button:hover{border-color:#666;color:#fff}
+#ff-search{
+  width:100%;padding:6px 8px;background:#0c0c14;border:1px solid #2e2e3e;
+  color:#eee;border-radius:4px;font-size:12px;margin-bottom:8px;
+  box-sizing:border-box;outline:none;
+}
+#ff-search:focus{border-color:#1976d2}
+.ff-list{max-height:280px;overflow-y:auto;display:flex;flex-direction:column}
+.ff-item{
+  display:flex;align-items:center;gap:8px;padding:5px 6px;
+  border-radius:4px;cursor:pointer;font-size:12px;color:#ddd;
+}
+.ff-item:hover{background:#1a1a24}
+.ff-item input{accent-color:#e53935;flex-shrink:0}
+.ff-item .ff-name{flex:1;white-space:nowrap}
+.ff-item .ff-count{color:#666;font-size:10px;flex-shrink:0}
+
 /* -- Scene grid -- */
 .scene-grid{
   display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;
@@ -387,11 +425,21 @@ nav a.active{color:#e53935;border-color:#e53935}
     <button class="search-clear" id="search-clear" onclick="clearSearch()" style="display:none">Clear</button>
   </div>
   <div class="search-row" style="margin-top:-4px">
-    <label for="file-filter" style="font-size:12px;color:#888;flex-shrink:0">Filter by file:</label>
-    <select id="file-filter" class="search-input" onchange="setFileFilter(this.value)"
-            style="flex:1;cursor:pointer">
-      <option value="">All files</option>
-    </select>
+    <label style="font-size:12px;color:#888;flex-shrink:0">Filter by file:</label>
+    <div class="file-filter">
+      <button type="button" id="file-filter-btn" onclick="toggleFileFilter(event)">
+        <span id="file-filter-label">All files</span>
+        <span class="ff-caret">&#9662;</span>
+      </button>
+      <div id="file-filter-pop" class="ff-pop">
+        <div class="ff-actions">
+          <button type="button" onclick="ffSelectAll(true)">Select all</button>
+          <button type="button" onclick="ffSelectAll(false)">Deselect all</button>
+        </div>
+        <input type="search" id="ff-search" placeholder="Filter files&hellip;" oninput="ffRenderList()">
+        <div class="ff-list" id="ff-list"></div>
+      </div>
+    </div>
   </div>
   <div class="tag-bar" id="tag-bar"></div>
   <div class="scene-count" id="scene-count"></div>
@@ -419,45 +467,96 @@ nav a.active{color:#e53935;border-color:#e53935}
 <script>
 var allScenes = [];
 var activeTag = '';
-var activeFile = '';         // filename selected in the file-filter dropdown; '' = all
 var searchQuery = '';        // current text query
 var searchHitIds = null;     // null = no search active; Set of scene_ids when active
 var searchTimer = null;
 
+// -- File-filter multi-select (mirrors the Builder/Wizard control) --
+var ffFiles = [];            // [{name, count}, ...] sorted alphabetically
+var ffSelected = null;       // Set<filename>; null until ffInit() runs
+
 async function init() {
   allScenes = await fetch('/rate/api/scenes').then(function(r){return r.json()});
-  renderFileFilter();
+  ffInit();
   renderTagBar();
   renderGrid();
 }
 
-function renderFileFilter() {
-  var sel = document.getElementById('file-filter');
-  if (!sel) return;
-  // Count scenes per source file so the dropdown shows useful context.
+function ffInit() {
   var counts = {};
   for (var i = 0; i < allScenes.length; i++) {
     var fn = allScenes[i].filename || '';
+    if (!fn) continue;
     counts[fn] = (counts[fn] || 0) + 1;
   }
-  var names = Object.keys(counts).sort(function(a, b){
+  ffFiles = Object.keys(counts).sort(function(a, b){
     return a.localeCompare(b);
-  });
-  var html = '<option value="">All files (' + allScenes.length + ')</option>';
-  for (var k = 0; k < names.length; k++) {
-    var n = names[k];
-    html += '<option value="' + n.replace(/"/g, '&quot;') + '">'
-          + n + ' (' + counts[n] + ')</option>';
-  }
-  sel.innerHTML = html;
-  sel.value = activeFile;
+  }).map(function(fn){ return {name: fn, count: counts[fn]}; });
+  ffSelected = new Set(ffFiles.map(function(f){return f.name}));
+  ffRenderList();
+  ffUpdateLabel();
 }
 
-function setFileFilter(name) {
-  activeFile = name || '';
-  renderTagBar();   // counts may shrink to scenes in this file
+function ffRenderList() {
+  var list = document.getElementById('ff-list');
+  if (!list) return;
+  var q = (document.getElementById('ff-search').value || '').toLowerCase();
+  var html = '';
+  for (var i = 0; i < ffFiles.length; i++) {
+    var f = ffFiles[i];
+    if (q && f.name.toLowerCase().indexOf(q) < 0) continue;
+    var checked = ffSelected.has(f.name) ? ' checked' : '';
+    var safe = f.name.replace(/"/g, '&quot;');
+    html += '<label class="ff-item">'
+      + '<input type="checkbox" data-fn="' + safe + '"' + checked
+      + ' onchange="ffToggle(this)">'
+      + '<span class="ff-name" title="' + safe + '">' + safe + '</span>'
+      + '<span class="ff-count">' + f.count + '</span>'
+      + '</label>';
+  }
+  list.innerHTML = html || '<div style="font-size:11px;color:#666;padding:6px">No matching files.</div>';
+}
+
+function ffToggle(input) {
+  var fn = input.getAttribute('data-fn');
+  if (input.checked) ffSelected.add(fn);
+  else ffSelected.delete(fn);
+  ffUpdateLabel();
+  renderTagBar();
   renderGrid();
 }
+
+function ffSelectAll(on) {
+  ffSelected = on ? new Set(ffFiles.map(function(f){return f.name})) : new Set();
+  ffRenderList();
+  ffUpdateLabel();
+  renderTagBar();
+  renderGrid();
+}
+
+function ffUpdateLabel() {
+  var el = document.getElementById('file-filter-label');
+  if (!el) return;
+  var total = ffFiles.length;
+  var n = ffSelected.size;
+  if (n === total)        el.textContent = 'All files (' + total + ')';
+  else if (n === 0)       el.textContent = 'No files';
+  else if (n === 1)       el.textContent = '1 file';
+  else                    el.textContent = n + ' / ' + total + ' files';
+}
+
+function toggleFileFilter(e) {
+  if (e) e.stopPropagation();
+  var pop = document.getElementById('file-filter-pop');
+  pop.classList.toggle('open');
+}
+document.addEventListener('click', function(e) {
+  var pop = document.getElementById('file-filter-pop');
+  if (!pop || !pop.classList.contains('open')) return;
+  var btn = document.getElementById('file-filter-btn');
+  if (pop.contains(e.target) || btn.contains(e.target)) return;
+  pop.classList.remove('open');
+});
 
 function renderTagBar() {
   var bar = document.getElementById('tag-bar');
@@ -525,8 +624,8 @@ function getFiltered() {
   if (searchHitIds) {
     base = base.filter(function(s) { return searchHitIds.has(s.id); });
   }
-  if (activeFile) {
-    base = base.filter(function(s) { return s.filename === activeFile; });
+  if (ffSelected && ffSelected.size !== ffFiles.length) {
+    base = base.filter(function(s) { return ffSelected.has(s.filename); });
   }
   return base;
 }
