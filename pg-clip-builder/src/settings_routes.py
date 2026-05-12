@@ -43,6 +43,7 @@ def api_app_set():
             tag_schema=data.get("tag_schema"),
             socials=data.get("socials"),
             analysis_mode=data.get("analysis_mode"),
+            theme=data.get("theme"),
             transcribe_provider=data.get("transcribe_provider"),
             transcribe_model=data.get("transcribe_model"),
             whisper_model=data.get("whisper_model"),
@@ -820,6 +821,22 @@ SETTINGS_PAGE = """<!doctype html>
 
   <div class="set-pane" id="set-pane-general" style="display:none">
 
+  <div class="section-title">Appearance</div>
+  <div class="card">
+    <div class="grid2">
+      <div>
+        <label>Theme</label>
+        <select id="theme-select" style="width:100%;padding:8px 10px;background:#0c0c14;border:1px solid #2e2e3e;color:#eee;border-radius:5px;font-size:12px">
+          <option value="default">Default — dark with red accent</option>
+          <option value="art_deco">Art Deco — gold on black, Poiret One headings</option>
+        </select>
+        <div class="muted" style="margin-top:6px">
+          Applies app-wide. Reload the page after saving to see the new theme.
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="section-title">Analysis</div>
   <div class="card">
     <p class="muted" style="margin:0 0 12px 0">
@@ -1135,6 +1152,9 @@ function fillFromAppCfg(){
   document.getElementById('tag-schema').value     =
     JSON.stringify(appCfg.tag_schema || {}, null, 2);
   renderSocials(appCfg.socials || {});
+  // Theme
+  var themeSel = document.getElementById('theme-select');
+  if (themeSel) themeSel.value = (appCfg.theme || 'default');
   // Analysis mode
   const mode = (appCfg.analysis_mode || 'visual');
   selectAnalysisMode(mode);
@@ -1701,6 +1721,7 @@ async function saveAll(){
     tag_schema:     tagSchema,
     socials:        _collectSocials(),
     analysis_mode:     _currentAnalysisMode(),
+    theme:             (document.getElementById('theme-select') || {}).value || 'default',
     transcribe_provider: document.getElementById('tx-provider').value,
     transcribe_model:    document.getElementById('tx-model').value,
     whisper_model:     document.getElementById('whisper-model').value,

@@ -36,6 +36,7 @@ GENERAL_KEYS = (
     "transcribe_provider", "transcribe_model",
     "whisper_model", "whisper_language", "whisper_translate",
     "ai",
+    "theme",
 )
 
 # Legacy paths — read once on first run for migration, then ignored.
@@ -71,6 +72,13 @@ DEFAULT_WHISPER_TRANSLATE = False  # if True, transcript is forced to English
 # transcription.MODELS / transcription.DEFAULT_MODEL.
 DEFAULT_TRANSCRIBE_PROVIDER = "whisper"
 TRANSCRIBE_PROVIDERS = ("whisper", "openai", "gemini")
+
+# UI theme. "default" keeps the existing dark / red-accent look. "art_deco"
+# repaints the entire app in gold-on-black art-deco styling inspired by
+# the ClipBuilder logo (Poiret One headings, copper/gold accents, etched
+# borders). Applied via a global CSS overlay injected by chrome.py.
+DEFAULT_THEME = "default"
+THEMES = ("default", "art_deco")
 
 SOCIAL_PLATFORMS = ("instagram", "tiktok", "youtube")
 
@@ -343,6 +351,9 @@ def _fill_defaults(raw, profile_name):
     if transcribe_provider not in TRANSCRIBE_PROVIDERS:
         transcribe_provider = DEFAULT_TRANSCRIBE_PROVIDER
     transcribe_model = (raw.get("transcribe_model") or "").strip()
+    theme = (raw.get("theme") or "").strip().lower()
+    if theme not in THEMES:
+        theme = DEFAULT_THEME
     return {
         "profile_name":   (raw.get("profile_name") or profile_name or "").strip()
                           or DEFAULT_BRAND_NAME,
@@ -373,6 +384,7 @@ def _fill_defaults(raw, profile_name):
         "whisper_model":       whisper_model,
         "whisper_language":    (raw.get("whisper_language") or "").strip(),
         "whisper_translate":   bool(raw.get("whisper_translate", False)),
+        "theme":               theme,
         "captions":            _validate_captions(raw.get("captions")),
     }
 
@@ -462,6 +474,9 @@ def get_app_settings():
     if transcribe_provider not in TRANSCRIBE_PROVIDERS:
         transcribe_provider = DEFAULT_TRANSCRIBE_PROVIDER
     transcribe_model = (raw.get("transcribe_model") or "").strip()
+    theme = (raw.get("theme") or "").strip().lower()
+    if theme not in THEMES:
+        theme = DEFAULT_THEME
     return {
         "analysis_mode":       mode,
         "transcribe_provider": transcribe_provider,
@@ -469,6 +484,7 @@ def get_app_settings():
         "whisper_model":       whisper_model,
         "whisper_language":    (raw.get("whisper_language") or "").strip(),
         "whisper_translate":   bool(raw.get("whisper_translate", False)),
+        "theme":               theme,
         "ai":                  raw.get("ai") or {},
     }
 
@@ -506,6 +522,11 @@ def set_app_settings(**fields):
         raw["transcribe_provider"] = p or DEFAULT_TRANSCRIBE_PROVIDER
     if "transcribe_model" in fields and fields["transcribe_model"] is not None:
         raw["transcribe_model"] = (fields["transcribe_model"] or "").strip()
+    if "theme" in fields and fields["theme"] is not None:
+        t = (fields["theme"] or "").strip().lower()
+        if t and t not in THEMES:
+            raise ValueError(f"theme must be one of {THEMES}, got {t!r}")
+        raw["theme"] = t or DEFAULT_THEME
     if "ai" in fields and fields["ai"] is not None:
         if not isinstance(fields["ai"], dict):
             raise ValueError("ai must be a dict")

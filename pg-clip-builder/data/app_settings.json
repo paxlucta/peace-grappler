@@ -29,5 +29,6 @@
     }
   },
   "transcribe_provider": "whisper",
-  "transcribe_model": "small"
+  "transcribe_model": "small",
+  "theme": "default"
 }
