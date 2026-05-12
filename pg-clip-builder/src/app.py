@@ -340,6 +340,31 @@ header{padding:6px 20px 7px}
   var headerEl = document.querySelector('header');
   if (headerEl && window.PG_APP && window.PG_APP.brand
       && !headerEl.querySelector('.pg-brand-pill')) {
+    // Resolve the per-profile color (set by the Settings Wizard from the
+    // brand's website) and derive bg / border / hover / fg from it. Falls
+    // back to the default purple when the profile has no brand_color set.
+    function _pgHexToRgba(hex, alpha) {
+      var h = (hex || '').replace(/^#/, '');
+      if (h.length === 3) h = h.split('').map(function(c){return c+c}).join('');
+      if (!/^[0-9a-fA-F]{6}$/.test(h)) h = '7c3aed';
+      var r = parseInt(h.slice(0,2),16),
+          g = parseInt(h.slice(2,4),16),
+          b = parseInt(h.slice(4,6),16);
+      return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+    }
+    function _pgReadableFg(hex) {
+      // Mix toward white 55% so the label stays bright but keeps the
+      // brand hue. Matches the picker's preview swatch.
+      var h = (hex || '').replace(/^#/, '');
+      if (h.length === 3) h = h.split('').map(function(c){return c+c}).join('');
+      if (!/^[0-9a-fA-F]{6}$/.test(h)) h = '7c3aed';
+      var r = parseInt(h.slice(0,2),16),
+          g = parseInt(h.slice(2,4),16),
+          b = parseInt(h.slice(4,6),16);
+      function mix(c){ return Math.round(c + (255 - c) * 0.55); }
+      return 'rgb(' + mix(r) + ',' + mix(g) + ',' + mix(b) + ')';
+    }
+    var brandHex = window.PG_APP.brand_color || '#7c3aed';
     var pill = document.createElement('a');
     pill.href = '/settings';
     pill.className = 'pg-brand-pill';
@@ -348,13 +373,15 @@ header{padding:6px 20px 7px}
     pill.style.cssText = ''
       + 'display:inline-flex;align-items:center;gap:5px;'
       + 'padding:4px 10px;border-radius:99px;'
-      + 'background:rgba(124,58,237,0.15);color:#c7a8ff;'
-      + 'border:1px solid rgba(124,58,237,0.4);'
+      + 'background:' + _pgHexToRgba(brandHex, 0.15) + ';'
+      + 'color:' + _pgReadableFg(brandHex) + ';'
+      + 'border:1px solid ' + _pgHexToRgba(brandHex, 0.4) + ';'
       + 'font-size:10px;font-weight:700;letter-spacing:0.5px;'
       + 'text-transform:uppercase;text-decoration:none;'
-      + 'margin-left:12px;cursor:pointer;flex-shrink:0;';
-    pill.onmouseenter = function(){ this.style.background = 'rgba(124,58,237,0.28)'; };
-    pill.onmouseleave = function(){ this.style.background = 'rgba(124,58,237,0.15)'; };
+      + 'margin-left:12px;cursor:pointer;flex-shrink:0;'
+      + 'transition:background .2s;';
+    pill.onmouseenter = function(){ this.style.background = _pgHexToRgba(brandHex, 0.28); };
+    pill.onmouseleave = function(){ this.style.background = _pgHexToRgba(brandHex, 0.15); };
     var nav0 = headerEl.querySelector('nav');
     if (nav0) headerEl.insertBefore(pill, nav0);
     else headerEl.appendChild(pill);
@@ -981,12 +1008,45 @@ def _start_video_watcher():
     t.start()
 
 
+def _wait_for_port_free(port, timeout=15.0):
+    """Poll until *port* is bindable on 0.0.0.0 or *timeout* elapses.
+
+    Used when this process was spawned by ``/settings/api/restart`` —
+    the old instance is still alive and holding the port until its
+    SIGTERM lands. We try a throwaway bind every 300 ms so app.run()
+    only gets called once the kernel has released the address.
+    """
+    import socket as _sock
+    import time as _t
+    deadline = _t.time() + max(0.5, float(timeout))
+    while _t.time() < deadline:
+        s = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
+        try:
+            s.setsockopt(_sock.SOL_SOCKET, _sock.SO_REUSEADDR, 1)
+            s.bind(("0.0.0.0", port))
+            s.close()
+            return True
+        except OSError:
+            try: s.close()
+            except Exception: pass
+            _t.sleep(0.3)
+    return False
+
+
 def main():
     port = 5555
     if "--port" in sys.argv:
         idx = sys.argv.index("--port")
         if idx + 1 < len(sys.argv):
             port = int(sys.argv[idx + 1])
+
+    # When the previous process spawned us via the Settings restart
+    # endpoint, the parent is still alive holding the port until its
+    # SIGTERM lands. Poll until the port is bindable before continuing
+    # so Werkzeug doesn't blow up with EADDRINUSE on startup.
+    if "--wait-bind" in sys.argv:
+        print(f"[restart] Waiting for port {port} to free up…")
+        _wait_for_port_free(port, timeout=15.0)
 
     # Initialize DB
     get_db()

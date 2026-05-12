@@ -70,17 +70,22 @@ def header_html(active: str = "") -> str:
         parts.append("</div>")
         parts.append(
             "<style>"
-            # Strip is transparent on purpose so it sits flush against the
-            # page chrome — only the active pill draws a background. Match
-            # the size/look used on the rating page (correct reference).
-            ".pg-subnav{display:flex;gap:10px;padding:16px 20px 14px;"
-            "background:transparent;flex-shrink:0;align-items:center}"
-            ".pg-subnav a{color:#888;text-decoration:none;font-size:14px;"
-            "font-weight:600;padding:8px 18px;border-radius:8px;"
-            "transition:background .15s,color .15s;"
+            # Underline-style tab strip — matches the Profile/General tabs
+            # on /settings. The whole strip sits on a shared baseline so
+            # the active tab's red underline reads as a real tab control,
+            # not just a pill button. Container is transparent; only the
+            # baseline border + active-tab underline are visible.
+            ".pg-subnav{display:flex;gap:4px;padding:14px 20px 0;"
+            "background:transparent;flex-shrink:0;align-items:flex-end;"
+            "border-bottom:1px solid #1e1e2a;margin-bottom:18px}"
+            ".pg-subnav a{color:#888;text-decoration:none;font-size:13px;"
+            "font-weight:600;padding:10px 18px;letter-spacing:0.4px;"
+            "border:none;border-bottom:2px solid transparent;"
+            "margin-bottom:-1px;background:transparent;"
+            "transition:color .15s,border-color .15s;"
             "display:inline-flex;align-items:center;line-height:1}"
-            ".pg-subnav a:hover{color:#fff;background:#1a1a22}"
-            ".pg-subnav a.active{color:#fff;background:#e53935}"
+            ".pg-subnav a:hover{color:#fff}"
+            ".pg-subnav a.active{color:#fff;border-bottom-color:#e53935}"
             "</style>"
         )
 

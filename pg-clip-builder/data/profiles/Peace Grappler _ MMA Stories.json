@@ -1,0 +1,119 @@
+{
+  "profile_name": "Peace Grappler _ MMA Stories",
+  "brand_name": "Peace Grappler | MMA Stories",
+  "content_domain": "MMA / combat sports media",
+  "source_folder": "videos/peacegrappler",
+  "output_folder": "output/peacegrappler",
+  "tag_schema": {
+    "activity": [
+      "striking",
+      "punch",
+      "jab",
+      "cross",
+      "hook",
+      "uppercut",
+      "kick",
+      "leg-kick",
+      "head-kick",
+      "knee-strike",
+      "elbow-strike",
+      "takedown",
+      "sprawl",
+      "clinch",
+      "ground-and-pound",
+      "submission",
+      "rear-naked-choke",
+      "guillotine",
+      "armbar",
+      "triangle-choke",
+      "kimura",
+      "guard-pass",
+      "mount",
+      "back-take",
+      "scramble",
+      "knockout",
+      "tko",
+      "referee-stoppage",
+      "tap-out",
+      "weigh-in",
+      "face-off",
+      "walkout",
+      "cage-entrance",
+      "corner-instructions",
+      "post-fight-interview",
+      "press-conference",
+      "fighter-introduction",
+      "decision-announcement",
+      "shadow-boxing",
+      "pad-work",
+      "heavy-bag",
+      "sparring",
+      "grappling-drill",
+      "celebration",
+      "talking-head",
+      "highlight-reel"
+    ],
+    "camera": [
+      "close-up",
+      "medium-shot",
+      "wide-shot",
+      "overhead",
+      "pov",
+      "handheld",
+      "steady",
+      "tracking",
+      "slow-pan"
+    ],
+    "energy": [
+      "high-energy",
+      "medium-energy",
+      "low-energy"
+    ],
+    "quality": [
+      "low-quality"
+    ],
+    "setting": [
+      "octagon",
+      "cage",
+      "boxing-ring",
+      "mma-gym",
+      "training-room",
+      "weigh-in-stage",
+      "press-conference-room",
+      "locker-room",
+      "arena",
+      "backstage",
+      "interview-set",
+      "outdoor-training",
+      "ufc-event",
+      "podcast-studio"
+    ]
+  },
+  "intro_video": "",
+  "outro_video": "",
+  "brand_color": "#7c3aed",
+  "socials": {
+    "instagram": {
+      "handle": "@peacegrappler",
+      "url": "https://instagram.com/peacegrappler",
+      "cookies": ""
+    },
+    "tiktok": {
+      "handle": "",
+      "url": "",
+      "cookies": ""
+    },
+    "youtube": {
+      "handle": "",
+      "url": "",
+      "cookies": ""
+    }
+  },
+  "captions": {
+    "font": "sans",
+    "color": "#ffffff",
+    "bg_on": false,
+    "bg_color": "#000000",
+    "position": "bottom"
+  }
+}

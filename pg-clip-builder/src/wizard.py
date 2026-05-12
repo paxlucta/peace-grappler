@@ -583,15 +583,30 @@ def _plan_video(model, research, scenes, music_files, feedback,
     cuts = research.get("pacing_cuts_per_minute", 20)
 
     if enable_text_overlays:
+        # When the user toggles "Enable AI text overlays" we want the model
+        # to act like a social-video editor: surface punchy on-screen text
+        # ONLY on the beats that would lift retention (hook, payoff,
+        # surprise, climax, CTA). It's an explicit engagement tool — not a
+        # decoration — so the instruction calls that out directly and tells
+        # the model to skip overlays on clips where they'd hurt the read.
         text_instruction = (
-            "- TEXT OVERLAYS ARE ENABLED AND REQUIRED. You MUST add \"text_overlay\" "
-            "to at least 3-4 clips. Use short punchy ALL-CAPS text (2-6 words) that "
-            "drives engagement:\n"
-            "  Examples: 'WATCH THIS', 'KO OF THE YEAR', 'HE DIDN'T SEE IT COMING', "
-            "'DEVASTATING', 'PURE POWER', 'SUBMISSION LOCKED'\n"
-            "  Add text to: the hook clip, the climax, any dramatic moment, the ending.\n"
-            "  Works on both portrait AND widescreen scenes.\n"
-            "  Set to null only for clips where text would distract."
+            "- TEXT OVERLAYS ARE ENABLED. Treat \"text_overlay\" as a "
+            "retention tool: insert short, punchy ALL-CAPS text ONLY where "
+            "you judge it will measurably improve viewer engagement "
+            "(stop-the-scroll hook, payoff moment, surprise reveal, "
+            "climax, final CTA). 2-6 words, max one line, in the spirit "
+            "of best-performing Reels for this domain.\n"
+            "  - Aim for 3-5 overlays across the whole reel — quality "
+            "beats quantity. Skip clips where text would clutter the "
+            "moment or where the scene already speaks for itself.\n"
+            "  - Examples (adapt to the actual content): 'WATCH THIS', "
+            "'WAIT FOR IT', 'PURE POWER', 'YOU WON'T BELIEVE THIS', "
+            "'SUBMISSION LOCKED', 'KO OF THE YEAR'.\n"
+            "  - Place text on: the hook (1st clip), any payoff/reveal, "
+            "the climax, the ending/CTA.\n"
+            "  - Works on both portrait AND widescreen scenes.\n"
+            "  - Set \"text_overlay\" to null for every clip that doesn't "
+            "need one — do not pad."
         )
     else:
         text_instruction = (
@@ -969,6 +984,21 @@ def _filter_scenes_by_folders(scenes, folders, video_dir):
     return filtered
 
 
+def _filter_scenes_by_files(scenes, filenames):
+    """Filter scenes to those whose source video filename is in *filenames*.
+
+    Used by the AI Builder's file-level Video Source picker (matches the
+    Builder page's file filter UX). *filenames* is a list/set of bare
+    filenames (basename only, no path).
+    """
+    targets = {str(f).strip() for f in filenames if f}
+    if not targets:
+        return scenes
+    return [s for s in scenes
+            if Path(s.get("video_path", "")).name in targets
+            or s.get("video_filename") in targets]
+
+
 def _auto_analyze_folders(model, folders):
     """Scan and analyze any unanalyzed videos in the selected folders."""
     from video import VIDEO_DIR, VIDEO_EXTENSIONS
@@ -1029,6 +1059,7 @@ def _auto_analyze_folders(model, folders):
 
 
 def _generate(model, num_videos, num_variations=1, folders=None,
+              files=None,
               mute_source=False, enable_text_overlays=False,
               music_folders=None, include_wide=True, provider=None,
               no_music=False, add_captions=False, caption_style=None,
@@ -1045,8 +1076,10 @@ def _generate(model, num_videos, num_variations=1, folders=None,
     _call_ctx.provider = provider
     _call_ctx.model    = model
     try:
-        # 0. Auto-analyze unanalyzed videos in selected folders
-        if folders:
+        # 0. Auto-analyze unanalyzed videos in selected folders. Skip when
+        # a per-file picker is in use — those files were already produced
+        # by /api/clips, so they're analyzed by definition.
+        if folders and not files:
             _auto_analyze_folders(model, folders)
 
         # 1. Research
@@ -1060,8 +1093,14 @@ def _generate(model, num_videos, num_variations=1, folders=None,
         emit("Loading scenes and music...")
         scenes = get_all_scenes()
 
-        # Filter by folders if specified
-        if folders:
+        # Filter by file (new) or folder (legacy). Files win when present —
+        # the wizard UI exposes file-level selection now.
+        if files:
+            before = len(scenes)
+            scenes = _filter_scenes_by_files(scenes, files)
+            emit(f"Filtered to {len(scenes)} scenes from {len(files)} "
+                 f"selected file(s) (was {before}).")
+        elif folders:
             from video import VIDEO_DIR
             scenes = _filter_scenes_by_folders(scenes, folders, VIDEO_DIR)
             emit(f"Filtered to {len(scenes)} scenes from selected folders")
@@ -1264,7 +1303,10 @@ def api_generate():
     provider = (data.get("provider") or "").strip() or None
     num_videos = max(1, min(10, data.get("num_videos", 1)))
     num_variations = max(1, min(3, data.get("variations", 1)))
-    folders = data.get("folders", [])
+    folders = data.get("folders", []) or []
+    # File-level Video Source picker — new wizard UI. Server prefers
+    # ``files`` over ``folders`` when both are present.
+    files_pick = data.get("files", []) or []
     mute_source = data.get("mute_source", False)
     enable_text_overlays = data.get("text_overlays", False)
     music_folders = data.get("music_folders", [])
@@ -1281,6 +1323,7 @@ def api_generate():
             "num_videos": num_videos,
             "num_variations": num_variations,
             "folders": folders,
+            "files": files_pick,
             "mute_source": mute_source,
             "enable_text_overlays": enable_text_overlays,
             "music_folders": music_folders,
@@ -1636,7 +1679,20 @@ input[type="number"]{width:80px}
 }
 .folder-item:hover{background:#333}
 .folder-item input{accent-color:#e53935}
-.folder-item .fi-name{flex:1}
+.folder-item .fi-name{flex:1;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
+.folder-item .fi-count{color:#777;font-size:10px;margin-left:8px;flex-shrink:0}
+.folder-actions .folder-act-btn{
+  flex:1;font-size:11px;padding:5px 10px;background:#1a1a1a;
+  border:1px solid #333;color:#ddd;border-radius:4px;cursor:pointer;
+  text-align:center;
+}
+.folder-actions .folder-act-btn:hover{border-color:#666;color:#fff}
+/* "No Music" sits at the top of the music picker and is mutually
+ * exclusive with the regular folder rows. */
+.folder-item.fi-nomusic{
+  border-bottom:1px solid #1a1a24;font-weight:600;color:#fff;
+}
 
 .btn-row{display:flex;gap:10px;align-items:flex-end}
 button{
@@ -1839,12 +1895,25 @@ button:disabled{opacity:.5;cursor:not-allowed}
       </div>
       <div class="field">
         <label>Video Source</label>
+        <!-- File-level picker (matches the Builder's filter). Lists each
+             individual source video with its analyzed-scene count so the
+             user can include / exclude specific files instead of broad
+             folders. Populated from /api/clips on init. -->
         <div class="folder-picker" id="folder-picker">
-          <button class="folder-btn" type="button" onclick="toggleDropdown('folder-dropdown')">
-            <span id="folder-btn-label">All Folders</span>
+          <button class="folder-btn" type="button" onclick="toggleDropdown('file-dropdown')">
+            <span id="file-btn-label">All files</span>
             <span class="arrow">&#9660;</span>
           </button>
-          <div class="folder-dropdown" id="folder-dropdown"></div>
+          <div class="folder-dropdown ff-dropdown" id="file-dropdown">
+            <div class="folder-actions" style="display:flex;gap:6px;padding:6px 8px 4px">
+              <button type="button" class="folder-act-btn" onclick="wizFileSelectAll(true)">Select all</button>
+              <button type="button" class="folder-act-btn" onclick="wizFileSelectAll(false)">Deselect all</button>
+            </div>
+            <input type="search" id="file-search" placeholder="Filter files…"
+                   oninput="renderFileList()"
+                   style="margin:4px 8px 8px;width:calc(100% - 16px);padding:6px 8px;background:#0c0c14;border:1px solid #2e2e3e;color:#eee;border-radius:4px;font-size:12px;box-sizing:border-box">
+            <div id="file-list" class="folder-list" style="max-height:240px;overflow-y:auto"></div>
+          </div>
         </div>
       </div>
       <div class="field">
@@ -1863,10 +1932,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
         <input type="checkbox" id="mute-source"> Mute source audio
       </label>
       <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#aaa;cursor:pointer"
-             title="Skip the music overlay entirely. Original audio (speech) is preserved.">
-        <input type="checkbox" id="no-music"> No music
-      </label>
-      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#aaa;cursor:pointer">
+             title="When enabled, the AI inserts short, punchy text overlays on engagement-driving moments (hook, climax, ending).">
         <input type="checkbox" id="text-overlays"> Enable AI text overlays
       </label>
       <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#aaa;cursor:pointer">
@@ -1990,7 +2056,7 @@ var captionDefaults = {
 
 async function init() {
   await loadModels();
-  loadFolders();
+  loadFiles();
   loadMusicFolders();
   await loadAppCfg();
 }
@@ -2055,6 +2121,7 @@ async function captionConfigSaveDefault() {
       output_folder:  cfg.output_folder,
       intro_video:    cfg.intro_video,
       outro_video:    cfg.outro_video,
+      brand_color:    cfg.brand_color || '',
       tag_schema:     cfg.tag_schema,
       socials:        cfg.socials,
       analysis_mode:  cfg.analysis_mode,
@@ -2139,30 +2206,141 @@ document.addEventListener('click', function(e) {
   }
 });
 
-async function loadFolders() {
-  var folders = await fetch('/wizard/api/folders').then(function(r){return r.json()});
-  var dd = document.getElementById('folder-dropdown');
+// ── Video Source: file-level picker (mirrors the Builder's filter) ────
+// We populate from /api/clips so the picker lists the actual scenes the
+// wizard will see, and each row shows how many analyzed scenes come from
+// that file (useful signal for what'll be available for selection).
+var _wizFiles = [];           // [{name, count}, ...]
+var _wizFileSelected = null;  // Set<filename>; null until first load
+
+async function loadFiles() {
+  var counts = {};
+  try {
+    var clips = await fetch('/api/clips').then(function(r){return r.json()});
+    for (var i = 0; i < clips.length; i++) {
+      var fn = clips[i].filename || '';
+      if (!fn) continue;
+      counts[fn] = (counts[fn] || 0) + 1;
+    }
+  } catch (e) { /* leave _wizFiles empty */ }
+  _wizFiles = Object.keys(counts).sort().map(function(fn){
+    return {name: fn, count: counts[fn]};
+  });
+  _wizFileSelected = new Set(_wizFiles.map(function(f){return f.name}));
+  renderFileList();
+  wizFileUpdateLabel();
+}
+
+function renderFileList() {
+  var list = document.getElementById('file-list');
+  if (!list) return;
+  var q = (document.getElementById('file-search').value || '').toLowerCase();
   var html = '';
-  for (var i = 0; i < folders.length; i++) {
+  for (var i = 0; i < _wizFiles.length; i++) {
+    var f = _wizFiles[i];
+    if (q && f.name.toLowerCase().indexOf(q) < 0) continue;
+    var checked = _wizFileSelected.has(f.name) ? ' checked' : '';
+    var safe = f.name.replace(/"/g, '&quot;');
     html += '<label class="folder-item">'
-      + '<input type="checkbox" value="' + folders[i] + '" checked onchange="updatePickerLabel(\'folder-dropdown\',\'folder-btn-label\',\'All Folders\')"/>'
-      + '<span class="fi-name">' + folders[i] + '</span></label>';
+      + '<input type="checkbox" data-fn="' + safe + '"' + checked
+      +   ' onchange="wizFileToggle(this)">'
+      + '<span class="fi-name" title="' + safe + '">' + safe + '</span>'
+      + '<span class="fi-count">' + f.count + '</span>'
+      + '</label>';
   }
-  dd.innerHTML = html;
-  updatePickerLabel('folder-dropdown', 'folder-btn-label', 'All Folders');
+  list.innerHTML = html
+    || '<div style="font-size:11px;color:#666;padding:8px 12px">No matching files.</div>';
+}
+
+function wizFileToggle(input) {
+  var fn = input.getAttribute('data-fn');
+  if (input.checked) _wizFileSelected.add(fn);
+  else _wizFileSelected.delete(fn);
+  wizFileUpdateLabel();
+}
+
+function wizFileSelectAll(on) {
+  _wizFileSelected = on
+    ? new Set(_wizFiles.map(function(f){return f.name}))
+    : new Set();
+  renderFileList();
+  wizFileUpdateLabel();
+}
+
+function wizFileUpdateLabel() {
+  var el = document.getElementById('file-btn-label');
+  if (!el) return;
+  var total = _wizFiles.length;
+  var n = _wizFileSelected.size;
+  if (total === 0)         el.textContent = 'No files yet';
+  else if (n === total)    el.textContent = 'All files (' + total + ')';
+  else if (n === 0)        el.textContent = 'No files';
+  else                     el.textContent = n + ' / ' + total + ' files';
+}
+
+// Returns the explicit list of filenames to include in this run, or [] if
+// "every file" is selected (server treats [] as no filter for parity with
+// the old folders API).
+function getWizSelectedFiles() {
+  if (!_wizFileSelected || _wizFileSelected.size === _wizFiles.length) return [];
+  return Array.from(_wizFileSelected);
 }
 
 async function loadMusicFolders() {
   var folders = await fetch('/wizard/api/music-folders').then(function(r){return r.json()});
   var dd = document.getElementById('music-dropdown');
-  var html = '';
+  // "No Music" sits at the top as a mutually-exclusive choice — checking
+  // it deselects the folder rows; checking any folder deselects it.
+  var html = '<label class="folder-item fi-nomusic">'
+    + '<input type="checkbox" id="music-nomusic"'
+    +   ' onchange="onMusicNoMusicToggle(this)">'
+    + '<span class="fi-name">No Music</span></label>';
   for (var i = 0; i < folders.length; i++) {
     html += '<label class="folder-item">'
-      + '<input type="checkbox" value="' + folders[i] + '" checked onchange="updatePickerLabel(\'music-dropdown\',\'music-btn-label\',\'All Music\')"/>'
+      + '<input type="checkbox" value="' + folders[i] + '" checked'
+      +   ' onchange="onMusicFolderToggle(this)"/>'
       + '<span class="fi-name">' + folders[i] + '</span></label>';
   }
   dd.innerHTML = html;
   updatePickerLabel('music-dropdown', 'music-btn-label', 'All Music');
+}
+
+function onMusicNoMusicToggle(input) {
+  // Mutually exclusive: when "No Music" is checked, uncheck every folder.
+  if (input.checked) {
+    var folderChecks = document.querySelectorAll(
+      '#music-dropdown input[type=checkbox]:not(#music-nomusic)'
+    );
+    for (var i = 0; i < folderChecks.length; i++) folderChecks[i].checked = false;
+  }
+  updateMusicLabel();
+}
+
+function onMusicFolderToggle(input) {
+  if (input.checked) {
+    var nm = document.getElementById('music-nomusic');
+    if (nm && nm.checked) nm.checked = false;
+  }
+  updateMusicLabel();
+}
+
+function updateMusicLabel() {
+  var nm = document.getElementById('music-nomusic');
+  var label = document.getElementById('music-btn-label');
+  if (nm && nm.checked) {
+    if (label) label.textContent = 'No music';
+    return;
+  }
+  // Same logic as updatePickerLabel but ignores the No-Music checkbox so
+  // "All Music" reflects the folder rows only.
+  var checks = document.querySelectorAll(
+    '#music-dropdown input[type=checkbox]:not(#music-nomusic)'
+  );
+  var total = checks.length, checked = 0;
+  for (var i = 0; i < checks.length; i++) if (checks[i].checked) checked++;
+  if (!label) return;
+  if (checked === 0 || checked === total) label.textContent = 'All Music';
+  else label.textContent = checked + ' of ' + total;
 }
 
 function updatePickerLabel(ddId, labelId, allText) {
@@ -2221,10 +2399,21 @@ function startGeneration() {
       provider: sel.provider,
       num_videos: numVids,
       variations: numVars,
-      folders: getSelectedFromPicker('folder-dropdown'),
-      music_folders: getSelectedFromPicker('music-dropdown'),
+      files: getWizSelectedFiles(),
+      music_folders: (function(){
+        // Exclude the special No-Music checkbox from the folder list.
+        var checks = document.querySelectorAll(
+          '#music-dropdown input[type=checkbox]:not(#music-nomusic)'
+        );
+        var total = checks.length, selected = [];
+        for (var i = 0; i < checks.length; i++) {
+          if (checks[i].checked) selected.push(checks[i].value);
+        }
+        return (selected.length === total) ? [] : selected;
+      })(),
       mute_source: document.getElementById('mute-source').checked,
-      no_music: document.getElementById('no-music').checked,
+      no_music: !!(document.getElementById('music-nomusic')
+                   && document.getElementById('music-nomusic').checked),
       text_overlays: document.getElementById('text-overlays').checked,
       include_wide: document.getElementById('include-wide').checked,
       auto_crop_wide: document.getElementById('auto-crop-wide').checked,

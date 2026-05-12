@@ -39,6 +39,7 @@ def api_app_set():
             output_folder=data.get("output_folder"),
             intro_video=data.get("intro_video"),
             outro_video=data.get("outro_video"),
+            brand_color=data.get("brand_color"),
             tag_schema=data.get("tag_schema"),
             socials=data.get("socials"),
             analysis_mode=data.get("analysis_mode"),
@@ -200,6 +201,7 @@ Return ONLY a JSON object with this exact structure:
   "brand_name":     "<channel/brand name as it appears on the page>",
   "social_handle":  "<primary @handle (often the IG handle), or empty if not visible>",
   "content_domain": "<plain-English description of the niche, 2-6 words. Examples: 'sourdough baking', 'urban skateboarding', 'wedding cinematography', 'MMA / combat sports'>",
+  "brand_color":    "<the brand's primary accent color as #RRGGBB (lowercase). Pick the dominant non-neutral color you see — logo color, CTA button color, theme color, or whatever the brand visually leads with. Skip pure white/black/grey. If nothing strong is visible, leave empty.>",
   "socials": {{
     "instagram": {{"handle": "<@handle or empty>", "url": "<https://instagram.com/... or empty>"}},
     "tiktok":    {{"handle": "<@handle or empty>", "url": "<https://tiktok.com/@... or empty>"}},
@@ -247,6 +249,11 @@ def api_app_wizard():
     if not url:
         return jsonify({"ok": False, "error": "url required"}), 400
 
+    # Per-run model override picked in the modal's dropdown. Either may be
+    # empty (falls back to the configured wizard task provider on /settings).
+    provider_override = (data.get("provider") or "").strip() or None
+    model_override    = (data.get("model")    or "").strip() or None
+
     try:
         html = _wizard_fetch(url)
     except ValueError as e:
@@ -259,7 +266,8 @@ def api_app_wizard():
         ), 400
 
     prompt = WIZARD_PROMPT.format(url=url, content=signal)
-    raw = ai_cli.call_ai(prompt, task="wizard", timeout=180)
+    raw = ai_cli.call_ai(prompt, task="wizard", timeout=180,
+                         provider=provider_override, model=model_override)
     if not raw:
         return jsonify(
             {"ok": False, "error": "AI returned no response. Check that the "
@@ -286,24 +294,56 @@ def api_app_wizard():
 
 @settings_bp.route("/settings/api/restart", methods=["POST"])
 def api_restart():
-    """Re-exec the Python process so settings that are read at module load
-    (source/output folders, tag schema) take effect.
+    """Re-launch the Python process so settings that are read at module
+    load (source/output folders, tag schema) take effect.
 
-    The HTTP response is sent first; the actual exec is scheduled on a
-    background timer with a 500 ms delay so the client sees a 200 OK and
-    can start polling /api/server-id to detect when the new server is up.
+    We spawn a detached subprocess first and *then* exit the current
+    one — this releases the listening socket cleanly before the new
+    instance tries to bind it. The previous ``os.execv`` approach
+    inherited the bound socket FD into the new image and would
+    sometimes race with Werkzeug's rebind and leave the app crashing
+    with EADDRINUSE.
     """
     import os
     import sys
+    import subprocess
     import threading
+    import signal
 
-    def _do_exec():
+    def _do_restart():
         try:
-            os.execv(sys.executable, [sys.executable] + sys.argv)
+            # Launch the replacement detached from this process group so
+            # killing the parent doesn't take the child with it. The
+            # ``--wait-bind`` flag tells the child's main() to poll the
+            # port until the parent's SIGTERM frees it, so the child
+            # never tries to bind while we're still alive — that was
+            # the previous bug (EADDRINUSE crashed the child during
+            # save-triggered restarts).
+            kwargs = {}
+            if hasattr(os, "setsid"):
+                kwargs["preexec_fn"] = os.setsid
+            else:
+                kwargs["start_new_session"] = True
+            argv = list(sys.argv)
+            if "--wait-bind" not in argv:
+                argv.append("--wait-bind")
+            subprocess.Popen(
+                [sys.executable] + argv,
+                cwd=os.getcwd(),
+                close_fds=True,
+                **kwargs,
+            )
         except Exception as exc:
-            print(f"[restart] os.execv failed: {exc}")
+            print(f"[restart] spawn failed: {exc}")
+            return
+        # Give the spawn a moment to come up + start polling, then
+        # SIGTERM ourselves so Werkzeug releases the port and the
+        # child's wait loop unblocks.
+        import time as _t
+        _t.sleep(0.4)
+        os.kill(os.getpid(), signal.SIGTERM)
 
-    threading.Timer(0.5, _do_exec).start()
+    threading.Timer(0.4, _do_restart).start()
     return jsonify({"ok": True})
 
 
@@ -374,6 +414,20 @@ SETTINGS_PAGE = """<!doctype html>
     text-transform:uppercase;margin:24px 0 10px;
   }
   .card{background:#111118;border:1px solid #1e1e2a;border-radius:10px;padding:18px 20px;margin-bottom:14px}
+
+  /* Top-level Profile / General tabs */
+  .set-tabs{
+    display:flex;gap:6px;margin:16px 0 22px;
+    border-bottom:1px solid #1e1e2a;
+  }
+  .set-tab{
+    background:transparent;border:none;color:#888;font-size:13px;
+    font-weight:600;padding:10px 18px;cursor:pointer;letter-spacing:0.4px;
+    border-bottom:2px solid transparent;margin-bottom:-1px;
+    transition:color .15s,border-color .15s;
+  }
+  .set-tab:hover{color:#fff}
+  .set-tab.active{color:#fff;border-bottom-color:#e53935}
 
   /* Task picker rows */
   .task-row{
@@ -506,6 +560,31 @@ SETTINGS_PAGE = """<!doctype html>
     filename and clicking Save.
   </p>
 
+  <!-- Top-level tabs: Profile (brand-specific) vs General (AI/provider
+       application config). The Save button at the bottom persists every
+       field on every tab in one call. -->
+  <div class="set-tabs" role="tablist">
+    <button class="set-tab active" data-pane="profile"
+            onclick="setSettingsTab('profile')">Profile</button>
+    <button class="set-tab" data-pane="general"
+            onclick="setSettingsTab('general')">General</button>
+  </div>
+
+  <div class="set-pane" id="set-pane-profile">
+
+  <!-- Profile loader sits at the top of the Profile tab so switching
+       brands is the first action a user sees. -->
+  <div class="card" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <button class="prof-btn" onclick="document.getElementById('profile-file-input').click()"
+            title="Pick a brand profile JSON from disk; the app will load it and restart.">
+      Load Profile
+    </button>
+    <input type="file" id="profile-file-input" accept=".json,application/json"
+           style="display:none" onchange="onProfileFilePicked(this)">
+    <span class="muted">Switch the active brand by loading its JSON file
+      from <code>data/profiles/</code>.</span>
+  </div>
+
   <div class="section-title">Profile</div>
   <div class="card">
     <div>
@@ -514,7 +593,7 @@ SETTINGS_PAGE = """<!doctype html>
       <div class="muted" style="margin-top:4px">
         Saved as <code>data/profiles/&lt;name&gt;.json</code>. Saving with a
         new name <b>creates a new profile</b> (the previous one is kept).
-        Use the <b>Load Profile</b> button at the bottom to switch to a
+        Use the <b>Load Profile</b> button above to switch to a
         different brand.
       </div>
     </div>
@@ -542,6 +621,11 @@ SETTINGS_PAGE = """<!doctype html>
       </p>
       <label>URL</label>
       <input type="text" id="wiz-url" placeholder="https://www.instagram.com/your-brand">
+      <label style="margin-top:12px">AI Model</label>
+      <select id="wiz-model"
+              style="width:100%;padding:8px 10px;background:#0c0c14;border:1px solid #2e2e3e;color:#eee;border-radius:5px;font-size:12px;font-family:'JetBrains Mono',monospace">
+        <option value="">Configured default (wizard task)</option>
+      </select>
       <div id="wiz-status" class="muted" style="min-height:18px;margin-top:10px"></div>
       <div style="margin-top:14px;display:flex;justify-content:flex-end;gap:8px">
         <button onclick="closeWizard()" class="prof-btn">Cancel</button>
@@ -566,6 +650,31 @@ SETTINGS_PAGE = """<!doctype html>
       <div class="muted" style="margin-top:4px">
         Plain-English description of the niche. Drops directly into prompts:
         “You are a social media expert for a <b>{content_domain}</b> channel…”
+      </div>
+    </div>
+    <div style="margin-top:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <div>
+        <label>Brand color</label>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+          <input type="color" id="brand-color" value="#7c3aed"
+                 style="width:48px;height:34px;padding:2px;background:#0c0c14;border:1px solid #2e2e3e;border-radius:5px;cursor:pointer">
+          <input type="text" id="brand-color-hex" maxlength="7"
+                 placeholder="#1f4cff"
+                 oninput="onBrandColorHex(this)"
+                 style="width:110px;padding:7px 10px;background:#0c0c14;border:1px solid #2e2e3e;color:#eee;border-radius:5px;font-size:12px;font-family:'JetBrains Mono',monospace">
+          <span id="brand-color-swatch"
+                style="display:inline-block;padding:4px 10px;border-radius:99px;
+                       font-size:10px;font-weight:700;letter-spacing:.5px;
+                       text-transform:uppercase;border:1px solid rgba(124,58,237,.4);
+                       background:rgba(124,58,237,0.15);color:#c7a8ff">
+            preview pill
+          </span>
+        </div>
+      </div>
+      <div class="muted" style="flex:1;min-width:220px">
+        Auto-extracted by the Settings Wizard from this brand's website.
+        Used for the per-profile pill in the page header. Leave blank for
+        the default purple.
       </div>
     </div>
     <div style="margin-top:14px">
@@ -639,69 +748,6 @@ SETTINGS_PAGE = """<!doctype html>
     </div>
   </div>
 
-  <div class="section-title">Analysis</div>
-  <div class="card">
-    <p class="muted" style="margin:0 0 12px 0">
-      How videos get broken into scenes during analysis. Pick the mode that
-      fits this brand's content type.
-    </p>
-    <div class="grid2">
-      <div>
-        <label>Mode</label>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">
-          <button class="prov-pill" id="amode-visual" data-mode="visual">
-            <b>Visual</b> · action / sports
-          </button>
-          <button class="prov-pill" id="amode-speech" data-mode="speech">
-            <b>Speech</b> · tutorials / interviews
-          </button>
-        </div>
-        <div class="muted" style="margin-top:6px;line-height:1.55">
-          <b>Visual</b> samples frames + asks the AI to tag each timeframe.
-          Best for fights, sports, motion content.<br>
-          <b>Speech</b> runs a local Whisper transcription, uses transcript
-          segments as scene boundaries, then tags each spoken chunk. Best
-          for talking-head content where the spoken topic — not the camera
-          cuts — defines a scene.
-        </div>
-      </div>
-      <div id="speech-opts" style="display:none">
-        <label>Whisper model</label>
-        <select id="whisper-model"
-                style="width:100%;padding:8px 10px;background:#0c0c14;border:1px solid #2e2e3e;color:#eee;border-radius:5px;font-size:12px">
-          <option value="tiny">tiny — 39 MB, fastest, English-leaning</option>
-          <option value="base">base — 74 MB, balanced (default)</option>
-          <option value="small">small — 244 MB, better accuracy</option>
-          <option value="medium">medium — 769 MB, very accurate</option>
-          <option value="large-v3">large-v3 — 1.5 GB, best quality (recommended for multilingual)</option>
-        </select>
-        <div style="height:10px"></div>
-        <label>Language (ISO code, optional)</label>
-        <input type="text" id="whisper-language"
-               placeholder="auto-detect (e.g. en, ru, es, pt)">
-        <div class="muted" style="margin-top:6px">
-          Lock the language for faster + more accurate transcription. Leave
-          blank to auto-detect each video. <b>Multilingual content:</b>
-          leave blank and use the <code>large-v3</code> model — it handles
-          code-switching far better than smaller models.
-        </div>
-        <div style="height:12px"></div>
-        <label class="tl-check" style="display:flex;align-items:center;gap:8px">
-          <input type="checkbox" id="whisper-translate">
-          <span>Translate transcript to English</span>
-        </label>
-        <div class="muted" style="margin-top:4px">
-          Whisper transcribes the source audio AND translates to English in
-          one pass. Useful for multilingual videos so downstream AI tagging
-          gets a uniform English transcript regardless of source language.
-          Leaves audio untouched — only affects the cached transcript text.
-          Models download on first use to
-          <code>~/.cache/huggingface/hub/</code>.
-        </div>
-      </div>
-    </div>
-  </div>
-
   <div class="section-title">Caption Defaults</div>
   <div class="card">
     <p class="muted" style="margin:0 0 10px 0">
@@ -768,20 +814,83 @@ SETTINGS_PAGE = """<!doctype html>
     </div>
   </div>
 
+  </div><!-- /#set-pane-profile -->
+
+  <div class="set-pane" id="set-pane-general" style="display:none">
+
+  <div class="section-title">Analysis</div>
+  <div class="card">
+    <p class="muted" style="margin:0 0 12px 0">
+      How videos get broken into scenes during analysis. Applies app-wide
+      (not per brand profile).
+    </p>
+    <div class="grid2">
+      <div>
+        <label>Mode</label>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">
+          <button class="prov-pill" id="amode-visual" data-mode="visual">
+            <b>Visual</b> · action / sports
+          </button>
+          <button class="prov-pill" id="amode-speech" data-mode="speech">
+            <b>Speech</b> · tutorials / interviews
+          </button>
+        </div>
+        <div class="muted" style="margin-top:6px;line-height:1.55">
+          <b>Visual</b> samples frames + asks the AI to tag each timeframe.
+          Best for fights, sports, motion content.<br>
+          <b>Speech</b> runs a local Whisper transcription, uses transcript
+          segments as scene boundaries, then tags each spoken chunk. Best
+          for talking-head content where the spoken topic — not the camera
+          cuts — defines a scene.
+        </div>
+      </div>
+      <div id="speech-opts" style="display:none">
+        <label>Whisper model</label>
+        <select id="whisper-model"
+                style="width:100%;padding:8px 10px;background:#0c0c14;border:1px solid #2e2e3e;color:#eee;border-radius:5px;font-size:12px">
+          <option value="tiny">tiny — 39 MB, fastest, English-leaning</option>
+          <option value="base">base — 74 MB, balanced (default)</option>
+          <option value="small">small — 244 MB, better accuracy</option>
+          <option value="medium">medium — 769 MB, very accurate</option>
+          <option value="large-v3">large-v3 — 1.5 GB, best quality (recommended for multilingual)</option>
+        </select>
+        <div style="height:10px"></div>
+        <label>Language (ISO code, optional)</label>
+        <input type="text" id="whisper-language"
+               placeholder="auto-detect (e.g. en, ru, es, pt)">
+        <div class="muted" style="margin-top:6px">
+          Lock the language for faster + more accurate transcription. Leave
+          blank to auto-detect each video. <b>Multilingual content:</b>
+          leave blank and use the <code>large-v3</code> model — it handles
+          code-switching far better than smaller models.
+        </div>
+        <div style="height:12px"></div>
+        <label class="tl-check" style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="whisper-translate">
+          <span>Translate transcript to English</span>
+        </label>
+        <div class="muted" style="margin-top:4px">
+          Whisper transcribes the source audio AND translates to English in
+          one pass. Useful for multilingual videos so downstream AI tagging
+          gets a uniform English transcript regardless of source language.
+          Leaves audio untouched — only affects the cached transcript text.
+          Models download on first use to
+          <code>~/.cache/huggingface/hub/</code>.
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="section-title">Task → Provider</div>
   <div class="card" id="tasks-card"></div>
 
   <div class="section-title">Provider Settings</div>
   <div id="providers-cards"></div>
 
+  </div><!-- /#set-pane-general -->
+
   <div style="margin-top:18px;display:flex;align-items:center;gap:14px">
     <button class="save" onclick="saveAll()">Save settings</button>
-    <button class="prof-btn" onclick="document.getElementById('profile-file-input').click()"
-            title="Pick a brand profile JSON from disk; the app will load it and restart.">
-      Load Profile
-    </button>
-    <input type="file" id="profile-file-input" accept=".json,application/json"
-           style="display:none" onchange="onProfileFilePicked(this)">
     <span id="msg" class="muted"></span>
   </div>
 </main>
@@ -794,6 +903,101 @@ let appCfg = null;
 // Snapshot of restart-sensitive fields the last time we synced with the
 // server. Used after Save to decide whether to prompt for a restart.
 let restartSnapshot = null;
+
+// Brand color sync: the color picker and the hex input edit the same
+// value and the live preview pill underneath them updates immediately.
+// Empty value reverts to the app's default purple.
+const _BRAND_DEFAULT_HEX = '#7c3aed';
+
+function _normalizeHex(s){
+  if (!s) return '';
+  let v = String(s).trim();
+  if (!v) return '';
+  if (v[0] !== '#') v = '#' + v;
+  if (/^#[0-9a-fA-F]{3}$/.test(v)) {
+    v = '#' + v.slice(1).split('').map(c => c + c).join('');
+  }
+  return /^#[0-9a-fA-F]{6}$/.test(v) ? v.toLowerCase() : '';
+}
+
+function _hexToRgba(hex, alpha){
+  const h = _normalizeHex(hex) || _BRAND_DEFAULT_HEX;
+  const r = parseInt(h.slice(1, 3), 16);
+  const g = parseInt(h.slice(3, 5), 16);
+  const b = parseInt(h.slice(5, 7), 16);
+  return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+}
+
+function setBrandColor(hex){
+  const norm = _normalizeHex(hex);
+  const picker = document.getElementById('brand-color');
+  const text   = document.getElementById('brand-color-hex');
+  const swatch = document.getElementById('brand-color-swatch');
+  if (picker) picker.value = norm || _BRAND_DEFAULT_HEX;
+  if (text)   text.value   = norm;
+  _refreshBrandSwatch(norm || _BRAND_DEFAULT_HEX);
+  // Update the live header pill so the user sees the new color
+  // immediately without needing to save + reload.
+  const headerPill = document.querySelector('.pg-brand-pill');
+  if (headerPill) _applyBrandColorToPill(headerPill, norm || _BRAND_DEFAULT_HEX);
+}
+
+function _refreshBrandSwatch(hex){
+  const swatch = document.getElementById('brand-color-swatch');
+  if (!swatch) return;
+  _applyBrandColorToPill(swatch, hex);
+}
+
+function _applyBrandColorToPill(el, hex){
+  el.style.background    = _hexToRgba(hex, 0.15);
+  el.style.borderColor   = _hexToRgba(hex, 0.4);
+  // Pick a readable foreground: keep the same hue, max luminance.
+  el.style.color = _readableForeground(hex);
+}
+
+function _readableForeground(hex){
+  // Mix the brand hex with white so the text reads bright but on-hue,
+  // matching the existing purple pill's color logic (#c7a8ff = a tinted
+  // version of #7c3aed). Mix 55% white → keeps brand identity but stays
+  // legible on the dark header bar.
+  const h = _normalizeHex(hex) || _BRAND_DEFAULT_HEX;
+  const r = parseInt(h.slice(1, 3), 16);
+  const g = parseInt(h.slice(3, 5), 16);
+  const b = parseInt(h.slice(5, 7), 16);
+  const mix = (c) => Math.round(c + (255 - c) * 0.55);
+  return 'rgb(' + mix(r) + ',' + mix(g) + ',' + mix(b) + ')';
+}
+
+// Wire the color picker → text input direction. The text input's
+// oninput= calls onBrandColorHex which goes back the other way.
+document.addEventListener('input', function(e){
+  if (e.target && e.target.id === 'brand-color') {
+    setBrandColor(e.target.value);
+  }
+});
+
+function onBrandColorHex(input){
+  const norm = _normalizeHex(input.value);
+  // If the user is mid-typing (e.g. '#1f4') don't yet update the picker.
+  if (!norm && input.value.replace('#','').length < 6) {
+    _refreshBrandSwatch(_BRAND_DEFAULT_HEX);
+    return;
+  }
+  setBrandColor(norm);
+}
+
+// Switch between the Profile and General tab panes. Save still persists
+// all panes in one call so the user doesn't have to switch tabs to
+// commit unrelated edits.
+function setSettingsTab(name){
+  const tabs = document.querySelectorAll('.set-tab');
+  for (const t of tabs) t.classList.toggle('active', t.dataset.pane === name);
+  const panes = document.querySelectorAll('.set-pane');
+  for (const p of panes) p.style.display = (p.id === 'set-pane-' + name) ? '' : 'none';
+  // Remember the user's last choice across reloads so editing a single
+  // pane doesn't keep snapping back to Profile.
+  try { localStorage.setItem('pg-settings-tab', name); } catch (e) {}
+}
 
 function _captureRestartSnapshot(c){
   return {
@@ -842,6 +1046,7 @@ function _currentAnalysisMode(){
 function fillFromAppCfg(){
   document.getElementById('brand-name').value     = appCfg.brand_name || '';
   document.getElementById('content-domain').value = appCfg.content_domain || '';
+  setBrandColor(appCfg.brand_color || '');
   document.getElementById('source-folder').value  = appCfg.source_folder || '';
   document.getElementById('output-folder').value  = appCfg.output_folder || '';
   document.getElementById('intro-video').value    = appCfg.intro_video || '';
@@ -944,10 +1149,14 @@ async function onProfileFilePicked(input){
   });
   const d = await r.json();
   if (!d.ok) { setMsg('Load failed: ' + (d.error || 'unknown'), false); return; }
-  // Restart so per-profile DB / source folder / tag schema all flip,
-  // then reload the page once the new server is up.
-  setMsg('Loaded "' + (d.active_profile || file.name) + '". Restarting server…', true);
-  await restartAndReload();
+  // No restart needed: get_config() / get_app_settings() / the video
+  // watcher's _current_paths() all re-read the active-profile pointer on
+  // every access. A page reload is enough to flush any client-side cache
+  // (model list, profile dropdown, brand pill, etc.). os.execv'ing the
+  // dev server here was racing with Werkzeug's port rebind and would
+  // sometimes leave the app refusing to start with EADDRINUSE.
+  setMsg('Loaded "' + (d.active_profile || file.name) + '". Reloading…', true);
+  setTimeout(function(){ location.reload(); }, 300);
 }
 
 function setMsg(text, ok){
@@ -1096,9 +1305,36 @@ async function refreshResearch(){
 
 /* ── Settings Wizard ─────────────────────────────────────────────────── */
 
+async function _populateWizModel(){
+  // Re-use the AI Builder's model catalog so the dropdown lists every
+  // installed provider/model. Done lazily on open so settings changes
+  // propagate without a page reload.
+  const sel = document.getElementById('wiz-model');
+  if (!sel || sel.dataset.populated === '1') return;
+  try {
+    const data = await fetch('/wizard/api/models').then(r => r.json());
+    const groups = data.groups || [];
+    // Wipe everything except the "Configured default" sentinel option.
+    while (sel.options.length > 1) sel.remove(1);
+    for (const g of groups) {
+      const og = document.createElement('optgroup');
+      og.label = g.label + (g.bin_found ? '' : '  (binary missing)');
+      for (const m of (g.models || [])) {
+        const opt = document.createElement('option');
+        opt.value = g.provider + '::' + m;
+        opt.textContent = m + (m === g.default ? '   (provider default)' : '');
+        og.appendChild(opt);
+      }
+      sel.appendChild(og);
+    }
+    sel.dataset.populated = '1';
+  } catch (e) { /* leave only the default option */ }
+}
+
 function openWizard(){
   document.getElementById('wiz-url').value = '';
   setWizStatus('', '');
+  _populateWizModel();
   document.getElementById('wiz-overlay').classList.add('active');
   setTimeout(() => document.getElementById('wiz-url').focus(), 50);
 }
@@ -1122,10 +1358,18 @@ async function runWizard(){
   const btn = document.getElementById('wiz-go');
   btn.disabled = true;
   setWizStatus('Fetching page and asking the AI…', 'working');
+  // Decode the dropdown value (provider::model). Empty means "use the
+  // wizard task's configured default" — the server interprets that.
+  let prov = '', mdl = '';
+  const sel = document.getElementById('wiz-model');
+  if (sel && sel.value) {
+    const sep = sel.value.indexOf('::');
+    if (sep > 0) { prov = sel.value.slice(0, sep); mdl = sel.value.slice(sep + 2); }
+  }
   try {
     const r = await fetch('/settings/api/app/wizard', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({url}),
+      body: JSON.stringify({url, provider: prov, model: mdl}),
     });
     const d = await r.json();
     if (!d.ok) {
@@ -1144,6 +1388,7 @@ async function runWizard(){
     const ext = d.extracted || {};
     if (ext.brand_name)     document.getElementById('brand-name').value     = ext.brand_name;
     if (ext.content_domain) document.getElementById('content-domain').value = ext.content_domain;
+    if (ext.brand_color)    setBrandColor(ext.brand_color);
     if (ext.tag_schema && typeof ext.tag_schema === 'object') {
       document.getElementById('tag-schema').value =
         JSON.stringify(ext.tag_schema, null, 2);
@@ -1360,6 +1605,9 @@ async function saveAll(){
     output_folder:  document.getElementById('output-folder').value,
     intro_video:    document.getElementById('intro-video').value,
     outro_video:    document.getElementById('outro-video').value,
+    brand_color:    _normalizeHex(
+                      document.getElementById('brand-color-hex').value
+                      || document.getElementById('brand-color').value),
     tag_schema:     tagSchema,
     socials:        _collectSocials(),
     analysis_mode:     _currentAnalysisMode(),
@@ -1472,6 +1720,13 @@ async function restartAndReload(){
 }
 
 load();
+
+// Restore the last-active settings tab (Profile / General) so the user
+// doesn't get bounced back to Profile every reload.
+try {
+  const last = localStorage.getItem('pg-settings-tab');
+  if (last === 'general' || last === 'profile') setSettingsTab(last);
+} catch (e) {}
 </script>
 </body></html>
 """

@@ -26,6 +26,16 @@ DATA_DIR = ROOT_DIR / "data"
 PROFILES_DIR = DATA_DIR / "profiles"
 ACTIVE_PATH = DATA_DIR / "active_profile.json"
 
+# App-level (profile-independent) settings live in their own file so that
+# switching brand profiles doesn't change which AI provider is used, what
+# analysis mode runs, or which Whisper model is loaded. The settings page
+# splits these out under its "General" tab.
+APP_SETTINGS_PATH = DATA_DIR / "app_settings.json"
+GENERAL_KEYS = (
+    "analysis_mode", "whisper_model", "whisper_language", "whisper_translate",
+    "ai",
+)
+
 # Legacy paths — read once on first run for migration, then ignored.
 LEGACY_APP_CONFIG = DATA_DIR / "app_config.json"
 LEGACY_AI_CONFIG = DATA_DIR / "ai_cli_config.json"
@@ -66,6 +76,25 @@ DEFAULT_CAPTIONS = {
 }
 CAPTION_FONTS    = ("sans", "serif", "mono")
 CAPTION_POSITIONS = ("bottom", "middle", "top")
+
+
+def _validate_hex_color(value):
+    """Normalize a hex color string to ``#rrggbb`` lowercase, or return
+    empty string for anything that doesn't parse. Accepts ``#rgb``,
+    ``#rrggbb``, and bare-hex versions (no leading #)."""
+    if not value:
+        return ""
+    s = str(value).strip()
+    if not s:
+        return ""
+    if not s.startswith("#"):
+        s = "#" + s
+    if re.match(r"^#[0-9a-fA-F]{3}$", s):
+        # Expand shorthand #rgb → #rrggbb
+        s = "#" + "".join(ch * 2 for ch in s[1:])
+    if re.match(r"^#[0-9a-fA-F]{6}$", s):
+        return s.lower()
+    return ""
 
 
 def _validate_captions(value):
@@ -316,6 +345,11 @@ def _fill_defaults(raw, profile_name):
         # assets/videos/intro* scan in find_asset().
         "intro_video":    (raw.get("intro_video") or "").strip(),
         "outro_video":    (raw.get("outro_video") or "").strip(),
+        # Brand accent color (#RRGGBB) — extracted by the Settings Wizard
+        # from the brand's website and used for the per-profile pill in
+        # the header. Empty falls back to the app's default purple.
+        "brand_color":    _validate_hex_color(raw.get("brand_color"))
+                          or "",
         "tag_schema":     _validate_tags(raw.get("tag_schema"))
                           or deepcopy(DEFAULT_TAGS),
         "socials":        socials,
@@ -328,38 +362,101 @@ def _fill_defaults(raw, profile_name):
     }
 
 
-def get_config():
-    """Return the active profile, fully populated with defaults."""
-    _ensure_profile()
-    name = get_active_profile_name()
-    raw = _read_profile_raw(name)
-    return _fill_defaults(raw, name)
+def _read_app_settings():
+    """Raw read of the app-level settings file. Returns ``{}`` if missing."""
+    try:
+        if APP_SETTINGS_PATH.exists():
+            return json.loads(APP_SETTINGS_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
 
 
-def set_config(**fields):
-    """Partial update of the active profile.
+def _write_app_settings(data):
+    APP_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    APP_SETTINGS_PATH.write_text(
+        json.dumps(data, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
-    Supported keys: brand_name, social_handle, content_domain, source_folder,
-    output_folder, tag_schema, ai, profile_name.
 
-    If *profile_name* changes, the underlying file is renamed and the active
-    pointer is updated to follow.
+def _migrate_general_from_profile_once():
+    """First-run migration: pull any general (app-wide) fields out of
+    every existing brand profile into ``app_settings.json``, then strip
+    them from the profile JSONs so future saves don't drift apart.
+
+    Idempotent: if the app-settings file already exists, this is a no-op.
+    The active profile's values win over older ones (first-write wins is
+    fine because we never re-migrate after this).
     """
-    _ensure_profile()
-    current_name = get_active_profile_name()
-    raw = _read_profile_raw(current_name)
+    if APP_SETTINGS_PATH.exists():
+        return
+    PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+    collected = {}
+    active = ""
+    try:
+        if ACTIVE_PATH.exists():
+            active = (json.loads(ACTIVE_PATH.read_text(encoding="utf-8"))
+                      .get("active") or "")
+    except Exception:
+        active = ""
+    # Walk profiles, preferring the active one for any conflicting fields.
+    candidates = []
+    if active:
+        candidates.append(active)
+    for p in PROFILES_DIR.glob("*.json"):
+        if p.stem not in candidates:
+            candidates.append(p.stem)
+    for name in candidates:
+        try:
+            raw = json.loads((_profile_path(name)).read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        for k in GENERAL_KEYS:
+            if k in raw and k not in collected:
+                collected[k] = raw[k]
+    _write_app_settings(collected)
+    # Now strip the lifted keys from every profile JSON so the source of
+    # truth lives only in app_settings.json going forward.
+    for p in PROFILES_DIR.glob("*.json"):
+        try:
+            raw = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        before = dict(raw)
+        for k in GENERAL_KEYS:
+            raw.pop(k, None)
+        if raw != before:
+            p.write_text(json.dumps(raw, indent=2, ensure_ascii=False),
+                         encoding="utf-8")
 
-    # Drop the deprecated top-level social_handle; primary handle now lives
-    # in socials.instagram.handle (migrated on load by _fill_defaults).
-    raw.pop("social_handle", None)
 
-    for k in ("brand_name", "content_domain",
-              "source_folder", "output_folder",
-              "intro_video", "outro_video",
-              "whisper_language"):
-        if k in fields and fields[k] is not None:
-            raw[k] = (fields[k] or "").strip()
+def get_app_settings():
+    """Return the app-level (profile-independent) settings dict with
+    defaults filled in for any missing field. Source of truth for
+    ``analysis_mode`` / ``whisper_*`` / ``ai``."""
+    _migrate_general_from_profile_once()
+    raw = _read_app_settings() or {}
+    mode = (raw.get("analysis_mode") or "").strip().lower()
+    if mode not in ANALYSIS_MODES:
+        mode = DEFAULT_ANALYSIS_MODE
+    whisper_model = (raw.get("whisper_model") or "").strip()
+    if whisper_model not in WHISPER_MODELS:
+        whisper_model = DEFAULT_WHISPER_MODEL
+    return {
+        "analysis_mode":     mode,
+        "whisper_model":     whisper_model,
+        "whisper_language":  (raw.get("whisper_language") or "").strip(),
+        "whisper_translate": bool(raw.get("whisper_translate", False)),
+        "ai":                raw.get("ai") or {},
+    }
 
+
+def set_app_settings(**fields):
+    """Partial update of the app-level settings file. Only keys in
+    ``GENERAL_KEYS`` are accepted; everything else is ignored."""
+    _migrate_general_from_profile_once()
+    raw = _read_app_settings() or {}
     if "analysis_mode" in fields and fields["analysis_mode"] is not None:
         m = (fields["analysis_mode"] or "").strip().lower()
         if m and m not in ANALYSIS_MODES:
@@ -367,7 +464,6 @@ def set_config(**fields):
                 f"analysis_mode must be one of {ANALYSIS_MODES}, got {m!r}"
             )
         raw["analysis_mode"] = m or DEFAULT_ANALYSIS_MODE
-
     if "whisper_model" in fields and fields["whisper_model"] is not None:
         m = (fields["whisper_model"] or "").strip()
         if m and m not in WHISPER_MODELS:
@@ -375,9 +471,81 @@ def set_config(**fields):
                 f"whisper_model must be one of {WHISPER_MODELS}, got {m!r}"
             )
         raw["whisper_model"] = m or DEFAULT_WHISPER_MODEL
-
+    if "whisper_language" in fields and fields["whisper_language"] is not None:
+        raw["whisper_language"] = (fields["whisper_language"] or "").strip()
     if "whisper_translate" in fields and fields["whisper_translate"] is not None:
         raw["whisper_translate"] = bool(fields["whisper_translate"])
+    if "ai" in fields and fields["ai"] is not None:
+        if not isinstance(fields["ai"], dict):
+            raise ValueError("ai must be a dict")
+        raw["ai"] = fields["ai"]
+    _write_app_settings(raw)
+
+
+def get_config():
+    """Return the active profile with defaults filled in, overlaid with
+    the app-level (profile-independent) general settings — so legacy
+    readers like ``cfg.get('analysis_mode')`` keep working without
+    knowing about the storage split."""
+    _ensure_profile()
+    name = get_active_profile_name()
+    raw = _read_profile_raw(name)
+    cfg = _fill_defaults(raw, name)
+    app = get_app_settings()
+    # General settings win over any stale copies still embedded in the
+    # profile (e.g. older saves before the split). app_settings.json is
+    # the single source of truth for these keys.
+    cfg.update(app)
+    return cfg
+
+
+def set_config(**fields):
+    """Partial update of the active profile.
+
+    Profile-scoped keys (brand_name, content_domain, source_folder,
+    output_folder, intro_video, outro_video, tag_schema, socials,
+    captions, profile_name) update the active profile JSON.
+
+    General/app-wide keys (analysis_mode, whisper_*, ai) are silently
+    forwarded to :func:`set_app_settings` so they never get persisted
+    inside the profile file — switching brand profiles no longer
+    swaps which AI provider or Whisper model is used.
+    """
+    _ensure_profile()
+
+    # Route general keys to the app-level store. Don't let them touch the
+    # profile JSON at all — that's what was previously causing the AI /
+    # Whisper config to follow whichever brand profile was active.
+    general_in = {k: fields[k] for k in GENERAL_KEYS
+                  if k in fields and fields[k] is not None}
+    if general_in:
+        set_app_settings(**general_in)
+
+    current_name = get_active_profile_name()
+    raw = _read_profile_raw(current_name)
+
+    # Drop the deprecated top-level social_handle; primary handle now lives
+    # in socials.instagram.handle (migrated on load by _fill_defaults).
+    raw.pop("social_handle", None)
+    # Belt-and-suspenders: in case a profile still has these from before
+    # the split, scrub them on every save so they can't drift back.
+    for k in GENERAL_KEYS:
+        raw.pop(k, None)
+
+    for k in ("brand_name", "content_domain",
+              "source_folder", "output_folder",
+              "intro_video", "outro_video"):
+        if k in fields and fields[k] is not None:
+            raw[k] = (fields[k] or "").strip()
+
+    if "brand_color" in fields and fields["brand_color"] is not None:
+        normalized = _validate_hex_color(fields["brand_color"])
+        if fields["brand_color"] and not normalized:
+            raise ValueError(
+                "brand_color must be a hex color like '#1f4cff' "
+                "(got %r)" % fields["brand_color"]
+            )
+        raw["brand_color"] = normalized
 
     if "tag_schema" in fields and fields["tag_schema"] is not None:
         validated = _validate_tags(fields["tag_schema"])
@@ -394,11 +562,6 @@ def set_config(**fields):
                 "socials must be a dict of platform → {handle, url}"
             )
         raw["socials"] = validated
-
-    if "ai" in fields and fields["ai"] is not None:
-        if not isinstance(fields["ai"], dict):
-            raise ValueError("ai must be a dict")
-        raw["ai"] = fields["ai"]
 
     if "captions" in fields and fields["captions"] is not None:
         raw["captions"] = _validate_captions(fields["captions"])
@@ -448,14 +611,16 @@ def _validate_tags(schema):
 # ── AI sub-config (reused by ai_cli.py) ─────────────────────────────────────
 
 def get_ai_block():
-    """Return the raw 'ai' sub-config of the active profile (may be empty).
-    ai_cli.py merges this with its own defaults."""
-    return get_config().get("ai") or {}
+    """Return the raw 'ai' sub-config (may be empty). This lives at the
+    app level (``app_settings.json``) so the configured providers don't
+    change when you switch brand profiles. ai_cli.py merges this with
+    its own defaults."""
+    return get_app_settings().get("ai") or {}
 
 
 def set_ai_block(ai_dict):
-    """Replace the 'ai' sub-config of the active profile."""
-    set_config(ai=ai_dict)
+    """Replace the 'ai' sub-config at the app level."""
+    set_app_settings(ai=ai_dict)
 
 
 # ── Convenience helpers ─────────────────────────────────────────────────────
@@ -491,6 +656,7 @@ def domain_vars():
         "brand":  c["brand_name"],
         "handle": handle,
         "domain": c["content_domain"],
+        "brand_color": c.get("brand_color") or "",
     }
 
 

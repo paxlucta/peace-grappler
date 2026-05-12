@@ -1,55 +1,51 @@
 {
   "profile_name": "How Janey Learned Russian _former COLLEGE RUSSIAN_",
   "brand_name": "How Janey Learned Russian (former COLLEGE RUSSIAN)",
-  "content_domain": "Russian language learning and teaching",
+  "content_domain": "russian language education",
   "source_folder": "videos/collegerussian",
   "output_folder": "output/collegerussian",
   "tag_schema": {
     "activity": [
-      "grammar-lesson",
+      "whiteboard-writing",
+      "cyrillic-handwriting",
+      "grammar-explanation",
+      "vocabulary-drill",
+      "pronunciation-demo",
       "verb-conjugation",
-      "case-system-lesson",
-      "pronunciation-drill",
-      "vocabulary-building",
-      "listening-practice",
+      "case-declension",
+      "noun-gender-lesson",
+      "alphabet-lesson",
+      "reading-aloud",
       "translation-exercise",
-      "reading-comprehension",
+      "russian-singing",
+      "music-lesson",
+      "flashcard-review",
+      "slide-presentation",
+      "screen-share",
+      "textbook-reading",
+      "dialogue-roleplay",
+      "listening-practice",
       "speaking-practice",
-      "cultural-explanation",
-      "literature-analysis",
-      "writing-feedback",
-      "accent-coaching",
-      "dialogue-practice",
-      "russian-music",
-      "music-translation",
+      "writing-practice",
+      "quiz-question",
+      "answer-reveal",
+      "cultural-explainer",
       "history-lesson",
-      "american-perspective",
-      "native-speaker-tips",
-      "beginner-lesson",
-      "intermediate-lesson",
-      "advanced-lesson",
-      "stress-marks-lesson",
-      "intonation-practice",
-      "idiom-explanation",
-      "slang-introduction",
-      "formal-register",
-      "informal-register",
-      "conversational-russian",
-      "business-russian",
-      "student-questions",
-      "q-and-a-session",
-      "online-tutoring",
-      "whiteboard-teaching",
-      "direct-address",
-      "lecture-style",
-      "demonstration",
-      "role-play",
-      "singing-lesson",
-      "russian-cinema",
-      "aspect-system-lesson",
-      "word-order-explanation",
-      "college-classroom-simulation",
-      "zoom-tutoring-session"
+      "literature-discussion",
+      "poetry-recitation",
+      "russian-cooking",
+      "travel-vlog",
+      "interview-clip",
+      "viewer-question",
+      "intro",
+      "outro",
+      "channel-promo",
+      "lesson-recap",
+      "annotation-overlay",
+      "subtitle-display",
+      "english-translation",
+      "russian-conversation",
+      "teacher-talking-head"
     ],
     "camera": [
       "close-up",
@@ -71,45 +67,24 @@
       "low-quality"
     ],
     "setting": [
-      "home-office",
-      "bedroom",
-      "living-room",
-      "zoom-classroom",
-      "virtual-background",
-      "studio",
+      "home-studio",
       "desk-setup",
-      "window-backdrop",
-      "plain-background",
-      "whiteboard",
-      "bookshelves",
+      "bookshelf-background",
+      "kitchen",
       "classroom",
-      "kitchen"
+      "whiteboard-background",
+      "outdoor-russia",
+      "moscow-street",
+      "saint-petersburg",
+      "cafe",
+      "library",
+      "church-orthodox",
+      "museum",
+      "park",
+      "travel-location",
+      "zoom-call",
+      "plain-background"
     ]
-  },
-  "ai": {
-    "tasks": {
-      "analysis": "minimax",
-      "captions": "claude",
-      "wizard": "claude"
-    },
-    "providers": {
-      "claude": {
-        "bin": "claude",
-        "model": "claude-haiku-4-5-20251001"
-      },
-      "codex": {
-        "bin": "codex",
-        "model": "gpt-5"
-      },
-      "gemini": {
-        "bin": "gemini",
-        "model": "gemini-2.5-flash"
-      },
-      "minimax": {
-        "bin": "",
-        "model": "MiniMax-M1"
-      }
-    }
   },
   "socials": {
     "instagram": {
@@ -124,14 +99,10 @@
     },
     "youtube": {
       "handle": "@howjaneylearned",
-      "url": "https://www.youtube.com/@howjaneylearned",
+      "url": "https://youtube.com/@howjaneylearned",
       "cookies": "chrome"
     }
   },
-  "whisper_language": "",
-  "analysis_mode": "speech",
-  "whisper_model": "large-v3",
-  "whisper_translate": true,
   "captions": {
     "font": "sans",
     "color": "#ffffff",
@@ -140,5 +111,6 @@
     "position": "bottom"
   },
   "intro_video": "",
-  "outro_video": ""
+  "outro_video": "",
+  "brand_color": "#d52b1e"
 }

@@ -1,0 +1,31 @@
+{
+  "analysis_mode": "speech",
+  "whisper_model": "small",
+  "whisper_language": "",
+  "whisper_translate": true,
+  "ai": {
+    "tasks": {
+      "analysis": "minimax",
+      "captions": "claude",
+      "wizard": "claude"
+    },
+    "providers": {
+      "claude": {
+        "bin": "claude",
+        "model": "claude-haiku-4-5-20251001"
+      },
+      "codex": {
+        "bin": "codex",
+        "model": "gpt-5-mini"
+      },
+      "gemini": {
+        "bin": "gemini",
+        "model": "gemini-2.5-flash"
+      },
+      "minimax": {
+        "bin": "",
+        "model": "MiniMax-M1"
+      }
+    }
+  }
+}
