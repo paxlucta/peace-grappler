@@ -32,7 +32,9 @@ ACTIVE_PATH = DATA_DIR / "active_profile.json"
 # splits these out under its "General" tab.
 APP_SETTINGS_PATH = DATA_DIR / "app_settings.json"
 GENERAL_KEYS = (
-    "analysis_mode", "whisper_model", "whisper_language", "whisper_translate",
+    "analysis_mode",
+    "transcribe_provider", "transcribe_model",
+    "whisper_model", "whisper_language", "whisper_translate",
     "ai",
 )
 
@@ -62,6 +64,13 @@ DEFAULT_WHISPER_MODEL = "base"
 WHISPER_MODELS = ("tiny", "base", "small", "medium", "large-v3")
 DEFAULT_WHISPER_LANGUAGE = ""  # empty = auto-detect
 DEFAULT_WHISPER_TRANSLATE = False  # if True, transcript is forced to English
+
+# Speech-mode transcription provider. "whisper" runs locally via
+# faster-whisper; "openai" and "gemini" call the respective cloud APIs
+# (keys read from the environment). Model menus and defaults live in
+# transcription.MODELS / transcription.DEFAULT_MODEL.
+DEFAULT_TRANSCRIBE_PROVIDER = "whisper"
+TRANSCRIBE_PROVIDERS = ("whisper", "openai", "gemini")
 
 SOCIAL_PLATFORMS = ("instagram", "tiktok", "youtube")
 
@@ -330,6 +339,10 @@ def _fill_defaults(raw, profile_name):
     whisper_model = (raw.get("whisper_model") or "").strip()
     if whisper_model not in WHISPER_MODELS:
         whisper_model = DEFAULT_WHISPER_MODEL
+    transcribe_provider = (raw.get("transcribe_provider") or "").strip().lower()
+    if transcribe_provider not in TRANSCRIBE_PROVIDERS:
+        transcribe_provider = DEFAULT_TRANSCRIBE_PROVIDER
+    transcribe_model = (raw.get("transcribe_model") or "").strip()
     return {
         "profile_name":   (raw.get("profile_name") or profile_name or "").strip()
                           or DEFAULT_BRAND_NAME,
@@ -354,11 +367,13 @@ def _fill_defaults(raw, profile_name):
                           or deepcopy(DEFAULT_TAGS),
         "socials":        socials,
         "ai":             raw.get("ai") or {},
-        "analysis_mode":     mode,
-        "whisper_model":     whisper_model,
-        "whisper_language":  (raw.get("whisper_language") or "").strip(),
-        "whisper_translate": bool(raw.get("whisper_translate", False)),
-        "captions":          _validate_captions(raw.get("captions")),
+        "analysis_mode":       mode,
+        "transcribe_provider": transcribe_provider,
+        "transcribe_model":    transcribe_model,
+        "whisper_model":       whisper_model,
+        "whisper_language":    (raw.get("whisper_language") or "").strip(),
+        "whisper_translate":   bool(raw.get("whisper_translate", False)),
+        "captions":            _validate_captions(raw.get("captions")),
     }
 
 
@@ -443,12 +458,18 @@ def get_app_settings():
     whisper_model = (raw.get("whisper_model") or "").strip()
     if whisper_model not in WHISPER_MODELS:
         whisper_model = DEFAULT_WHISPER_MODEL
+    transcribe_provider = (raw.get("transcribe_provider") or "").strip().lower()
+    if transcribe_provider not in TRANSCRIBE_PROVIDERS:
+        transcribe_provider = DEFAULT_TRANSCRIBE_PROVIDER
+    transcribe_model = (raw.get("transcribe_model") or "").strip()
     return {
-        "analysis_mode":     mode,
-        "whisper_model":     whisper_model,
-        "whisper_language":  (raw.get("whisper_language") or "").strip(),
-        "whisper_translate": bool(raw.get("whisper_translate", False)),
-        "ai":                raw.get("ai") or {},
+        "analysis_mode":       mode,
+        "transcribe_provider": transcribe_provider,
+        "transcribe_model":    transcribe_model,
+        "whisper_model":       whisper_model,
+        "whisper_language":    (raw.get("whisper_language") or "").strip(),
+        "whisper_translate":   bool(raw.get("whisper_translate", False)),
+        "ai":                  raw.get("ai") or {},
     }
 
 
@@ -475,6 +496,16 @@ def set_app_settings(**fields):
         raw["whisper_language"] = (fields["whisper_language"] or "").strip()
     if "whisper_translate" in fields and fields["whisper_translate"] is not None:
         raw["whisper_translate"] = bool(fields["whisper_translate"])
+    if "transcribe_provider" in fields and fields["transcribe_provider"] is not None:
+        p = (fields["transcribe_provider"] or "").strip().lower()
+        if p and p not in TRANSCRIBE_PROVIDERS:
+            raise ValueError(
+                f"transcribe_provider must be one of {TRANSCRIBE_PROVIDERS}, "
+                f"got {p!r}"
+            )
+        raw["transcribe_provider"] = p or DEFAULT_TRANSCRIBE_PROVIDER
+    if "transcribe_model" in fields and fields["transcribe_model"] is not None:
+        raw["transcribe_model"] = (fields["transcribe_model"] or "").strip()
     if "ai" in fields and fields["ai"] is not None:
         if not isinstance(fields["ai"], dict):
             raise ValueError("ai must be a dict")

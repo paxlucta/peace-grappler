@@ -417,21 +417,59 @@ def analyze_speech(video_path, duration, overrides=None):
     Returns the same {tags, moments} shape as analyze_full() so the
     existing save_analysis() works unchanged.
     """
-    import audio_analysis
+    import transcription
     cfg = app_config.get_config()
     o = overrides or {}
-    model = (o.get("whisper_model") or cfg.get("whisper_model") or "base")
+    # Provider + model: per-run override > app settings. When the provider
+    # is whisper, the legacy ``whisper_model`` key is honored for back-
+    # compat; cloud providers use ``transcribe_model``.
+    tx_provider = (o.get("transcribe_provider")
+                   or cfg.get("transcribe_provider") or "whisper").strip().lower()
+    if tx_provider == "whisper":
+        tx_model = (o.get("transcribe_model")
+                    or o.get("whisper_model")
+                    or cfg.get("transcribe_model")
+                    or cfg.get("whisper_model")
+                    or "base")
+    else:
+        tx_model = (o.get("transcribe_model")
+                    or cfg.get("transcribe_model")
+                    or transcription.default_model_for(tx_provider))
     language = (o.get("whisper_language") if "whisper_language" in o
                 else cfg.get("whisper_language")) or None
-    translate = bool(o["whisper_translate"]) if "whisper_translate" in o \
-                else bool(cfg.get("whisper_translate", False))
+    # `whisper_translate` used to mean "transcribe in English instead of the
+    # source language" — which threw away the native version. It now means
+    # "also produce an English copy even when the source is already English."
+    # The native pass always runs; the English pass runs whenever the source
+    # is non-English (or this flag is set), so callers reliably get both.
+    force_english = bool(o["whisper_translate"]) if "whisper_translate" in o \
+                    else bool(cfg.get("whisper_translate", False))
+
+    # Map transcription's internal 0..1 progress into a portion of the
+    # outer speech-mode pct budget so the bar moves smoothly instead of
+    # camping at 5% for the entire transcribe step. We reserve 0.05–0.20
+    # for the native pass; if a translation pass runs it gets 0.20–0.30,
+    # then 0.30–0.95 is the AI tagging phase, 0.95–1.00 is saving.
+    def _tx_progress(lo, hi, prefix):
+        def _cb(frac, label=""):
+            try:
+                f = max(0.0, min(1.0, float(frac)))
+            except Exception:
+                f = 0.0
+            stage = f"{prefix}: {label}" if label else prefix
+            emit_pct(lo + (hi - lo) * f, stage)
+        return _cb
 
     emit_pct(0.05, "transcribing audio")
-    result = audio_analysis.transcribe(
-        video_path, model=model, language=language, translate=translate,
+    # Pass 1 — always native (translate=False). This is the source of truth
+    # for "what was actually said". We persist it as is_translation=False.
+    result = transcription.transcribe(
+        video_path, provider=tx_provider, model=tx_model,
+        language=language, translate=False,
         on_log=emit_progress,
+        on_progress=_tx_progress(0.05, 0.20, "native"),
     )
-    emit_pct(0.25, "transcript ready")
+    emit_pct(0.20, "transcript ready")
     segments = result.get("segments", [])
     detected_language = (result.get("language") or "").strip().lower()
     if not segments:
@@ -439,7 +477,8 @@ def analyze_speech(video_path, duration, overrides=None):
         return analyze_full(video_path, duration)
 
     emit_progress(
-        f"Got {len(segments)} transcript segments. Sampling frames..."
+        f"Got {len(segments)} transcript segments "
+        f"(language: {detected_language or 'unknown'}). Sampling frames..."
     )
 
     # Persist the raw (un-merged) transcript so it's searchable and viewable
@@ -447,42 +486,55 @@ def analyze_speech(video_path, duration, overrides=None):
     # caller hasn't already (analyze_full does this too; idempotent on hash).
     try:
         video_id = db.register_video(video_path)
-        is_xlat_pass = bool(translate)
-        # Attribute transcript rows to the Whisper model that produced them
-        # so the UI can show "whisper" as the brand badge + the specific
-        # size (tiny/base/.../large-v3) on hover.
+        # Attribute transcript rows to the backend that produced them so
+        # the UI can show the right brand badge + the specific model on
+        # hover (whisper-base, openai/whisper-1, gemini-2.5-flash, ...).
         db.save_transcripts(
             video_id, segments,
             language=(detected_language or (language or "")),
-            is_translation=is_xlat_pass,
-            provider="whisper", model=model,
+            is_translation=False,
+            provider=tx_provider, model=tx_model,
         )
-        # Bilingual: if the source language isn't English and the user
-        # didn't already ask for translate-mode, run a second pass to get
-        # an English version stored alongside the original. This way the
-        # scene-level transcript modal can show both, and search works in
-        # either language.
-        if (not is_xlat_pass
-                and detected_language
-                and detected_language != "en"):
-            emit_progress(
-                f"Source is '{detected_language}' — generating English "
-                f"translation alongside original..."
-            )
-            xlat = audio_analysis.transcribe(
-                video_path, model=model, language=language, translate=True,
+        # Bilingual: produce an English-translated copy when the source
+        # isn't already English. Also runs when the user explicitly asked
+        # for the English version (`force_english`) — useful for content
+        # like code-switching streams where Whisper's auto-detect may
+        # flip-flop between segments. Skipped only when we're confident
+        # the source IS English.
+        need_english = (detected_language != "en") or force_english
+        if need_english:
+            if detected_language and detected_language != "en":
+                emit_progress(
+                    f"Source is '{detected_language}' — generating English "
+                    f"translation alongside original..."
+                )
+            else:
+                emit_progress(
+                    "Generating English translation alongside original..."
+                )
+            xlat = transcription.transcribe(
+                video_path, provider=tx_provider, model=tx_model,
+                language=language, translate=True,
                 on_log=emit_progress,
+                on_progress=_tx_progress(0.20, 0.30, "english"),
             )
             xlat_segs = xlat.get("segments", [])
             if xlat_segs:
                 db.save_transcripts(
                     video_id, xlat_segs,
-                    language=detected_language,  # remembered as the SOURCE lang
+                    # Remember the source language on the translation rows
+                    # so the modal can label it "English (translated from Ru)"
+                    # instead of "translated from Unknown".
+                    language=(detected_language or (language or "")),
                     is_translation=True,
-                    provider="whisper", model=model,
+                    provider=tx_provider, model=tx_model,
                 )
                 emit_progress(
                     f"Saved {len(xlat_segs)} translated segments."
+                )
+            else:
+                emit_progress(
+                    "Translation pass returned no segments; native only."
                 )
     except Exception as e:
         emit_progress(f"(transcript persist warning: {e})")
@@ -522,9 +574,10 @@ def analyze_speech(video_path, duration, overrides=None):
     for batch_start in range(0, _total_segs, BATCH):
         _check_cancel()
         batch = segments[batch_start:batch_start + BATCH]
-        # Map batch progress into the 0.25–0.95 portion of the overall bar
-        # (transcription owned the first 25%; saving owns the last 5%).
-        _done_pct = 0.25 + 0.70 * (batch_start / max(1, _total_segs))
+        # Map batch progress into the 0.30–0.95 portion of the overall bar
+        # (transcription + optional translation owned the first 30%;
+        # saving owns the last 5%).
+        _done_pct = 0.30 + 0.65 * (batch_start / max(1, _total_segs))
         emit_pct(_done_pct,
                  f"tagging {batch_start + 1}-{batch_start + len(batch)}"
                  f"/{_total_segs}")
@@ -1811,6 +1864,37 @@ td{font-size:13px}
 }
 .vtx-seg-text{color:#ddd;flex:1}
 .vtx-seg-text::selection{background:rgba(25,118,210,.45);color:#fff}
+.vtx-seg-text mark{
+  background:#ffeb3b;color:#111;border-radius:2px;padding:0 1px;
+}
+.vtx-seg-text mark.active{background:#ff9800;color:#fff}
+
+/* Toolbar: language toggle + search. Lives between the help banner and
+   the scrolling transcript body so it stays put as the user scrolls. */
+.vtx-toolbar{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:8px 18px;border-bottom:1px solid #1e1e2a;background:#11151a;
+}
+.vtx-lang-toggle{display:inline-flex;background:#0c0c14;
+  border:1px solid #2e2e3e;border-radius:6px;overflow:hidden}
+.vtx-lang-toggle button{
+  background:transparent;border:none;color:#aaa;
+  padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer;
+  text-transform:uppercase;letter-spacing:.5px;
+}
+.vtx-lang-toggle button:hover:not(:disabled){color:#fff;background:#1a1a24}
+.vtx-lang-toggle button.active{background:#1976d2;color:#fff}
+.vtx-lang-toggle button:disabled{color:#444;cursor:not-allowed}
+.vtx-search-wrap{flex:1;min-width:180px;position:relative}
+.vtx-search{
+  width:100%;background:#0c0c14;border:1px solid #2e2e3e;color:#eee;
+  border-radius:6px;font-size:12px;padding:6px 32px 6px 10px;outline:none;
+}
+.vtx-search:focus{border-color:#1976d2}
+.vtx-search-count{
+  position:absolute;right:8px;top:50%;transform:translateY(-50%);
+  font-size:10px;color:#777;pointer-events:none;
+}
 .vtx-foot{
   padding:10px 18px;border-top:1px solid #1e1e2a;
   display:flex;align-items:center;gap:12px;background:#0d1217;
@@ -2089,6 +2173,19 @@ td{font-size:13px}
       Tip: <b>highlight any text</b> in the transcript, then click
       <b>Preview</b> to play the matching clip or <b>Add to Builder</b>
       to append it to the timeline.
+    </div>
+    <div class="vtx-toolbar" id="vtx-toolbar" style="display:none">
+      <div class="vtx-lang-toggle" id="vtx-lang-toggle">
+        <button type="button" data-mode="native"  onclick="setVtxMode('native')">Native</button>
+        <button type="button" data-mode="english" onclick="setVtxMode('english')">English</button>
+        <button type="button" data-mode="both"    onclick="setVtxMode('both')">Both</button>
+      </div>
+      <div class="vtx-search-wrap">
+        <input type="search" class="vtx-search" id="vtx-search"
+               placeholder="Search within transcript&hellip;"
+               oninput="onVtxSearchInput()" autocomplete="off">
+        <span class="vtx-search-count" id="vtx-search-count"></span>
+      </div>
     </div>
     <div id="vtx-body" class="vtx-body"></div>
     <div class="vtx-foot">
@@ -3101,6 +3198,11 @@ function _aoptsBuildModelSelect(elId, catalog) {
 
 async function openAnalyzeOpts(evt, videoId, _mode) {
   evt.stopPropagation();
+  // Capture the trigger's geometry BEFORE any await — once the handler
+  // yields to the event loop the browser nulls out evt.currentTarget,
+  // and on first open the data fetches below actually take time so we'd
+  // be measuring null and the popover would land in the top-left corner.
+  var anchorRect = (evt.currentTarget || evt.target).getBoundingClientRect();
   var prof = await _aoptsLoadProfile();
   var catalog = await _aoptsLoadModels();
   var pop = document.getElementById('aopts');
@@ -3166,14 +3268,15 @@ async function openAnalyzeOpts(evt, videoId, _mode) {
   var t = document.getElementById('aopts-translate');
   if (t) t.checked = !!prof.whisper_translate;
 
-  // Anchor next to the clicked ⚙ button.
+  // Anchor next to the clicked ⚙ button. Use the rect we captured before
+  // the awaits so the position is correct on the first open too.
   pop.style.left = '0px';
   pop.style.top  = '0px';
   pop.classList.add('open');
-  var br = evt.currentTarget.getBoundingClientRect();
   var pr = pop.getBoundingClientRect();
-  var x = br.right + 8;
-  var y = br.top;
+  var x = anchorRect.right + 8;
+  var y = anchorRect.top;
+  var br = anchorRect;
   if (x + pr.width > window.innerWidth - 8) x = br.left - pr.width - 8;
   if (y + pr.height > window.innerHeight - 8) y = window.innerHeight - pr.height - 8;
   pop.style.left = Math.max(8, x) + 'px';
@@ -3228,6 +3331,13 @@ document.addEventListener('keydown', function(e) {
 // ── Per-video transcript modal ────────────────────────────────────────────
 var _vtxState = { videoId: null, selectionStart: null, selectionEnd: null,
                   selectionText: '' };
+// Language toggle + in-modal search state. _vtxData holds the last
+// fetched payload so we can re-render when the user flips the toggle or
+// types in the search box without re-hitting the API.
+var _vtxData = null;
+var _vtxMode = 'native';
+var _vtxHasNative = false;
+var _vtxHasEnglish = false;
 
 function _vtxFmt(s) {
   var m = Math.floor(s / 60);
@@ -3280,44 +3390,131 @@ async function openVideoTranscript(videoId) {
       attr.innerHTML = '<span class="vtx-attr-empty">Provider not recorded for this transcript.</span>';
     }
     if (!data.groups || data.groups.length === 0) {
+      _vtxData = null;
+      document.getElementById('vtx-toolbar').style.display = 'none';
       body.innerHTML = '<div style="color:#666;text-align:center;padding:24px">'
         + 'No transcript saved for this video.</div>';
       document.getElementById('vtx-sel-info').textContent = '';
       return;
     }
-    var html = '';
-    for (var i = 0; i < data.groups.length; i++) {
-      var g = data.groups[i];
-      // Brand badge + model tooltip on each transcript group's header so
-      // the user can tell at a glance which Whisper run produced this
-      // particular language pass.
-      var badge = (g.provider && window.pgAiBadge)
-        ? ' ' + window.pgAiBadge(g.provider, {
-            size: 12,
-            model: g.model || '',
-            title: 'Transcribed by ' + g.provider
-                  + (g.model ? ' · ' + g.model : ''),
-          })
-        : '';
-      html += '<div class="vtx-group' + (g.is_translation ? ' is-xlat' : '') + '">';
-      html += '<div class="vtx-group-label">' + _vtxEsc(g.label) + badge + '</div>';
-      for (var j = 0; j < g.segments.length; j++) {
-        var seg = g.segments[j];
-        html += '<div class="vtx-seg">'
-          + '<span class="vtx-seg-time">' + _vtxFmt(seg.start) + '</span>'
-          + '<span class="vtx-seg-text" data-start="' + seg.start
-                + '" data-end="' + seg.end + '">'
-          + _vtxEsc(seg.text)
-          + '</span>'
-          + '</div>';
-      }
-      html += '</div>';
-    }
-    body.innerHTML = html;
+    _vtxData = data;
+    _vtxHasNative  = data.groups.some(function(g){ return !g.is_translation; });
+    _vtxHasEnglish = data.groups.some(function(g){ return g.is_translation; })
+                  || data.groups.some(function(g){
+                       return !g.is_translation
+                              && (g.language || '').toLowerCase() === 'en';
+                     });
+    _vtxMode = _vtxHasNative ? 'native' : (_vtxHasEnglish ? 'english' : 'native');
+    var s = document.getElementById('vtx-search');
+    if (s) s.value = '';
+    document.getElementById('vtx-search-count').textContent = '';
+    document.getElementById('vtx-toolbar').style.display = '';
+    syncVtxLangToggle();
+    renderVtxContent();
     document.getElementById('vtx-sel-info').textContent = 'Select text to preview or add to Builder.';
   } catch (e) {
     body.innerHTML = '<div style="color:#ef5350;padding:16px">Failed to load transcript.</div>';
   }
+}
+
+function syncVtxLangToggle() {
+  var btns = document.querySelectorAll('#vtx-lang-toggle button');
+  for (var i = 0; i < btns.length; i++) {
+    var b = btns[i];
+    var m = b.getAttribute('data-mode');
+    var has = (m === 'native')  ? _vtxHasNative
+            : (m === 'english') ? _vtxHasEnglish
+            : (_vtxHasNative && _vtxHasEnglish);
+    b.disabled = !has;
+    b.classList.toggle('active', m === _vtxMode);
+  }
+}
+
+function setVtxMode(mode) {
+  if (!_vtxData) return;
+  _vtxMode = mode;
+  syncVtxLangToggle();
+  renderVtxContent();
+}
+
+function _vtxGroupsForMode() {
+  if (!_vtxData || !_vtxData.groups) return [];
+  if (_vtxMode === 'both') return _vtxData.groups;
+  if (_vtxMode === 'native') {
+    return _vtxData.groups.filter(function(g){ return !g.is_translation; });
+  }
+  var xlat = _vtxData.groups.filter(function(g){ return g.is_translation; });
+  if (xlat.length) return xlat;
+  return _vtxData.groups.filter(function(g){
+    return !g.is_translation && (g.language || '').toLowerCase() === 'en';
+  });
+}
+
+function _vtxHighlight(text, query) {
+  var esc = _vtxEsc(text);
+  if (!query) return {html: esc, count: 0};
+  var qEsc = _vtxEsc(query).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  var re = new RegExp(qEsc, 'gi');
+  var count = 0;
+  var html = esc.replace(re, function(m){ count++; return '<mark>' + m + '</mark>'; });
+  return {html: html, count: count};
+}
+
+function renderVtxContent() {
+  var body = document.getElementById('vtx-body');
+  if (!body || !_vtxData) return;
+  var groups = _vtxGroupsForMode();
+  if (!groups.length) {
+    body.innerHTML = '<div style="color:#666;text-align:center;padding:24px">'
+      + 'No transcript in this view.</div>';
+    document.getElementById('vtx-search-count').textContent = '';
+    return;
+  }
+  var q = (document.getElementById('vtx-search') || {}).value || '';
+  var totalHits = 0;
+  var html = '';
+  for (var i = 0; i < groups.length; i++) {
+    var g = groups[i];
+    var badge = (g.provider && window.pgAiBadge)
+      ? ' ' + window.pgAiBadge(g.provider, {
+          size: 12,
+          model: g.model || '',
+          title: 'Transcribed by ' + g.provider
+                + (g.model ? ' · ' + g.model : ''),
+        })
+      : '';
+    html += '<div class="vtx-group' + (g.is_translation ? ' is-xlat' : '') + '">';
+    html += '<div class="vtx-group-label">' + _vtxEsc(g.label) + badge + '</div>';
+    for (var j = 0; j < g.segments.length; j++) {
+      var seg = g.segments[j];
+      var r = _vtxHighlight(seg.text, q);
+      totalHits += r.count;
+      html += '<div class="vtx-seg">'
+        + '<span class="vtx-seg-time">' + _vtxFmt(seg.start) + '</span>'
+        + '<span class="vtx-seg-text" data-start="' + seg.start
+              + '" data-end="' + seg.end + '">'
+        + r.html
+        + '</span>'
+        + '</div>';
+    }
+    html += '</div>';
+  }
+  body.innerHTML = html;
+  var countEl = document.getElementById('vtx-search-count');
+  if (q) {
+    countEl.textContent = totalHits + ' match' + (totalHits !== 1 ? 'es' : '');
+    var first = body.querySelector('mark');
+    if (first) {
+      first.classList.add('active');
+      first.scrollIntoView({block: 'center', behavior: 'smooth'});
+    }
+  } else {
+    countEl.textContent = '';
+  }
+}
+
+function onVtxSearchInput() {
+  renderVtxContent();
 }
 
 function closeVideoTranscript() {

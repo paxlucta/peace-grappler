@@ -72,6 +72,16 @@ def _cache_path(content_hash, model, language, translate=False):
     return CACHE_DIR / f"{content_hash}.{model}.{safe_lang}{suffix}.json"
 
 
+def _fmt_mmss(sec):
+    """Format seconds as ``m:ss`` for progress labels. Negative / NaN
+    inputs collapse to ``0:00`` so callers don't have to guard."""
+    try:
+        s = max(0, int(round(float(sec))))
+    except (TypeError, ValueError):
+        return "0:00"
+    return f"{s // 60}:{s % 60:02d}"
+
+
 def _extract_audio_wav(video_path, dest_wav):
     """Pull the audio track out as 16 kHz mono WAV (Whisper's native format).
     Skips re-encoding any video stream — quick even for long files."""
@@ -85,7 +95,7 @@ def _extract_audio_wav(video_path, dest_wav):
 
 
 def transcribe(video_path, model="base", language=None, translate=False,
-               on_log=None):
+               on_log=None, on_progress=None):
     """Transcribe *video_path* and return ``{"segments": [...], "language":
     "..."}`` where:
 
@@ -99,10 +109,17 @@ def transcribe(video_path, model="base", language=None, translate=False,
         for multilingual content where you want a uniform English
         transcript downstream regardless of source language.
 
+    *on_progress*: optional ``callable(frac: float, label: str)``. Fired
+        roughly once per second as Whisper streams segments out, with
+        ``frac = seg.end / audio_duration`` so the caller can drive a
+        progress bar. Cached transcripts skip this since there's nothing
+        to wait for.
+
     On no-audio / failure returns ``{"segments": [], "language": ""}``.
     Cached per (content_hash, model, language, translate-flag).
     """
     log = on_log or (lambda m: None)
+    progress = on_progress or (lambda frac, label="": None)
     empty = {"segments": [], "language": ""}
     video_path = Path(video_path)
     if not video_path.exists():
@@ -144,6 +161,7 @@ def transcribe(video_path, model="base", language=None, translate=False,
             return empty
 
         try:
+            import time as _time
             segments_iter, info = m.transcribe(
                 str(wav),
                 language=(language or None),
@@ -152,16 +170,37 @@ def transcribe(video_path, model="base", language=None, translate=False,
                 vad_filter=True,           # skip non-speech regions
                 vad_parameters={"min_silence_duration_ms": 500},
             )
+            total_dur = float(getattr(info, "duration", 0) or 0)
             segments = []
+            _last_pct_at = 0.0
+            _last_log_at = 0.0
             for seg in segments_iter:
                 txt = (seg.text or "").strip()
-                if not txt:
-                    continue
-                segments.append({
-                    "start": round(float(seg.start), 2),
-                    "end":   round(float(seg.end), 2),
-                    "text":  txt,
-                })
+                if txt:
+                    segments.append({
+                        "start": round(float(seg.start), 2),
+                        "end":   round(float(seg.end), 2),
+                        "text":  txt,
+                    })
+                # Heartbeat: emit progress at most ~3x/sec so we don't spam
+                # the SSE stream with hundreds of events on long videos.
+                now = _time.monotonic()
+                if total_dur > 0 and (now - _last_pct_at) >= 0.35:
+                    _last_pct_at = now
+                    frac = min(1.0, float(seg.end) / total_dur)
+                    progress(frac,
+                             f"transcribing {_fmt_mmss(seg.end)}"
+                             f"/{_fmt_mmss(total_dur)}")
+                # Less frequent textual breadcrumb (every 10s wall-clock)
+                # so the log panel doesn't drown in identical lines but
+                # still confirms forward motion if the bar UI is off-screen.
+                if (now - _last_log_at) >= 10.0 and total_dur > 0:
+                    _last_log_at = now
+                    log(f"  {_fmt_mmss(seg.end)} / {_fmt_mmss(total_dur)} "
+                        f"({100 * seg.end / total_dur:.0f}%) — "
+                        f"{len(segments)} segments so far")
+            if total_dur > 0:
+                progress(1.0, f"transcribed {_fmt_mmss(total_dur)}")
             detected_language = getattr(info, "language", "") or ""
             log(f"Transcribed {len(segments)} segments "
                 f"(detected language: {detected_language or '?'}).")

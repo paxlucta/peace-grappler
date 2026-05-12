@@ -376,9 +376,34 @@ nav a.active{color:#e53935;border-color:#e53935}
   cursor:pointer;padding:0 4px;line-height:1;
 }
 .tx-close:hover{color:#fff}
-.tx-body{padding:8px 18px 18px;overflow-y:auto;flex:1}
+.tx-body{padding:0 18px 18px;overflow-y:auto;flex:1}
+.tx-toolbar{
+  position:sticky;top:0;z-index:2;background:#161616;
+  padding:10px 18px;margin:0 -18px;border-bottom:1px solid #242424;
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+}
+.tx-lang-toggle{display:inline-flex;background:#0c0c14;
+  border:1px solid #2e2e3e;border-radius:6px;overflow:hidden}
+.tx-lang-toggle button{
+  background:transparent;border:none;color:#aaa;
+  padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer;
+  text-transform:uppercase;letter-spacing:.5px;
+}
+.tx-lang-toggle button:hover:not(:disabled){color:#fff;background:#1a1a24}
+.tx-lang-toggle button.active{background:#1976d2;color:#fff}
+.tx-lang-toggle button:disabled{color:#444;cursor:not-allowed}
+.tx-search-wrap{flex:1;min-width:160px;position:relative}
+.tx-search{
+  width:100%;background:#0c0c14;border:1px solid #2e2e3e;color:#eee;
+  border-radius:6px;font-size:12px;padding:6px 28px 6px 10px;outline:none;
+}
+.tx-search:focus{border-color:#1976d2}
+.tx-search-count{
+  position:absolute;right:8px;top:50%;transform:translateY(-50%);
+  font-size:10px;color:#777;pointer-events:none;
+}
 .tx-group{margin-top:14px}
-.tx-group:first-child{margin-top:6px}
+.tx-group:first-child{margin-top:10px}
 .tx-group-label{
   font-size:10px;font-weight:700;color:#1976d2;text-transform:uppercase;
   letter-spacing:.5px;margin-bottom:6px;
@@ -394,6 +419,10 @@ nav a.active{color:#e53935;border-color:#e53935}
   flex-shrink:0;min-width:54px;padding-top:2px;
 }
 .tx-seg-text{color:#ddd;flex:1}
+.tx-seg-text mark{
+  background:#ffeb3b;color:#111;border-radius:2px;padding:0 1px;
+}
+.tx-seg-text mark.active{background:#ff9800;color:#fff}
 .tx-empty{color:#666;font-size:13px;text-align:center;padding:20px 0}
 
 /* -- Video player overlay -- */
@@ -460,7 +489,22 @@ nav a.active{color:#e53935;border-color:#e53935}
       <span class="tx-range" id="tx-range"></span>
       <button class="tx-close" onclick="closeTranscript()">&times;</button>
     </div>
-    <div class="tx-body" id="tx-body"></div>
+    <div class="tx-body" id="tx-body">
+      <div class="tx-toolbar" id="tx-toolbar" style="display:none">
+        <div class="tx-lang-toggle" id="tx-lang-toggle">
+          <button type="button" data-mode="native"  onclick="setTxMode('native')">Native</button>
+          <button type="button" data-mode="english" onclick="setTxMode('english')">English</button>
+          <button type="button" data-mode="both"    onclick="setTxMode('both')">Both</button>
+        </div>
+        <div class="tx-search-wrap">
+          <input type="search" class="tx-search" id="tx-search"
+                 placeholder="Search within transcript&hellip;"
+                 oninput="onTxSearchInput()" autocomplete="off">
+          <span class="tx-search-count" id="tx-search-count"></span>
+        </div>
+      </div>
+      <div id="tx-content"></div>
+    </div>
   </div>
 </div>
 
@@ -789,43 +833,149 @@ function clearSearch() {
   onSearchInput('');
 }
 
+// -- Transcript modal state --
+var _txData = null;            // last loaded {groups, ...}
+var _txMode = 'native';         // 'native' | 'english' | 'both'
+var _txHasNative = false;
+var _txHasEnglish = false;
+
 async function openTranscript(sceneId) {
   var overlay = document.getElementById('tx-overlay');
-  var body = document.getElementById('tx-body');
+  var content = document.getElementById('tx-content');
+  var toolbar = document.getElementById('tx-toolbar');
   var title = document.getElementById('tx-title');
   var range = document.getElementById('tx-range');
-  body.innerHTML = '<div class="tx-empty">Loading...</div>';
+  content.innerHTML = '<div class="tx-empty">Loading...</div>';
+  toolbar.style.display = 'none';
   title.textContent = 'Transcript';
   range.textContent = '';
+  // Reset the in-modal search so it doesn't carry over from a prior open.
+  var s = document.getElementById('tx-search');
+  if (s) s.value = '';
+  document.getElementById('tx-search-count').textContent = '';
   overlay.classList.add('active');
   try {
     var r = await fetch('/rate/api/scene/' + sceneId + '/transcript');
     var data = await r.json();
+    _txData = data;
     title.textContent = data.filename || 'Transcript';
     range.textContent = '[' + data.start.toFixed(1) + 's – ' + data.end.toFixed(1) + 's]';
     if (!data.groups || data.groups.length === 0) {
-      body.innerHTML = '<div class="tx-empty">No transcript saved for this scene.<br>'
+      content.innerHTML = '<div class="tx-empty">No transcript saved for this scene.<br>'
         + '<span style="font-size:11px">Run audio-mode analysis on this video to generate one.</span></div>';
       return;
     }
-    var html = '';
-    for (var i = 0; i < data.groups.length; i++) {
-      var g = data.groups[i];
-      html += '<div class="tx-group' + (g.is_translation ? ' is-xlat' : '') + '">';
-      html += '<div class="tx-group-label">' + escHtml(g.label) + '</div>';
-      for (var j = 0; j < g.segments.length; j++) {
-        var seg = g.segments[j];
-        html += '<div class="tx-seg">'
-          + '<span class="tx-seg-time">' + fmtT(seg.start) + '</span>'
-          + '<span class="tx-seg-text">' + escHtml(seg.text) + '</span>'
-          + '</div>';
-      }
-      html += '</div>';
-    }
-    body.innerHTML = html;
+    // Detect which versions exist. is_translation=true is the
+    // English-translated pass; is_translation=false is the original
+    // (which may itself be English when the source spoke English).
+    _txHasNative  = data.groups.some(function(g){ return !g.is_translation; });
+    _txHasEnglish = data.groups.some(function(g){ return g.is_translation; })
+                  || data.groups.some(function(g){
+                       return !g.is_translation
+                              && (g.language || '').toLowerCase() === 'en';
+                     });
+    // Default: native wins. If only English exists, show English.
+    _txMode = _txHasNative ? 'native' : (_txHasEnglish ? 'english' : 'native');
+    syncLangToggle();
+    toolbar.style.display = '';
+    renderTxContent();
   } catch (e) {
-    body.innerHTML = '<div class="tx-empty">Failed to load transcript.</div>';
+    content.innerHTML = '<div class="tx-empty">Failed to load transcript.</div>';
   }
+}
+
+function syncLangToggle() {
+  var btns = document.querySelectorAll('#tx-lang-toggle button');
+  for (var i = 0; i < btns.length; i++) {
+    var b = btns[i];
+    var m = b.getAttribute('data-mode');
+    var has = (m === 'native')  ? _txHasNative
+            : (m === 'english') ? _txHasEnglish
+            : (_txHasNative && _txHasEnglish);
+    b.disabled = !has;
+    b.classList.toggle('active', m === _txMode);
+  }
+}
+
+function setTxMode(mode) {
+  if (!_txData) return;
+  _txMode = mode;
+  syncLangToggle();
+  renderTxContent();
+}
+
+function _txGroupsForMode() {
+  if (!_txData || !_txData.groups) return [];
+  if (_txMode === 'both') return _txData.groups;
+  // 'native' → originals (is_translation=false). If a video's source was
+  // English, the "native" view is its English original.
+  if (_txMode === 'native') {
+    return _txData.groups.filter(function(g){ return !g.is_translation; });
+  }
+  // 'english' → translated pass when present; otherwise English originals.
+  var xlat = _txData.groups.filter(function(g){ return g.is_translation; });
+  if (xlat.length) return xlat;
+  return _txData.groups.filter(function(g){
+    return !g.is_translation && (g.language || '').toLowerCase() === 'en';
+  });
+}
+
+function _txHighlight(text, query) {
+  // Escape HTML first; then re-find matches in the escaped string and
+  // wrap them in <mark>. Returns {html, count}.
+  var esc = escHtml(text);
+  if (!query) return {html: esc, count: 0};
+  var qEsc = escHtml(query).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  var re = new RegExp(qEsc, 'gi');
+  var count = 0;
+  var html = esc.replace(re, function(m){ count++; return '<mark>' + m + '</mark>'; });
+  return {html: html, count: count};
+}
+
+function renderTxContent() {
+  var content = document.getElementById('tx-content');
+  if (!content || !_txData) return;
+  var groups = _txGroupsForMode();
+  if (!groups.length) {
+    content.innerHTML = '<div class="tx-empty">No transcript in this view.</div>';
+    document.getElementById('tx-search-count').textContent = '';
+    return;
+  }
+  var q = (document.getElementById('tx-search') || {}).value || '';
+  var totalHits = 0;
+  var html = '';
+  for (var i = 0; i < groups.length; i++) {
+    var g = groups[i];
+    html += '<div class="tx-group' + (g.is_translation ? ' is-xlat' : '') + '">';
+    html += '<div class="tx-group-label">' + escHtml(g.label) + '</div>';
+    for (var j = 0; j < g.segments.length; j++) {
+      var seg = g.segments[j];
+      var r = _txHighlight(seg.text, q);
+      totalHits += r.count;
+      html += '<div class="tx-seg">'
+        + '<span class="tx-seg-time">' + fmtT(seg.start) + '</span>'
+        + '<span class="tx-seg-text">' + r.html + '</span>'
+        + '</div>';
+    }
+    html += '</div>';
+  }
+  content.innerHTML = html;
+  var countEl = document.getElementById('tx-search-count');
+  if (q) {
+    countEl.textContent = totalHits + ' match' + (totalHits !== 1 ? 'es' : '');
+    // Scroll the first match into view.
+    var first = content.querySelector('mark');
+    if (first) {
+      first.classList.add('active');
+      first.scrollIntoView({block: 'center', behavior: 'smooth'});
+    }
+  } else {
+    countEl.textContent = '';
+  }
+}
+
+function onTxSearchInput() {
+  renderTxContent();
 }
 
 function closeTranscript() {

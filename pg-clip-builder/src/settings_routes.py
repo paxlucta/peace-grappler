@@ -43,6 +43,8 @@ def api_app_set():
             tag_schema=data.get("tag_schema"),
             socials=data.get("socials"),
             analysis_mode=data.get("analysis_mode"),
+            transcribe_provider=data.get("transcribe_provider"),
+            transcribe_model=data.get("transcribe_model"),
             whisper_model=data.get("whisper_model"),
             whisper_language=data.get("whisper_language"),
             whisper_translate=data.get("whisper_translate"),
@@ -845,16 +847,29 @@ SETTINGS_PAGE = """<!doctype html>
         </div>
       </div>
       <div id="speech-opts" style="display:none">
-        <label>Whisper model</label>
-        <select id="whisper-model"
+        <label>Transcription provider</label>
+        <select id="tx-provider"
+                onchange="onTranscribeProviderChange()"
                 style="width:100%;padding:8px 10px;background:#0c0c14;border:1px solid #2e2e3e;color:#eee;border-radius:5px;font-size:12px">
-          <option value="tiny">tiny — 39 MB, fastest, English-leaning</option>
-          <option value="base">base — 74 MB, balanced (default)</option>
-          <option value="small">small — 244 MB, better accuracy</option>
-          <option value="medium">medium — 769 MB, very accurate</option>
-          <option value="large-v3">large-v3 — 1.5 GB, best quality (recommended for multilingual)</option>
+          <option value="whisper">Whisper — local (faster-whisper, no API key)</option>
+          <option value="openai">OpenAI — hosted Whisper (needs OPENAI_API_KEY)</option>
+          <option value="gemini">Gemini — audio in (needs GEMINI_API_KEY)</option>
         </select>
+        <div class="muted" id="tx-provider-hint" style="margin-top:6px"></div>
         <div style="height:10px"></div>
+        <label>Model</label>
+        <select id="tx-model"
+                style="width:100%;padding:8px 10px;background:#0c0c14;border:1px solid #2e2e3e;color:#eee;border-radius:5px;font-size:12px"></select>
+        <div style="height:10px"></div>
+        <!-- Hidden mirror of tx-model for back-compat with the legacy
+             whisper_model save key. Kept in sync from JS. -->
+        <select id="whisper-model" style="display:none">
+          <option value="tiny">tiny</option>
+          <option value="base">base</option>
+          <option value="small">small</option>
+          <option value="medium">medium</option>
+          <option value="large-v3">large-v3</option>
+        </select>
         <label>Language (ISO code, optional)</label>
         <input type="text" id="whisper-language"
                placeholder="auto-detect (e.g. en, ru, es, pt)">
@@ -867,15 +882,16 @@ SETTINGS_PAGE = """<!doctype html>
         <div style="height:12px"></div>
         <label class="tl-check" style="display:flex;align-items:center;gap:8px">
           <input type="checkbox" id="whisper-translate">
-          <span>Translate transcript to English</span>
+          <span>Always store an English translation alongside the native one</span>
         </label>
         <div class="muted" style="margin-top:4px">
-          Whisper transcribes the source audio AND translates to English in
-          one pass. Useful for multilingual videos so downstream AI tagging
-          gets a uniform English transcript regardless of source language.
-          Leaves audio untouched — only affects the cached transcript text.
-          Models download on first use to
-          <code>~/.cache/huggingface/hub/</code>.
+          The native-language transcript is always stored. When the source
+          isn't English, an English translation is automatically generated
+          and stored as a second copy — the transcript modal lets you flip
+          between them. Tick this box to <em>also</em> generate the English
+          copy when Whisper thinks the source is already English (useful for
+          code-switching content where detection may flip-flop). Models
+          download on first use to <code>~/.cache/huggingface/hub/</code>.
         </div>
       </div>
     </div>
@@ -1043,6 +1059,70 @@ function _currentAnalysisMode(){
   return 'visual';
 }
 
+// Mirrors transcription.MODELS / DEFAULT_MODEL. Kept here so the picker
+// stays static-html-only (no extra API roundtrip on page load).
+const TX_MODELS = {
+  whisper: [
+    {value:'tiny',     label:'tiny — 39 MB, fastest'},
+    {value:'base',     label:'base — 74 MB, balanced (default)'},
+    {value:'small',    label:'small — 244 MB, better accuracy'},
+    {value:'medium',   label:'medium — 769 MB, very accurate'},
+    {value:'large-v3', label:'large-v3 — 1.5 GB, best quality (multilingual)'},
+  ],
+  openai: [
+    {value:'whisper-1', label:'whisper-1 — OpenAI hosted Whisper'},
+  ],
+  gemini: [
+    {value:'gemini-2.5-flash-lite', label:'gemini-2.5-flash-lite — cheapest'},
+    {value:'gemini-2.5-flash',      label:'gemini-2.5-flash — default'},
+    {value:'gemini-2.0-flash',      label:'gemini-2.0-flash'},
+    {value:'gemini-2.5-pro',        label:'gemini-2.5-pro — best quality'},
+  ],
+};
+const TX_DEFAULT = {whisper:'base', openai:'whisper-1', gemini:'gemini-2.5-flash'};
+
+function populateTxModels(provider, selected){
+  const sel = document.getElementById('tx-model');
+  if (!sel) return;
+  const opts = TX_MODELS[provider] || [];
+  let html = '';
+  for (const o of opts) {
+    html += '<option value="' + o.value + '">' + o.label + '</option>';
+  }
+  sel.innerHTML = html;
+  const want = selected || TX_DEFAULT[provider] || '';
+  if (want && Array.from(sel.options).some(function(o){return o.value===want})) {
+    sel.value = want;
+  }
+  // Keep the legacy hidden whisper-model select in sync — only meaningful
+  // when provider=whisper, but harmless otherwise (server ignores it).
+  if (provider === 'whisper') {
+    document.getElementById('whisper-model').value = sel.value;
+  }
+}
+
+function onTranscribeProviderChange(){
+  const prov = document.getElementById('tx-provider').value;
+  populateTxModels(prov);
+  refreshTxProviderHint();
+}
+
+function refreshTxProviderHint(){
+  const prov = document.getElementById('tx-provider').value;
+  const hint = document.getElementById('tx-provider-hint');
+  if (!hint) return;
+  if (prov === 'whisper') {
+    hint.textContent = 'Runs locally with faster-whisper. Models download '
+      + 'on first use to ~/.cache/huggingface/hub/.';
+  } else if (prov === 'openai') {
+    hint.textContent = 'Posts audio to OpenAI. Requires OPENAI_API_KEY '
+      + 'in your .env. 25 MB upload cap → use Whisper (local) for long videos.';
+  } else if (prov === 'gemini') {
+    hint.textContent = 'Posts audio to Gemini. Requires GEMINI_API_KEY '
+      + 'in your .env. Inline-data cap ~19 MB.';
+  }
+}
+
 function fillFromAppCfg(){
   document.getElementById('brand-name').value     = appCfg.brand_name || '';
   document.getElementById('content-domain').value = appCfg.content_domain || '';
@@ -1058,12 +1138,22 @@ function fillFromAppCfg(){
   // Analysis mode
   const mode = (appCfg.analysis_mode || 'visual');
   selectAnalysisMode(mode);
+  // Transcription provider + model. Falls back to whisper/base.
+  var txProv = (appCfg.transcribe_provider || 'whisper');
+  document.getElementById('tx-provider').value = txProv;
+  // Pre-populate model menu for the chosen provider, then pick the saved
+  // model (or that provider's default).
+  populateTxModels(txProv,
+    appCfg.transcribe_model || (txProv === 'whisper'
+                                  ? (appCfg.whisper_model || 'base')
+                                  : ''));
   document.getElementById('whisper-model').value =
     appCfg.whisper_model || 'base';
   document.getElementById('whisper-language').value =
     appCfg.whisper_language || '';
   document.getElementById('whisper-translate').checked =
     !!appCfg.whisper_translate;
+  refreshTxProviderHint();
   // Caption defaults
   var caps = appCfg.captions || {};
   document.getElementById('cap-def-font').value  = caps.font || 'sans';
@@ -1611,6 +1701,8 @@ async function saveAll(){
     tag_schema:     tagSchema,
     socials:        _collectSocials(),
     analysis_mode:     _currentAnalysisMode(),
+    transcribe_provider: document.getElementById('tx-provider').value,
+    transcribe_model:    document.getElementById('tx-model').value,
     whisper_model:     document.getElementById('whisper-model').value,
     whisper_language:  document.getElementById('whisper-language').value,
     whisper_translate: document.getElementById('whisper-translate').checked,

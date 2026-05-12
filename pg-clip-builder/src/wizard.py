@@ -2124,6 +2124,8 @@ async function captionConfigSaveDefault() {
       tag_schema:     cfg.tag_schema,
       socials:        cfg.socials,
       analysis_mode:  cfg.analysis_mode,
+      transcribe_provider: cfg.transcribe_provider,
+      transcribe_model:    cfg.transcribe_model,
       whisper_model:  cfg.whisper_model,
       whisper_language:  cfg.whisper_language,
       whisper_translate: cfg.whisper_translate,

@@ -1,6 +1,6 @@
 {
   "analysis_mode": "speech",
-  "whisper_model": "small",
+  "whisper_model": "base",
   "whisper_language": "",
   "whisper_translate": true,
   "ai": {
@@ -27,5 +27,7 @@
         "model": "MiniMax-M1"
       }
     }
-  }
+  },
+  "transcribe_provider": "whisper",
+  "transcribe_model": "small"
 }
