@@ -81,13 +81,13 @@ def _get_cached_research(include_provider=False):
         conn.close()
 
 
-def _save_research(result, provider=None):
+def _save_research(result, provider=None, model=None):
     conn = get_db()
     try:
         conn.execute(
-            "INSERT INTO wizard_research (topic, result_json, provider) "
-            "VALUES (?, ?, ?)",
-            ("instagram_reels", json.dumps(result), provider),
+            "INSERT INTO wizard_research (topic, result_json, provider, model) "
+            "VALUES (?, ?, ?, ?)",
+            ("instagram_reels", json.dumps(result), provider, model),
         )
         conn.commit()
     finally:
@@ -132,7 +132,8 @@ def _get_wizard_history(limit=20):
         rows = conn.execute(
             "SELECT gv.id, gv.path, gv.duration, gv.generated_at, "
             "gv.timeline_json, gv.caption, "
-            "gv.wizard_provider, gv.caption_provider "
+            "gv.wizard_provider, gv.caption_provider, "
+            "gv.wizard_model, gv.caption_model "
             "FROM generated_videos gv ORDER BY gv.generated_at DESC LIMIT ?",
             (limit,),
         ).fetchall()
@@ -188,6 +189,8 @@ def _get_wizard_history(limit=20):
                 "caption": r["caption"] or "",
                 "wizard_provider":  r["wizard_provider"] or "",
                 "caption_provider": r["caption_provider"] or "",
+                "wizard_model":     r["wizard_model"]     if "wizard_model"     in r.keys() else "",
+                "caption_model":    r["caption_model"]    if "caption_model"    in r.keys() else "",
                 "feedback": [{"text": f["feedback"], "at": f["created_at"]}
                              for f in fb_rows],
                 "scenes": scenes_used,
@@ -218,6 +221,18 @@ def _active_provider_name(task="wizard"):
     default."""
     override = getattr(_call_ctx, "provider", None)
     return override or ai_cli.get_provider_for_task(task)
+
+
+def _active_provider_and_model(task="wizard"):
+    """Resolve both the provider AND the specific model that will handle
+    *task* right now, respecting any threadlocal overrides. Returns
+    ``(provider, model)``. Used to stamp DB rows with full attribution so
+    the UI badge can show brand + version-on-hover."""
+    override_p = getattr(_call_ctx, "provider", None)
+    override_m = getattr(_call_ctx, "model", None)
+    return ai_cli.resolve_provider_model(task,
+                                          provider=override_p,
+                                          model=override_m)
 
 
 def _active_provider_label(task="wizard"):
@@ -331,7 +346,8 @@ def _run_research(model):
             emit("Research returned empty — using defaults")
             return _default_research()
         result = _parse_json(raw)
-        _save_research(result, provider=_active_provider_name("wizard"))
+        _rp, _rm = _active_provider_and_model("wizard")
+        _save_research(result, provider=_rp, model=_rm)
         emit("Research complete — cached for future runs")
         return result
     except Exception as e:
@@ -869,9 +885,10 @@ def _assemble_video(plan, music_files, video_num, total,
         })
 
     final_dur = get_video_duration(str(out_file))
+    _wp, _wm = _active_provider_and_model("wizard")
     save_generated_video(
         str(out_file), round(final_dur, 1), timeline,
-        wizard_provider=_active_provider_name("wizard"),
+        wizard_provider=_wp, wizard_model=_wm,
     )
 
     return {
@@ -1022,9 +1039,11 @@ def _generate(model, num_videos, num_variations=1, folders=None,
     assembly step skips the overlay. Useful for spoken / instructional
     content where original audio carries the value.
     """
-    # Stash the provider override so every nested _call_claude in this
-    # thread routes through the user's chosen provider.
+    # Stash the provider + model override so every nested _call_claude in
+    # this thread routes through the user's chosen pair, and so the save
+    # paths can stamp DB rows with the exact model that ran.
     _call_ctx.provider = provider
+    _call_ctx.model    = model
     try:
         # 0. Auto-analyze unanalyzed videos in selected folders
         if folders:
@@ -1156,7 +1175,9 @@ def _generate(model, num_videos, num_variations=1, folders=None,
                             None,
                         )
                         if match:
-                            update_video_caption(match["id"], caption, provider=_active_provider_name("captions"))
+                            _cp, _cm = _active_provider_and_model("captions")
+                            update_video_caption(match["id"], caption,
+                                                 provider=_cp, model=_cm)
                         result["caption"] = caption
                         emit("Caption generated!")
 
@@ -1299,9 +1320,10 @@ def api_regenerate_caption(video_id):
     data = request.json or {}
     model = (data.get("model") or "").strip() or None
     provider = (data.get("provider") or "").strip() or None
-    # Synchronous endpoint — set the provider override on this request's
-    # thread for the duration of the call.
+    # Synchronous endpoint — set the provider/model override on this
+    # request's thread for the duration of the call.
     _call_ctx.provider = provider
+    _call_ctx.model    = model
 
     from db import get_all_generated_videos
     videos = get_all_generated_videos()
@@ -1322,7 +1344,8 @@ def api_regenerate_caption(video_id):
 
     caption = _generate_caption(model, plan, video["duration"])
     if caption:
-        update_video_caption(video_id, caption, provider=_active_provider_name("captions"))
+        _cp, _cm = _active_provider_and_model("captions")
+        update_video_caption(video_id, caption, provider=_cp, model=_cm)
         return jsonify({"status": "ok", "caption": caption})
     return jsonify({"error": "Caption generation failed"}), 500
 
@@ -1438,11 +1461,14 @@ def api_refresh_research():
         )
         if raw:
             result = _parse_json(raw)
-            actual_provider = (provider_override
-                               or ai_cli.get_provider_for_task("wizard"))
-            _save_research(result, provider=actual_provider)
+            actual_provider, actual_model = ai_cli.resolve_provider_model(
+                "wizard", provider=provider_override, model=model_override,
+            )
+            _save_research(result, provider=actual_provider,
+                                    model=actual_model)
             return jsonify({"status": "ok", "research": result,
-                            "provider": actual_provider})
+                            "provider": actual_provider,
+                            "model":    actual_model})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
     return jsonify({"status": "error", "message": "Empty response"}), 500
@@ -2278,13 +2304,24 @@ function showResults() {
       // Inline provider badges so the user sees which AI composed the
       // reel (e.g. minimax logo when minimax was selected) and which one
       // wrote the caption, when they differ.
+      var wizModel = match.wizard_model || '';
+      var capModel = match.caption_model || '';
       var wizBadge = (window.pgAiBadge && match.wizard_provider)
-        ? ' ' + window.pgAiBadge(match.wizard_provider,
-            {size:13, title:'Reel composed by ' + match.wizard_provider}) : '';
+        ? ' ' + window.pgAiBadge(match.wizard_provider, {
+            size: 13,
+            model: wizModel,
+            title: 'Reel composed by ' + match.wizard_provider
+                  + (wizModel ? ' · ' + wizModel : ''),
+          }) : '';
       var capBadge = (window.pgAiBadge && match.caption_provider
-                      && match.caption_provider !== match.wizard_provider)
-        ? ' ' + window.pgAiBadge(match.caption_provider,
-            {size:11, title:'Caption by ' + match.caption_provider}) : '';
+                      && (match.caption_provider !== match.wizard_provider
+                          || capModel !== wizModel))
+        ? ' ' + window.pgAiBadge(match.caption_provider, {
+            size: 11,
+            model: capModel,
+            title: 'Caption by ' + match.caption_provider
+                  + (capModel ? ' · ' + capModel : ''),
+          }) : '';
 
       var card = document.createElement('div');
       card.className = 'result-card';

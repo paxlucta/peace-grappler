@@ -448,10 +448,14 @@ def analyze_speech(video_path, duration, overrides=None):
     try:
         video_id = db.register_video(video_path)
         is_xlat_pass = bool(translate)
+        # Attribute transcript rows to the Whisper model that produced them
+        # so the UI can show "whisper" as the brand badge + the specific
+        # size (tiny/base/.../large-v3) on hover.
         db.save_transcripts(
             video_id, segments,
             language=(detected_language or (language or "")),
             is_translation=is_xlat_pass,
+            provider="whisper", model=model,
         )
         # Bilingual: if the source language isn't English and the user
         # didn't already ask for translate-mode, run a second pass to get
@@ -475,6 +479,7 @@ def analyze_speech(video_path, duration, overrides=None):
                     video_id, xlat_segs,
                     language=detected_language,  # remembered as the SOURCE lang
                     is_translation=True,
+                    provider="whisper", model=model,
                 )
                 emit_progress(
                     f"Saved {len(xlat_segs)} translated segments."
@@ -689,6 +694,8 @@ def scan_videos():
             "needs_update": len(new_tags) > 0,
             "analyzer_provider": v["analyzer_provider"]
                 if "analyzer_provider" in v.keys() else None,
+            "analyzer_model": v["analyzer_model"]
+                if "analyzer_model" in v.keys() else None,
             "has_transcript": v["id"] in transcript_video_ids,
             "visual_analyzed_at": v["visual_analyzed_at"]
                 if "visual_analyzed_at" in v.keys() else None,
@@ -698,6 +705,10 @@ def scan_videos():
                 if "visual_analyzer_provider" in v.keys() else None,
             "speech_analyzer_provider": v["speech_analyzer_provider"]
                 if "speech_analyzer_provider" in v.keys() else None,
+            "visual_analyzer_model": v["visual_analyzer_model"]
+                if "visual_analyzer_model" in v.keys() else None,
+            "speech_analyzer_model": v["speech_analyzer_model"]
+                if "speech_analyzer_model" in v.keys() else None,
         })
 
     return jsonify({"registered": registered, "videos": result})
@@ -749,8 +760,15 @@ def _analyze_one(video_id, force, overrides=None):
         analyzed_tags = get_analyzed_tags(video_id)
         new_tags = ALL_TAG_SET - analyzed_tags
 
-        # Capture which AI produced this analysis so the UI can attribute it.
-        provider = ai_cli.get_provider_for_task("analysis")
+        # Capture which AI + which specific model produced this analysis
+        # so the UI can attribute it (brand badge + model in the tooltip).
+        # Per-run override (set by the ⚙ popover) wins; falls back to the
+        # /settings task→provider mapping.
+        provider, model = ai_cli.resolve_provider_model(
+            "analysis",
+            provider=getattr(_ai_call_override, "provider", None),
+            model=getattr(_ai_call_override, "model", None),
+        )
 
         # Per-run override beats the brand profile mode.
         mode = (overrides.get("mode")
@@ -779,7 +797,8 @@ def _analyze_one(video_id, force, overrides=None):
                 partial = getattr(e, "partial", None) or {"tags": {}, "moments": []}
                 if partial["tags"] or partial["moments"]:
                     save_analysis(video_id, partial["tags"], partial["moments"],
-                                  list(ALL_TAG_SET), provider=provider, mode=mode)
+                                  list(ALL_TAG_SET),
+                                  provider=provider, mode=mode, model=model)
                     emit_progress(
                         f"Saved {len(partial['tags'])} partial tags before quota hit."
                     )
@@ -788,7 +807,8 @@ def _analyze_one(video_id, force, overrides=None):
                 emit_progress("Analysis failed")
                 return False
             save_analysis(video_id, result["tags"], result["moments"],
-                          list(ALL_TAG_SET), provider=provider, mode=mode)
+                          list(ALL_TAG_SET),
+                          provider=provider, mode=mode, model=model)
             emit_pct(1.0, "done")
             emit_progress(f"Saved {len(result['tags'])} tags")
 
@@ -797,11 +817,11 @@ def _analyze_one(video_id, force, overrides=None):
             new_tag_results = analyze_incremental(video_path, duration, new_tags)
             if new_tag_results:
                 save_analysis(video_id, new_tag_results, [], list(new_tags),
-                              provider=provider, mode=mode)
+                              provider=provider, mode=mode, model=model)
                 emit_progress(f"Saved {len(new_tag_results)} new tags")
             else:
                 save_analysis(video_id, {}, [], list(new_tags),
-                              provider=provider, mode=mode)
+                              provider=provider, mode=mode, model=model)
                 emit_progress("No new tags found")
 
         else:
@@ -1362,8 +1382,62 @@ def api_video_transcript(video_id):
             "is_translation": g["is_translation"],
             "label":          _lang_label(g["language"], g["is_translation"]),
             "segments":       g["segments"],
+            "provider":       g.get("provider") or "",
+            "model":          g.get("model") or "",
         } for g in groups],
     })
+
+
+@analyzer_bp.route("/analyze/api/clip-preview")
+def api_clip_preview():
+    """Stream a short MP4 cut from *video_id* between *start* and *end*
+    seconds so the transcript modal's Preview button can play a selection
+    without creating a real scene. Mirrors rating.api_clip but accepts
+    arbitrary ranges; result is cached by (path, start, end) hash so
+    repeat previews are instant."""
+    import hashlib
+    try:
+        video_id = int(request.args.get("video_id"))
+        start    = float(request.args.get("start"))
+        end      = float(request.args.get("end"))
+    except (TypeError, ValueError):
+        return "", 400
+    if end <= start:
+        return "", 400
+    v = get_video_by_id(video_id)
+    if not v:
+        return "", 404
+    src_path = v["path"]
+    dur = v["duration"] if "duration" in v.keys() else 0
+    if dur and end > dur:
+        end = dur
+    seg = end - start
+    if seg <= 0:
+        return "", 400
+
+    from video import THUMB_DIR
+    from flask import send_file
+    THUMB_DIR.mkdir(parents=True, exist_ok=True)
+    key = hashlib.md5(
+        f"prev:{src_path}@{start:.2f}@{end:.2f}".encode()
+    ).hexdigest()
+    out = THUMB_DIR / f"prev_{key}.mp4"
+    if not out.exists():
+        try:
+            subprocess.run(
+                ["ffmpeg", "-ss", f"{start:.2f}", "-i", str(src_path),
+                 "-t", f"{seg:.2f}",
+                 "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
+                 "-c:a", "aac", "-b:a", "96k",
+                 "-movflags", "+faststart",
+                 "-y", str(out)],
+                capture_output=True, timeout=60,
+            )
+        except Exception:
+            return "", 500
+    if out.exists():
+        return send_file(str(out), mimetype="video/mp4")
+    return "", 500
 
 
 @analyzer_bp.route("/analyze/api/scene-from-selection", methods=["POST"])
@@ -1441,6 +1515,30 @@ def api_delete_scene(scene_id):
     return jsonify({"ok": True, "scene_id": scene_id})
 
 
+@analyzer_bp.route("/analyze/api/video/<int:video_id>", methods=["DELETE"])
+def api_delete_video(video_id):
+    """Remove a source video from this brand profile. Drops the file on
+    disk and every dependent row (scenes, moments, transcripts, tags) so
+    the table view + Scenes page are immediately clean. Refuses while an
+    analysis is in flight for that same video — easy footgun to avoid."""
+    with _analysis_lock:
+        if _analysis_state["running"] and _analysis_state["video_id"] == video_id:
+            return jsonify({
+                "ok": False,
+                "error": "Video is being analyzed. Cancel first."
+            }), 409
+    v = get_video_by_id(video_id)
+    if not v:
+        return jsonify({"ok": False, "error": "Video not found"}), 404
+    path, scenes = db.delete_video(video_id, remove_file=True)
+    return jsonify({
+        "ok": True,
+        "video_id": video_id,
+        "path": path,
+        "scenes_removed": scenes,
+    })
+
+
 @analyzer_bp.route("/analyze/state")
 def analyze_state():
     """Return current analysis state (for reconnecting after navigation)."""
@@ -1481,12 +1579,17 @@ ANALYZE_HTML = r"""<!DOCTYPE html>
 body{
   background:#0a0a0a;color:#e0e0e0;
   font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
-  padding:20px;
+  /* Flex-column layout matches the rest of the app (rate / library /
+   * wizard / builder). Chrome (header + sub-nav) sits full-width; flow
+   * content below gets its own horizontal gutter via .controls / table
+   * / .progress so we don't need the old `body { padding:20px }` +
+   * `header { margin:-20px -20px 24px }` negative-margin workaround. */
+  display:flex;flex-direction:column;min-height:100vh;
 }
 header{
-  display:flex;align-items:center;gap:16px;margin-bottom:24px;
+  display:flex;align-items:center;gap:16px;
   background:#141414;border-bottom:1px solid #2a2a2a;
-  padding:10px 20px;margin:-20px -20px 24px;
+  padding:10px 20px;flex-shrink:0;
 }
 header h1{font-size:18px;font-weight:600;color:#fff;white-space:nowrap}
 header h1 span{color:#e53935}
@@ -1503,8 +1606,9 @@ button:hover{border-color:#666}
 button.primary{background:#e53935;color:#fff;border-color:#e53935}
 button.primary:hover{background:#c62828}
 button:disabled{opacity:.5;cursor:not-allowed}
-.controls{display:flex;gap:12px;margin-bottom:20px;align-items:center}
-table{width:100%;border-collapse:collapse;margin-top:12px}
+.controls{display:flex;gap:12px;align-items:center;
+  padding:0 20px;margin-bottom:20px}
+table{width:calc(100% - 40px);border-collapse:collapse;margin:12px 20px 0}
 th,td{padding:8px 12px;text-align:left;border-bottom:1px solid #222}
 th{color:#888;font-size:12px;font-weight:600;text-transform:uppercase}
 td{font-size:13px}
@@ -1548,7 +1652,7 @@ td{font-size:13px}
   background:transparent;border:1px dashed #333;color:#666;
 }
 .progress{
-  margin-top:20px;padding:16px;background:#1a1a1a;border-radius:8px;
+  margin:20px 20px 20px;padding:16px;background:#1a1a1a;border-radius:8px;
   font-size:13px;max-height:300px;overflow-y:auto;display:none;
 }
 .progress.active{display:block}
@@ -1619,16 +1723,41 @@ td{font-size:13px}
   background:linear-gradient(135deg,#e53935,#c62828);border:1px solid #e53935;color:#fff;
 }
 
-/* -- Per-row transcript button -- */
-.row-actions .ra-tx{
+/* -- Per-row transcript button (lives in its own column now) -- */
+.ra-tx{
   padding:4px 8px;background:#1a1a1a;border:1px solid #333;color:#aaa;
   border-radius:4px;cursor:pointer;font-size:13px;line-height:1;
   display:inline-flex;align-items:center;
 }
-.row-actions .ra-tx:hover:not(:disabled){
+.ra-tx:hover:not(:disabled){
   color:#1976d2;border-color:#1976d2;background:#0d1f30;
 }
-.row-actions .ra-tx svg{width:14px;height:14px;fill:currentColor}
+.ra-tx svg{width:14px;height:14px;fill:currentColor}
+/* Em-dash placeholder shown in the Transcript column when a video has
+ * none yet — keeps the column visually clean instead of running an
+ * "(no transcript)" tooltip across every row. */
+.ra-empty{color:#555;font-size:13px;user-select:none}
+
+/* -- Per-row Analyze + Delete buttons (consolidated from the old
+ *    Visual / Audio / cog trio). The Analyze button opens the model
+ *    picker modal; Delete removes the file + dependent rows. */
+.row-actions .ra-analyze{
+  background:linear-gradient(135deg,#1976d2,#1565c0);
+  border-color:#1976d2;color:#fff;font-weight:600;
+}
+.row-actions .ra-analyze:hover:not(:disabled){
+  background:linear-gradient(135deg,#1e88e5,#1976d2);
+  border-color:#42a5f5;
+}
+.row-actions .ra-del{
+  padding:4px 8px;background:#1a1a1a;border:1px solid #333;color:#aaa;
+  border-radius:4px;cursor:pointer;line-height:1;
+  display:inline-flex;align-items:center;justify-content:center;
+}
+.row-actions .ra-del:hover:not(:disabled){
+  color:#fff;background:#c62828;border-color:#c62828;
+}
+.row-actions .ra-del svg{width:14px;height:14px;fill:currentColor}
 
 /* -- Video transcript modal (Analyze page) -- */
 .vtx-overlay{
@@ -1685,62 +1814,58 @@ td{font-size:13px}
   padding:7px 14px;font-size:12px;font-weight:600;
   border-radius:6px;cursor:pointer;border:1px solid #2e2e3e;
 }
-.vtx-foot .vtx-cut{
+.vtx-foot .vtx-prev{
   background:linear-gradient(135deg,#1976d2,#1565c0);
   border-color:#1976d2;color:#fff;
 }
-.vtx-foot .vtx-cut:disabled{opacity:.4;cursor:not-allowed;background:#222}
+.vtx-foot .vtx-prev:disabled{opacity:.4;cursor:not-allowed;background:#222}
 .vtx-foot .vtx-add{
   background:linear-gradient(135deg,#43a047,#2e7d32);
   border-color:#2e7d32;color:#fff;
 }
 .vtx-foot .vtx-add:disabled{opacity:.4;cursor:not-allowed;background:#222}
 
-/* -- Cut Scene confirmation modal -- */
-.cut-overlay{
-  display:none;position:fixed;inset:0;z-index:9200;
+/* Model attribution line under the transcript title. Sits between the
+ * filename and the help banner so the brand badge + model name are the
+ * first thing the user sees about the transcript provenance. */
+.vtx-attr{
+  display:flex;align-items:center;gap:8px;
+  padding:6px 18px 0;color:#888;font-size:11px;
+}
+.vtx-attr .vtx-attr-empty{color:#555}
+.vtx-attr .vtx-attr-brand{color:#bbb;font-weight:600}
+.vtx-attr .vtx-attr-model{color:#888;font-family:'SF Mono',Menlo,monospace}
+
+/* Preview overlay shown when the user clicks Preview from the transcript
+ * modal — plays just the highlighted selection from the source video so
+ * they can sanity-check the timing before clicking Add to Builder. */
+.vtx-prev-overlay{
+  display:none;position:fixed;inset:0;z-index:9300;
   background:rgba(0,0,0,.88);align-items:center;justify-content:center;
 }
-.cut-overlay.active{display:flex}
-.cut-modal{
+.vtx-prev-overlay.active{display:flex}
+.vtx-prev-modal{
   background:#15151c;border:1px solid #2e2e3e;border-radius:12px;
-  width:min(560px,94vw);max-height:90vh;display:flex;flex-direction:column;
-  box-shadow:0 20px 60px rgba(0,0,0,.7);overflow:hidden;
+  width:min(720px,94vw);max-height:90vh;display:flex;flex-direction:column;
+  overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.7);
 }
-.cut-head{padding:14px 18px;border-bottom:1px solid #1e1e2a;
-  display:flex;align-items:center;gap:12px}
-.cut-head h3{font-size:14px;font-weight:600;color:#fff;flex:1;margin:0;
-  display:flex;align-items:center;gap:8px}
-.cut-head h3 .cut-tag{
-  display:inline-block;font-size:9px;font-weight:800;letter-spacing:.5px;
-  text-transform:uppercase;color:#fff;background:#1976d2;
-  padding:2px 6px;border-radius:3px;
+.vtx-prev-head{
+  display:flex;align-items:center;gap:10px;
+  padding:12px 16px;border-bottom:1px solid #1e1e2a;
 }
-.cut-head .cut-range{font-size:11px;color:#888;font-family:'SF Mono',Menlo,monospace}
-.cut-body{padding:14px 18px;display:flex;flex-direction:column;gap:10px;
-  overflow-y:auto}
-.cut-body video{width:100%;max-height:50vh;border-radius:6px;background:#000}
-.cut-body .cut-text{
-  font-size:12px;color:#bbb;line-height:1.5;
-  background:#0d0d14;border:1px solid #1e1e2a;border-radius:6px;
-  padding:8px 10px;max-height:90px;overflow-y:auto;
+.vtx-prev-range{font-size:12px;color:#888;flex:1}
+.vtx-prev-close{
+  background:none;border:none;color:#888;font-size:22px;
+  cursor:pointer;padding:0 4px;line-height:1;
 }
-.cut-body .cut-text:empty{display:none}
-.cut-foot{padding:12px 18px;border-top:1px solid #1e1e2a;
-  display:flex;align-items:center;gap:12px;background:#0d1217;}
-.cut-foot .cut-status{flex:1;font-size:11px;color:#888}
-.cut-foot button{
-  padding:8px 16px;font-size:12px;font-weight:600;border-radius:6px;
-  cursor:pointer;border:1px solid #2e2e3e;
+.vtx-prev-close:hover{color:#fff}
+.vtx-prev-modal video{
+  width:100%;max-height:60vh;background:#000;display:block;
 }
-.cut-foot .cut-discard{background:#1a1a1a;color:#ef5350;border-color:#3a1a1a}
-.cut-foot .cut-discard:hover:not(:disabled){background:#3a1414;border-color:#ef5350}
-.cut-foot .cut-keep{
-  background:linear-gradient(135deg,#22c55e,#16a34a);
-  border-color:#22c55e;color:#fff;
+.vtx-prev-text{
+  padding:10px 16px;color:#ccc;font-size:13px;line-height:1.5;
+  max-height:120px;overflow-y:auto;border-top:1px solid #1e1e2a;
 }
-.cut-foot .cut-keep:hover:not(:disabled){filter:brightness(1.1)}
-.cut-foot button:disabled{opacity:.45;cursor:not-allowed}
 
 /* -- Import-from-socials modal -- */
 .imp-overlay{
@@ -1883,17 +2008,11 @@ td{font-size:13px}
 <!-- pg-chrome -->
 
 <div class="controls">
-  <button class="primary" onclick="scanVideos()">Scan for New Videos</button>
-  <button onclick="openImports()" id="imports-btn"
-          title="Browse videos from your IG/TikTok/YouTube channels">
-    Import Videos
+  <button class="primary" onclick="openImports()" id="imports-btn"
+          title="Browse videos from your IG/TikTok/YouTube channels, paste a URL, or upload from disk">
+    Import Video
   </button>
   <button onclick="pullFromDrive()" id="drive-pull-btn" style="display:none">Pull from Drive</button>
-  <button onclick="autoHide()" id="auto-hide-btn"
-          title="Hide low-quality scenes and ones similar to your down-voted scenes">
-    Auto Hide
-  </button>
-  <button class="primary" id="analyze-all-btn" onclick="analyzeAll()" style="display:none">✨ Analyze All</button>
   <button id="analyze-cancel-btn" onclick="cancelAnalysis()" style="display:none;background:#c62828;border:1px solid #c62828;color:#fff;padding:7px 14px;border-radius:6px;cursor:pointer;font-weight:600">Cancel Analysis</button>
   <span id="scan-status" style="font-size:13px;color:#888"></span>
 </div>
@@ -1905,7 +2024,7 @@ td{font-size:13px}
 <div id="imp-overlay" class="imp-overlay" onclick="if(event.target===this)closeImports()">
   <div class="imp-modal">
     <div class="imp-header">
-      <h2 id="imp-title">Import Videos</h2>
+      <h2 id="imp-title">Import Video</h2>
       <button id="imp-back-btn" class="imp-back" onclick="impGoToPicker()"
               style="display:none">&larr; Back</button>
       <button class="imp-close" onclick="closeImports()" title="Close">&times;</button>
@@ -1948,36 +2067,39 @@ td{font-size:13px}
       <h3 id="vtx-title">Transcript</h3>
       <button class="vtx-close" onclick="closeVideoTranscript()">&times;</button>
     </div>
+    <!-- Sub-header under the filename: which Whisper model produced this
+         transcript. Populated by openVideoTranscript() from the API
+         response so the user can tell at a glance which run they're
+         reading (base vs large-v3 etc.). -->
+    <div class="vtx-attr" id="vtx-attr"></div>
     <div class="vtx-help">
-      Tip: <b>highlight any text</b> in the transcript, then click <b>Cut Scene</b>
-      to create a new scene spanning the selection's timestamps.
+      Tip: <b>highlight any text</b> in the transcript, then click
+      <b>Preview</b> to play the matching clip or <b>Add to Builder</b>
+      to append it to the timeline.
     </div>
     <div id="vtx-body" class="vtx-body"></div>
     <div class="vtx-foot">
-      <span class="vtx-sel-info" id="vtx-sel-info">Select text to enable Cut Scene.</span>
-      <button class="vtx-cut" id="vtx-cut-btn" disabled onclick="cutSceneFromSelection()">Cut Scene</button>
+      <span class="vtx-sel-info" id="vtx-sel-info">Select text to preview or add to Builder.</span>
+      <button class="vtx-prev" id="vtx-prev-btn" disabled onclick="previewSelection()">Preview</button>
       <button class="vtx-add" id="vtx-add-btn" disabled onclick="addSelectionToBuilder()">Add to Builder</button>
     </div>
   </div>
 </div>
 
-<div id="cut-overlay" class="cut-overlay">
-  <div class="cut-modal">
-    <div class="cut-head">
-      <h3>New scene <span class="cut-tag">custom</span></h3>
-      <span class="cut-range" id="cut-range"></span>
+<!-- Preview overlay (selection playback) — separate from the cut/keep modal
+     so we don't have to cut a real scene just to peek at the clip. -->
+<div id="vtx-prev-overlay" class="vtx-prev-overlay"
+     onclick="if(event.target===this)closePreview()">
+  <div class="vtx-prev-modal">
+    <div class="vtx-prev-head">
+      <span id="vtx-prev-range" class="vtx-prev-range"></span>
+      <button class="vtx-prev-close" onclick="closePreview()">&times;</button>
     </div>
-    <div class="cut-body">
-      <video id="cut-video" controls preload="auto"></video>
-      <div class="cut-text" id="cut-text"></div>
-    </div>
-    <div class="cut-foot">
-      <span class="cut-status" id="cut-status"></span>
-      <button class="cut-discard" id="cut-discard" onclick="cutDiscard()">Discard</button>
-      <button class="cut-keep" id="cut-keep" onclick="cutKeep()">Keep</button>
-    </div>
+    <video id="vtx-prev-video" controls autoplay preload="auto"></video>
+    <div id="vtx-prev-text" class="vtx-prev-text"></div>
   </div>
 </div>
+
 <script>
 (function(){
   if (window.PG_FEATURES && window.PG_FEATURES.drive) {
@@ -1994,6 +2116,7 @@ td{font-size:13px}
       <th>Duration</th>
       <th>Size</th>
       <th>Status</th>
+      <th>Transcript</th>
       <th>Action</th>
     </tr>
   </thead>
@@ -2022,6 +2145,28 @@ function _updateCancelBtn() {
   btn.style.display = analyzing ? '' : 'none';
   btn.disabled = false;
   if (analyzing) btn.textContent = 'Cancel Analysis';
+}
+
+async function deleteVideo(videoId, filename) {
+  if (!window.confirm(
+    'Delete "' + filename + '" and every scene/moment/transcript '
+    + 'associated with it?\n\nThis removes the file from disk too. '
+    + 'This cannot be undone.'
+  )) return;
+  try {
+    var r = await fetch('/analyze/api/video/' + videoId, {method: 'DELETE'});
+    var d = await r.json();
+    if (!r.ok || d.ok === false) {
+      addLine('Delete failed: ' + (d.error || 'unknown'), 'error');
+      return;
+    }
+    addLine('Deleted ' + filename
+      + (d.scenes_removed ? ' (' + d.scenes_removed + ' scene'
+          + (d.scenes_removed === 1 ? '' : 's') + ' removed)' : ''));
+    scanVideos();
+  } catch (e) {
+    addLine('Delete failed: ' + e.message, 'error');
+  }
 }
 
 async function cancelAnalysis() {
@@ -2093,7 +2238,7 @@ function closeImports(){
 // from the active brand profile's socials + the universal URL/Disk options.
 function impGoToPicker(){
   _impSelectedSource = null;
-  document.getElementById('imp-title').textContent = 'Import Videos';
+  document.getElementById('imp-title').textContent = 'Import Video';
   document.getElementById('imp-help').innerHTML =
     'Pick a source. Configured social channels come from your '
     + '<a href="/settings" style="color:#1976d2">Settings</a> page.';
@@ -2514,32 +2659,6 @@ document.addEventListener('keydown', function(e){
   if (e.key === 'Escape') closeImports();
 });
 
-async function autoHide() {
-  var btn = document.getElementById('auto-hide-btn');
-  var st = document.getElementById('scan-status');
-  btn.disabled = true;
-  st.textContent = 'Auto-hiding...';
-  try {
-    var r = await fetch('/analyze/auto-hide', {method:'POST'});
-    var d = await r.json();
-    var v = d.vote_learning || {};
-    var blackTags = (v.blacklist_tags || []).map(function(b){
-      return b.tag + '(' + Math.round(b.down_rate * 100) + '%)';
-    }).join(', ');
-    var msg = 'Hidden ' + d.total_hidden + ' scene(s)'
-      + ' — ' + d.low_quality_hidden + ' low-quality, '
-      + (v.hidden || 0) + ' from votes'
-      + (v.scanned ? ' (scanned ' + v.scanned + ')' : '')
-      + (blackTags ? '. Down-vote tags: ' + blackTags : '');
-    st.textContent = msg;
-    if (window.pgLog) window.pgLog('[auto-hide] ' + msg, 'ok');
-  } catch (e) {
-    st.textContent = 'Auto-hide failed: ' + e.message;
-  } finally {
-    btn.disabled = false;
-  }
-}
-
 async function pullFromDrive() {
   var btn = document.getElementById('drive-pull-btn');
   var st = document.getElementById('scan-status');
@@ -2585,6 +2704,9 @@ function _modeStatus(v, kind) {
   var prov  = kind === 'speech'
     ? (v.speech_analyzer_provider || v.analyzer_provider || '')
     : (v.visual_analyzer_provider || v.analyzer_provider || '');
+  var modelStr = kind === 'speech'
+    ? (v.speech_analyzer_model || v.analyzer_model || '')
+    : (v.visual_analyzer_model || v.analyzer_model || '');
   var done  = kind === 'speech'
     ? !!(v.speech_analyzed_at || v.has_transcript)
     : !!v.visual_analyzed_at;
@@ -2608,9 +2730,13 @@ function _modeStatus(v, kind) {
   }
   // Per-mode AI badge sits inline next to its status \u2014 visual and audio
   // can be tagged by different providers, so each row gets its own badge.
+  // Model is surfaced in the tooltip ("Tagged by claude \u00b7 claude-haiku-4-5")
+  // so users can hover to see exactly which version ran.
+  var aiTitle = 'Tagged by ' + prov + (modelStr ? ' \u00b7 ' + modelStr : '');
   var aiInline = (done && prov && window.pgAiBadge)
-    ? ' <span class="status-prov" title="Tagged by ' + prov + '">'
-      + window.pgAiBadge(prov, {size:13}) + '</span>'
+    ? ' <span class="status-prov">'
+      + window.pgAiBadge(prov, {size:13, model: modelStr, title: aiTitle})
+      + '</span>'
     : '';
   // Inline progress bar — visible only while THIS badge represents the
   // running analysis. Width is updated live by _updateProgressBadge()
@@ -2635,11 +2761,9 @@ function renderList() {
   var tbody = document.getElementById('video-list');
   tbody.innerHTML = '';
   if (videos.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:36px 0;color:#666">'
-      + 'No source videos yet. Click <b>Scan for New Videos</b> above '
-      + 'or <b>Import Videos</b> to pull from social channels.</td></tr>';
-    var pendBtn = document.getElementById('analyze-all-btn');
-    if (pendBtn) pendBtn.style.display = 'none';
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:36px 0;color:#666">'
+      + 'No source videos yet. Click <b>Import Video</b> above '
+      + 'to add files from your social channels, a URL, or disk.</td></tr>';
     return;
   }
   for (var i = 0; i < videos.length; i++) {
@@ -2647,27 +2771,29 @@ function renderList() {
     var dims = v.width + 'x' + v.height;
     if (v.wide) dims += ' (wide)';
     var disabled = analyzing ? ' disabled' : '';
-    var txBtn = v.has_transcript
+    // Transcript icon is now its own column; only rendered when the
+    // video actually has a saved transcript so a glance at the column
+    // tells the user which files are searchable / cuttable.
+    var txCell = v.has_transcript
       ? '<button class="ra-tx" onclick="openVideoTranscript(' + v.id + ')"'
         + ' title="View full transcript (click to read; select + Cut Scene to extract a moment)">'
         + '<svg viewBox="0 0 24 24"><path d="M4 4h16v2H4V4zm0 4h16v2H4V8zm0 4h10v2H4v-2zm0 4h16v2H4v-2zm0 4h10v2H4v-2z"/></svg>'
         + '</button>'
-      : '';
-    // Single cog at the far right opens a popover with both Visual and
-    // Audio settings sections. Replaced the old per-mode cogs since the
-    // user wanted one combined config surface.
+      : '<span class="ra-empty" title="No transcript yet — run audio analysis to generate one.">—</span>';
+    // Consolidated action cell: a single ✨ Analyze button opens the
+    // popover (model picker for visual + audio + Run buttons) — same UX
+    // as the old ⚙ cog. The trash icon is the only sibling and removes
+    // the file + scenes after confirm.
     var actionCell =
         '<div class="row-actions">'
-      +   '<button class="ra-btn"' + disabled
-      +   ' onclick="analyzeVideoMode(' + v.id + ',\'visual\')"'
-      +   ' title="Visual analysis (frame sampling)">✨ Visual</button>'
-      +   '<button class="ra-btn"' + disabled
-      +   ' onclick="analyzeVideoMode(' + v.id + ',\'speech\')"'
-      +   ' title="Speech analysis (Whisper transcript)">✨ Audio</button>'
-      +   txBtn
-      +   '<button class="ra-cog ra-cog-end"' + disabled
+      +   '<button class="ra-btn ra-analyze"' + disabled
       +   ' onclick="openAnalyzeOpts(event,' + v.id + ',\'both\')"'
-      +   ' title="Per-video Visual + Audio settings">⚙</button>'
+      +   ' title="Pick a model and run Visual or Audio analysis">✨ Analyze</button>'
+      +   '<button class="ra-del"' + disabled
+      +   ' onclick="deleteVideo(' + v.id + ',\'' + escImp(v.filename) + '\')"'
+      +   ' title="Delete this file and all its scenes">'
+      +   '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>'
+      +   '</button>'
       + '</div>';
     tbody.innerHTML += '<tr>'
       + '<td>' + v.filename + '</td>'
@@ -2677,22 +2803,11 @@ function renderList() {
       +     _modeStatus(v, 'visual')
       +     _modeStatus(v, 'speech')
       + '</div></td>'
+      + '<td>' + txCell + '</td>'
       + '<td>' + actionCell + '</td>'
       + '</tr>';
   }
 
-  var pending = videos.filter(function(v) { return !v.analyzed_at || v.needs_update; });
-  var allBtn = document.getElementById('analyze-all-btn');
-  if (pending.length > 0 && !analyzing) {
-    allBtn.style.display = '';
-    allBtn.textContent = 'Analyze All (' + pending.length + ')';
-    allBtn.disabled = false;
-  } else if (analyzing) {
-    allBtn.style.display = '';
-    allBtn.disabled = true;
-  } else {
-    allBtn.style.display = 'none';
-  }
 }
 
 function connectSSE() {
@@ -2993,9 +3108,10 @@ async function openVideoTranscript(videoId) {
   _vtxState.selectionStart = null;
   _vtxState.selectionEnd = null;
   _vtxState.selectionText = '';
-  document.getElementById('vtx-cut-btn').disabled = true;
+  document.getElementById('vtx-prev-btn').disabled = true;
   document.getElementById('vtx-add-btn').disabled = true;
   document.getElementById('vtx-sel-info').innerHTML = 'Loading transcript...';
+  document.getElementById('vtx-attr').innerHTML = '';
   var body = document.getElementById('vtx-body');
   body.innerHTML = '';
   document.getElementById('vtx-overlay').classList.add('active');
@@ -3003,6 +3119,28 @@ async function openVideoTranscript(videoId) {
     var r = await fetch('/analyze/api/video/' + videoId + '/transcript');
     var data = await r.json();
     document.getElementById('vtx-title').textContent = data.filename || 'Transcript';
+    // Attribution line under the title: brand badge + "Transcribed by …".
+    // Picks the first group's (provider, model) since all groups of one
+    // transcribe run share the same Whisper config.
+    var attr = document.getElementById('vtx-attr');
+    var g0 = (data.groups && data.groups[0]) || null;
+    if (g0 && g0.provider) {
+      var badge = (window.pgAiBadge)
+        ? window.pgAiBadge(g0.provider, {
+            size: 12, model: g0.model || '',
+            title: 'Transcribed by ' + g0.provider
+                  + (g0.model ? ' · ' + g0.model : ''),
+          })
+        : '';
+      attr.innerHTML = badge
+        + '<span class="vtx-attr-brand">Transcribed by '
+        + _vtxEsc(g0.provider) + '</span>'
+        + (g0.model
+            ? ' · <span class="vtx-attr-model">' + _vtxEsc(g0.model) + '</span>'
+            : '');
+    } else {
+      attr.innerHTML = '<span class="vtx-attr-empty">Provider not recorded for this transcript.</span>';
+    }
     if (!data.groups || data.groups.length === 0) {
       body.innerHTML = '<div style="color:#666;text-align:center;padding:24px">'
         + 'No transcript saved for this video.</div>';
@@ -3012,8 +3150,19 @@ async function openVideoTranscript(videoId) {
     var html = '';
     for (var i = 0; i < data.groups.length; i++) {
       var g = data.groups[i];
+      // Brand badge + model tooltip on each transcript group's header so
+      // the user can tell at a glance which Whisper run produced this
+      // particular language pass.
+      var badge = (g.provider && window.pgAiBadge)
+        ? ' ' + window.pgAiBadge(g.provider, {
+            size: 12,
+            model: g.model || '',
+            title: 'Transcribed by ' + g.provider
+                  + (g.model ? ' · ' + g.model : ''),
+          })
+        : '';
       html += '<div class="vtx-group' + (g.is_translation ? ' is-xlat' : '') + '">';
-      html += '<div class="vtx-group-label">' + _vtxEsc(g.label) + '</div>';
+      html += '<div class="vtx-group-label">' + _vtxEsc(g.label) + badge + '</div>';
       for (var j = 0; j < g.segments.length; j++) {
         var seg = g.segments[j];
         html += '<div class="vtx-seg">'
@@ -3027,7 +3176,7 @@ async function openVideoTranscript(videoId) {
       html += '</div>';
     }
     body.innerHTML = html;
-    document.getElementById('vtx-sel-info').textContent = 'Select text to enable Cut Scene.';
+    document.getElementById('vtx-sel-info').textContent = 'Select text to preview or add to Builder.';
   } catch (e) {
     body.innerHTML = '<div style="color:#ef5350;padding:16px">Failed to load transcript.</div>';
   }
@@ -3052,16 +3201,19 @@ document.addEventListener('selectionchange', function() {
   var overlay = document.getElementById('vtx-overlay');
   if (!overlay || !overlay.classList.contains('active')) return;
   var sel = window.getSelection();
-  var btn = document.getElementById('vtx-cut-btn');
-  var addBtn = document.getElementById('vtx-add-btn');
-  var info = document.getElementById('vtx-sel-info');
+  var prevBtn = document.getElementById('vtx-prev-btn');
+  var addBtn  = document.getElementById('vtx-add-btn');
+  var info    = document.getElementById('vtx-sel-info');
+  function _disable() {
+    if (prevBtn) prevBtn.disabled = true;
+    if (addBtn)  addBtn.disabled  = true;
+  }
   if (!sel || sel.isCollapsed || !sel.rangeCount) {
-    btn.disabled = true;
-    if (addBtn) addBtn.disabled = true;
+    _disable();
     _vtxState.selectionStart = null;
     _vtxState.selectionEnd = null;
     _vtxState.selectionText = '';
-    info.textContent = 'Select text to enable Cut Scene.';
+    info.textContent = 'Select text to preview or add to Builder.';
     return;
   }
   var range = sel.getRangeAt(0);
@@ -3074,9 +3226,8 @@ document.addEventListener('selectionchange', function() {
   var startSeg = _vtxFindSegText(range.startContainer);
   var endSeg   = _vtxFindSegText(range.endContainer);
   if (!startSeg || !endSeg) {
-    btn.disabled = true;
-    if (addBtn) addBtn.disabled = true;
-    info.textContent = 'Select text inside a transcript line to enable Cut Scene.';
+    _disable();
+    info.textContent = 'Select text inside a transcript line.';
     return;
   }
   // Walk all .vtx-seg-text nodes and collect those between startSeg and endSeg
@@ -3097,49 +3248,52 @@ document.addEventListener('selectionchange', function() {
     if (!isNaN(e) && e > maxEnd) maxEnd = e;
   }
   if (!isFinite(minStart) || !isFinite(maxEnd) || maxEnd <= minStart) {
-    btn.disabled = true;
-    if (addBtn) addBtn.disabled = true;
+    _disable();
     return;
   }
   _vtxState.selectionStart = minStart;
   _vtxState.selectionEnd   = maxEnd;
   _vtxState.selectionText  = sel.toString();
-  btn.disabled = false;
-  if (addBtn) addBtn.disabled = false;
-  info.innerHTML = 'Cut from <b>' + _vtxFmt(minStart) + '</b> to <b>'
+  if (prevBtn) prevBtn.disabled = false;
+  if (addBtn)  addBtn.disabled  = false;
+  info.innerHTML = 'Selection: <b>' + _vtxFmt(minStart) + '</b> – <b>'
     + _vtxFmt(maxEnd) + '</b> (' + (maxEnd - minStart).toFixed(1) + 's)';
 });
 
-async function cutSceneFromSelection() {
+function previewSelection() {
   if (_vtxState.selectionStart == null || _vtxState.selectionEnd == null) return;
-  var btn = document.getElementById('vtx-cut-btn');
-  btn.disabled = true;
-  btn.textContent = 'Cutting...';
-  try {
-    var r = await fetch('/analyze/api/scene-from-selection', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        video_id: _vtxState.videoId,
-        start:    _vtxState.selectionStart,
-        end:      _vtxState.selectionEnd,
-        text:     _vtxState.selectionText,
-      }),
-    });
-    var data = await r.json();
-    if (!r.ok) throw new Error(data.error || 'failed');
-    document.getElementById('vtx-sel-info').innerHTML =
-      'Created scene <b>#' + data.scene_id + '</b> ['
-      + _vtxFmt(data.start) + ' – ' + _vtxFmt(data.end) + ']';
-    openCutConfirm(data.scene_id, data.start, data.end,
-                   _vtxState.selectionText);
-  } catch (e) {
-    document.getElementById('vtx-sel-info').textContent = 'Cut failed: ' + e.message;
-  } finally {
-    btn.textContent = 'Cut Scene';
-    btn.disabled = false;
-  }
+  var s = _vtxState.selectionStart, e = _vtxState.selectionEnd;
+  var url = '/analyze/api/clip-preview?video_id=' + _vtxState.videoId
+          + '&start=' + s.toFixed(2) + '&end=' + e.toFixed(2);
+  var v = document.getElementById('vtx-prev-video');
+  v.src = url; v.load();
+  document.getElementById('vtx-prev-range').textContent =
+    _vtxFmt(s) + ' – ' + _vtxFmt(e) + '  (' + (e - s).toFixed(1) + 's)';
+  document.getElementById('vtx-prev-text').textContent =
+    (_vtxState.selectionText || '').trim();
+  document.getElementById('vtx-prev-overlay').classList.add('active');
+  v.play().catch(function(){ /* autoplay may be blocked; user can click play */ });
 }
+
+function closePreview() {
+  var v = document.getElementById('vtx-prev-video');
+  try { v.pause(); } catch (_) {}
+  v.removeAttribute('src');
+  v.load();
+  document.getElementById('vtx-prev-overlay').classList.remove('active');
+}
+
+document.addEventListener('keydown', function(e) {
+  // Esc closes the preview when it's open (without also closing the
+  // transcript modal underneath).
+  if (e.key === 'Escape') {
+    var prev = document.getElementById('vtx-prev-overlay');
+    if (prev && prev.classList.contains('active')) {
+      closePreview();
+      e.stopPropagation();
+    }
+  }
+});
 
 // Cut the selected scene and append it to the end of Layer I of the
 // builder's saved timeline. Stays on the current page — the change is
@@ -3257,90 +3411,9 @@ async function addSelectionToBuilder() {
   }
 }
 
-// ── Cut Scene confirmation modal ──────────────────────────────────────────
-// Opens after a successful Cut Scene with the freshly-extracted clip
-// previewed and Keep / Discard buttons. Keep is the no-op (scene already
-// saved); Discard hits DELETE on the new scene_id.
-
-var _cutScene = null;  // { id, start, end }
-
-function openCutConfirm(sceneId, start, end, text) {
-  _cutScene = { id: sceneId, start: start, end: end };
-  var overlay = document.getElementById('cut-overlay');
-  document.getElementById('cut-range').textContent =
-    _vtxFmt(start) + ' – ' + _vtxFmt(end)
-    + '  (' + (end - start).toFixed(1) + 's)';
-  document.getElementById('cut-text').textContent = (text || '').trim();
-  var v = document.getElementById('cut-video');
-  v.src = '/rate/api/clip/' + sceneId;
-  v.load();
-  v.play().catch(function(){/* autoplay blocked, that's fine */});
-  document.getElementById('cut-status').textContent = '';
-  document.getElementById('cut-keep').disabled = false;
-  document.getElementById('cut-discard').disabled = false;
-  overlay.classList.add('active');
-}
-
-function closeCutConfirm() {
-  var overlay = document.getElementById('cut-overlay');
-  var v = document.getElementById('cut-video');
-  v.pause(); v.removeAttribute('src'); v.load();
-  overlay.classList.remove('active');
-  _cutScene = null;
-}
-
-function cutKeep() {
-  // Scene was already saved server-side; this just closes the modal.
-  closeCutConfirm();
-}
-
-async function cutDiscard() {
-  if (!_cutScene) return closeCutConfirm();
-  var k = document.getElementById('cut-keep');
-  var d = document.getElementById('cut-discard');
-  var s = document.getElementById('cut-status');
-  k.disabled = true; d.disabled = true;
-  s.textContent = 'Discarding...';
-  try {
-    var r = await fetch('/analyze/api/scene/' + _cutScene.id, {method: 'DELETE'});
-    if (!r.ok) throw new Error('delete failed');
-    document.getElementById('vtx-sel-info').textContent =
-      'Discarded scene #' + _cutScene.id + '.';
-    closeCutConfirm();
-  } catch (e) {
-    s.textContent = 'Discard failed: ' + e.message;
-    k.disabled = false; d.disabled = false;
-  }
-}
-
 document.getElementById('vtx-overlay').addEventListener('click', function(e) {
   if (e.target === this) closeVideoTranscript();
 });
-
-function analyzeAll() {
-  if (analyzing) return;
-  analyzing = true;
-  renderList();
-  document.getElementById('progress-lines').innerHTML = '';
-  addLine('Queuing all pending videos...');
-
-  fetch('/analyze/run-all', {method: 'POST'}).then(function(r) {
-    return r.json();
-  }).then(function(data) {
-    if (data.status === 'nothing') {
-      analyzing = false;
-      addLine('No videos pending analysis.');
-      renderList();
-      return;
-    }
-    addLine('Analyzing ' + data.count + ' videos...', 'done');
-    connectSSE();
-  }).catch(function(e) {
-    analyzing = false;
-    addLine('Error: ' + e.message, 'error');
-    renderList();
-  });
-}
 
 async function checkState() {
   try {

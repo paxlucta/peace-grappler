@@ -70,6 +70,11 @@ def api_scenes():
             "excluded": s.get("excluded", False),
             "status": status,
             "analyzer_provider": s.get("analyzer_provider") or "",
+            "analyzer_model":    s.get("analyzer_model")    or "",
+            "visual_analyzer_provider": s.get("visual_analyzer_provider") or "",
+            "visual_analyzer_model":    s.get("visual_analyzer_model")    or "",
+            "speech_analyzer_provider": s.get("speech_analyzer_provider") or "",
+            "speech_analyzer_model":    s.get("speech_analyzer_model")    or "",
             "has_transcript": s["id"] in transcript_scene_ids,
         })
     return jsonify(result)
@@ -561,9 +566,23 @@ function renderGrid() {
       badge = '<span class="unrated-badge">UNRATED</span>';
     }
 
-    var aiBadge = (window.pgAiBadge && s.analyzer_provider)
-      ? '<span class="scene-ai-badge" title="Tagged by ' + s.analyzer_provider + '">'
-        + window.pgAiBadge(s.analyzer_provider, {size:13}) + '</span>'
+    // Brand badge + model in tooltip. We prefer the visual-mode pair
+    // when present (most scenes came from visual analysis), falling
+    // back to speech, then the legacy single-provider column.
+    var sceneProv = s.visual_analyzer_provider
+                 || s.speech_analyzer_provider
+                 || s.analyzer_provider || '';
+    var sceneModel = s.visual_analyzer_model
+                  || s.speech_analyzer_model
+                  || s.analyzer_model || '';
+    var aiBadge = (window.pgAiBadge && sceneProv)
+      ? '<span class="scene-ai-badge">'
+        + window.pgAiBadge(sceneProv, {
+            size: 13,
+            model: sceneModel,
+            title: 'Tagged by ' + sceneProv
+                  + (sceneModel ? ' · ' + sceneModel : ''),
+          }) + '</span>'
       : '';
     html += '<div class="' + cls + '" id="sc-' + s.id + '">'
       + '<img class="thumb" src="/api/thumbnail/' + s.id + '" loading="lazy" onclick="playScene(' + s.id + ')"/>'

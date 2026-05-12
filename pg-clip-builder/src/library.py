@@ -94,7 +94,9 @@ def library_videos():
                 "drive_link": v.get("drive_link") or "",
                 "drive_file_id": v.get("drive_file_id") or "",
                 "caption_provider": v.get("caption_provider") or "",
-                "wizard_provider": v.get("wizard_provider") or "",
+                "wizard_provider":  v.get("wizard_provider")  or "",
+                "caption_model":    v.get("caption_model")    or "",
+                "wizard_model":     v.get("wizard_model")     or "",
             })
         return jsonify(result)
     finally:
@@ -507,10 +509,22 @@ function renderGrid(videos) {
       tagsHtml += '<span class="ctag">+' + (v.tags.length - 4) + '</span>';
     }
 
+    var wizModel = v.wizard_model || '';
+    var capModel = v.caption_model || '';
     var wizBadge = (window.pgAiBadge && v.wizard_provider)
-      ? window.pgAiBadge(v.wizard_provider, {size:14, title:'Reel composed by ' + v.wizard_provider}) : '';
-    var capBadge = (window.pgAiBadge && v.caption_provider && v.caption_provider !== v.wizard_provider)
-      ? window.pgAiBadge(v.caption_provider, {size:12, title:'Caption by ' + v.caption_provider}) : '';
+      ? window.pgAiBadge(v.wizard_provider, {
+          size: 14, model: wizModel,
+          title: 'Reel composed by ' + v.wizard_provider
+                + (wizModel ? ' · ' + wizModel : ''),
+        }) : '';
+    var capBadge = (window.pgAiBadge && v.caption_provider
+                     && (v.caption_provider !== v.wizard_provider
+                         || capModel !== wizModel))
+      ? window.pgAiBadge(v.caption_provider, {
+          size: 12, model: capModel,
+          title: 'Caption by ' + v.caption_provider
+                + (capModel ? ' · ' + capModel : ''),
+        }) : '';
     html += '<div class="video-card" onclick="playVideo(' + v.id + ',\'' + escHtml(v.filename) + '\')">'
       + '<div class="thumb-wrap">'
       + '<img src="/library/api/thumbnail/' + v.id + '" loading="lazy" alt=""/>'
@@ -548,8 +562,13 @@ function playVideo(id, filename) {
   video.src = '/library/api/video/' + id;
 
   // Build detail panel
+  var _wzm = v.wizard_model || '';
   var wizBadge = (window.pgAiBadge && v.wizard_provider)
-    ? ' ' + window.pgAiBadge(v.wizard_provider, {size:13, title:'Reel composed by ' + v.wizard_provider}) : '';
+    ? ' ' + window.pgAiBadge(v.wizard_provider, {
+        size: 13, model: _wzm,
+        title: 'Reel composed by ' + v.wizard_provider
+              + (_wzm ? ' · ' + _wzm : ''),
+      }) : '';
   var html = '<div class="pd-filename">' + escHtml(v.filename) + '</div>'
     + '<div class="pd-meta">' + formatDuration(v.duration) + ' &middot; ' + formatDate(v.generated_at) + wizBadge + '</div>';
 
@@ -563,8 +582,13 @@ function playVideo(id, filename) {
   }
 
   // Caption
+  var _cpm = v.caption_model || '';
   var capBadge = (window.pgAiBadge && v.caption_provider)
-    ? ' ' + window.pgAiBadge(v.caption_provider, {size:12, title:'Caption written by ' + v.caption_provider}) : '';
+    ? ' ' + window.pgAiBadge(v.caption_provider, {
+        size: 12, model: _cpm,
+        title: 'Caption written by ' + v.caption_provider
+              + (_cpm ? ' · ' + _cpm : ''),
+      }) : '';
   html += '<div class="pd-section"><div class="pd-label">Caption' + capBadge + '</div>';
   if (v.caption) {
     html += '<div class="pd-caption" id="pd-caption-text">' + escHtml(v.caption) + '</div>';

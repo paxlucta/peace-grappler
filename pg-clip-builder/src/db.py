@@ -215,12 +215,21 @@ def get_db():
     # *_analyzer_provider columns split it per analysis mode so the
     # status badges can attribute each pass independently — visual and
     # speech might run under different providers.
+    # Each provider column gets a paired model column so the UI can show
+    # "claude" as the brand badge with the specific model (e.g.
+    # "claude-haiku-4-5") on hover. Provider stays as the user-visible
+    # brand key; model captures the version that actually ran.
     _provider_columns = {
         "videos":           ["analyzer_provider",
                              "visual_analyzer_provider",
-                             "speech_analyzer_provider"],
-        "generated_videos": ["caption_provider", "wizard_provider"],
-        "wizard_research":  ["provider"],
+                             "speech_analyzer_provider",
+                             "analyzer_model",
+                             "visual_analyzer_model",
+                             "speech_analyzer_model"],
+        "generated_videos": ["caption_provider", "wizard_provider",
+                             "caption_model", "wizard_model"],
+        "wizard_research":  ["provider", "model"],
+        "transcripts":      ["provider", "model"],
     }
     for table, cols in _provider_columns.items():
         for col in cols:
@@ -395,7 +404,9 @@ def get_all_scenes(include_ignored=False, include_excluded=False):
             SELECT s.id, s.video_id, s.start_time, s.end_time,
                    s.excluded, s.ignored,
                    v.path, v.filename, v.wide, v.duration as video_duration,
-                   v.analyzer_provider
+                   v.analyzer_provider, v.analyzer_model,
+                   v.visual_analyzer_provider, v.visual_analyzer_model,
+                   v.speech_analyzer_provider, v.speech_analyzer_model
             FROM scenes s
             JOIN videos v ON v.id = s.video_id
             {where}
@@ -420,6 +431,11 @@ def get_all_scenes(include_ignored=False, include_excluded=False):
                 "wide": bool(row["wide"]),
                 "video_duration": row["video_duration"],
                 "analyzer_provider": row["analyzer_provider"] or "",
+                "analyzer_model":    row["analyzer_model"] or "",
+                "visual_analyzer_provider": row["visual_analyzer_provider"] or "",
+                "visual_analyzer_model":    row["visual_analyzer_model"] or "",
+                "speech_analyzer_provider": row["speech_analyzer_provider"] or "",
+                "speech_analyzer_model":    row["speech_analyzer_model"] or "",
                 "tags": [t["tag"] for t in tags],
             })
         return scenes
@@ -428,7 +444,7 @@ def get_all_scenes(include_ignored=False, include_excluded=False):
 
 
 def save_analysis(video_id, tags_dict, moments_list, analyzed_tag_names,
-                  provider=None, mode=None):
+                  provider=None, mode=None, model=None):
     """Save analysis results (tags, moments, analyzed_tag_names) to DB.
     tags_dict: {"tag_name": [{"start": 0.0, "end": 5.2}, ...], ...}
     moments_list: [{"at": 3.5, "note": "...", "dialog": "..."}, ...]
@@ -436,6 +452,9 @@ def save_analysis(video_id, tags_dict, moments_list, analyzed_tag_names,
     mode: 'visual' or 'speech' — sets the per-mode timestamp column so the
         analyze-page status badge can show distinct visual/audio states. If
         None, only the legacy ``analyzed_at`` timestamp is set.
+    model: the specific model that ran (e.g. ``"claude-haiku-4-5-20251001"``).
+        Stored alongside *provider* so the UI badge can show the brand and
+        the version it ran on.
     """
     conn = get_db()
     try:
@@ -490,10 +509,13 @@ def save_analysis(video_id, tags_dict, moments_list, analyzed_tag_names,
         # each with its own AI badge.
         ts_col = None
         prov_col = None
+        model_col = None
         if mode == "visual":
             ts_col, prov_col = "visual_analyzed_at", "visual_analyzer_provider"
+            model_col = "visual_analyzer_model"
         elif mode == "speech":
             ts_col, prov_col = "speech_analyzed_at", "speech_analyzer_provider"
+            model_col = "speech_analyzer_model"
         sets = ["analyzed_at = datetime('now')"]
         params = []
         if ts_col:
@@ -504,6 +526,12 @@ def save_analysis(video_id, tags_dict, moments_list, analyzed_tag_names,
             if prov_col:
                 sets.append(f"{prov_col} = ?")
                 params.append(provider)
+        if model:
+            sets.append("analyzer_model = ?")
+            params.append(model)
+            if model_col:
+                sets.append(f"{model_col} = ?")
+                params.append(model)
         params.append(video_id)
         conn.execute(
             f"UPDATE videos SET {', '.join(sets)} WHERE id=?",
@@ -667,7 +695,8 @@ def get_analyzed_tags(video_id):
         conn.close()
 
 
-def save_transcripts(video_id, segments, language="", is_translation=False):
+def save_transcripts(video_id, segments, language="", is_translation=False,
+                     provider=None, model=None):
     """Persist Whisper transcript segments for a video. Replaces any prior
     rows for the same (video_id, language, is_translation) so re-running
     audio analysis with the same settings overwrites cleanly.
@@ -679,6 +708,10 @@ def save_transcripts(video_id, segments, language="", is_translation=False):
         the text itself is English regardless.
     *is_translation*: False for the original transcript, True for the
         Whisper-translated English version saved alongside it.
+    *provider*/*model*: which Whisper-side stack produced these segments
+        (e.g. ``provider='whisper'``, ``model='base'``). Stored on each
+        row so the UI can show a brand badge with the specific model on
+        hover.
     """
     if not segments:
         return
@@ -691,14 +724,16 @@ def save_transcripts(video_id, segments, language="", is_translation=False):
         rows = [
             (video_id, language or "", 1 if is_translation else 0,
              float(s.get("start", 0)), float(s.get("end", 0)),
-             (s.get("text") or "").strip())
+             (s.get("text") or "").strip(),
+             provider or None, model or None)
             for s in segments
             if (s.get("text") or "").strip()
         ]
         conn.executemany(
             """INSERT INTO transcripts
-               (video_id, language, is_translation, start_time, end_time, text)
-               VALUES (?, ?, ?, ?, ?, ?)""",
+               (video_id, language, is_translation, start_time, end_time, text,
+                provider, model)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             rows,
         )
         conn.commit()
@@ -716,8 +751,17 @@ def get_transcripts_in_range(video_id, start_time, end_time):
     """
     conn = get_db()
     try:
+        # Schema may not have provider/model yet on older DBs — pick safe
+        # column lists and skip the new fields when they're missing.
+        cols = "language, is_translation, start_time, end_time, text"
+        has_attr = True
+        try:
+            conn.execute("SELECT provider, model FROM transcripts LIMIT 0")
+            cols += ", provider, model"
+        except sqlite3.OperationalError:
+            has_attr = False
         rows = conn.execute(
-            """SELECT language, is_translation, start_time, end_time, text
+            f"""SELECT {cols}
                FROM transcripts
                WHERE video_id=?
                  AND start_time < ?
@@ -726,6 +770,7 @@ def get_transcripts_in_range(video_id, start_time, end_time):
             (video_id, end_time, start_time),
         ).fetchall()
         groups = {}
+        attr = {}  # (language, is_translation) -> (provider, model)
         for r in rows:
             key = (r["language"], bool(r["is_translation"]))
             groups.setdefault(key, []).append({
@@ -733,12 +778,17 @@ def get_transcripts_in_range(video_id, start_time, end_time):
                 "end":   r["end_time"],
                 "text":  r["text"],
             })
+            if has_attr and key not in attr:
+                attr[key] = (r["provider"] or "", r["model"] or "")
         out = []
         for (lang, is_xlat), segs in sorted(groups.items(), key=lambda x: x[0][1]):
+            p, m = attr.get((lang, is_xlat), ("", ""))
             out.append({
                 "language":       lang,
                 "is_translation": is_xlat,
                 "segments":       segs,
+                "provider":       p,
+                "model":          m,
             })
         return out
     finally:
@@ -830,14 +880,22 @@ def get_video_transcripts(video_id):
     analyze-page transcript modal."""
     conn = get_db()
     try:
+        cols = "language, is_translation, start_time, end_time, text"
+        has_attr = True
+        try:
+            conn.execute("SELECT provider, model FROM transcripts LIMIT 0")
+            cols += ", provider, model"
+        except sqlite3.OperationalError:
+            has_attr = False
         rows = conn.execute(
-            """SELECT language, is_translation, start_time, end_time, text
+            f"""SELECT {cols}
                FROM transcripts
                WHERE video_id=?
                ORDER BY is_translation, start_time""",
             (video_id,),
         ).fetchall()
         groups = {}
+        attr = {}
         for r in rows:
             key = (r["language"], bool(r["is_translation"]))
             groups.setdefault(key, []).append({
@@ -845,12 +903,17 @@ def get_video_transcripts(video_id):
                 "end":   r["end_time"],
                 "text":  r["text"],
             })
+            if has_attr and key not in attr:
+                attr[key] = (r["provider"] or "", r["model"] or "")
         out = []
         for (lang, is_xlat), segs in sorted(groups.items(), key=lambda x: x[0][1]):
+            p, m = attr.get((lang, is_xlat), ("", ""))
             out.append({
                 "language":       lang,
                 "is_translation": is_xlat,
                 "segments":       segs,
+                "provider":       p,
+                "model":          m,
             })
         return out
     finally:
@@ -902,6 +965,53 @@ def delete_scene(scene_id):
         conn.commit()
     finally:
         conn.close()
+
+
+def delete_video(video_id, remove_file=True):
+    """Hard-delete a source video + every scene/moment/transcript/analyzed-tag
+    row that referenced it. Used by the trash button on /analyze.
+
+    Returns ``(removed_path, scene_count)``. The CASCADE foreign keys on
+    scenes / moments / transcripts / scene_tags / analyzed_tags clean up
+    automatically; ``imported_externals`` uses SET NULL so the import
+    history record stays around with ``video_id=NULL`` (so re-scanning
+    doesn't try to download the same external twice).
+
+    When *remove_file* is True (default), the underlying file on disk is
+    also unlinked. Pass False if the caller wants to keep the file but
+    just drop the DB record.
+    """
+    conn = get_db()
+    path = None
+    scene_count = 0
+    try:
+        row = conn.execute(
+            "SELECT path FROM videos WHERE id=?", (video_id,)
+        ).fetchone()
+        if row:
+            path = row["path"]
+        scene_row = conn.execute(
+            "SELECT COUNT(*) AS n FROM scenes WHERE video_id=?",
+            (video_id,),
+        ).fetchone()
+        if scene_row:
+            scene_count = scene_row["n"]
+        conn.execute("DELETE FROM videos WHERE id=?", (video_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    if remove_file and path:
+        try:
+            from pathlib import Path
+            p = Path(path)
+            if p.exists() and p.is_file():
+                p.unlink()
+        except Exception:
+            # File may be missing or unlinkable (locked / read-only) — the
+            # DB row is already gone, so callers shouldn't fail the whole
+            # delete over a stuck file.
+            pass
+    return path, scene_count
 
 
 def create_scene(video_id, start_time, end_time, tags=None):
@@ -996,12 +1106,14 @@ def get_scene_by_id(scene_id):
 
 
 def save_generated_video(path, duration, timeline, caption="",
-                         caption_provider=None, wizard_provider=None):
+                         caption_provider=None, wizard_provider=None,
+                         caption_model=None, wizard_model=None):
     """Save a generated video record with its timeline as JSON.
 
     *caption_provider* / *wizard_provider* record which AI produced the caption
     and the wizard plan (scene picks + narrative). They surface as small
-    badges in the library UI.
+    badges in the library UI. The paired *_model fields store the specific
+    model version (e.g. ``claude-haiku-4-5-20251001``) shown on hover.
     """
     import json
     conn = get_db()
@@ -1009,35 +1121,40 @@ def save_generated_video(path, duration, timeline, caption="",
         conn.execute(
             "INSERT INTO generated_videos "
             "(path, duration, timeline_json, caption, "
-            " caption_provider, wizard_provider) "
-            "VALUES (?,?,?,?,?,?)",
+            " caption_provider, wizard_provider, "
+            " caption_model, wizard_model) "
+            "VALUES (?,?,?,?,?,?,?,?)",
             (str(path), duration, json.dumps(timeline), caption,
-             caption_provider, wizard_provider),
+             caption_provider, wizard_provider,
+             caption_model, wizard_model),
         )
         conn.commit()
     finally:
         conn.close()
 
 
-def update_video_caption(video_id, caption, provider=None):
+def update_video_caption(video_id, caption, provider=None, model=None):
     """Update the caption for a generated video.
 
-    *provider*: which AI generated this caption (e.g. 'claude'). Surfaces as
-    a small badge next to the caption in the library UI.
+    *provider* / *model*: which AI + which specific version produced this
+    caption (e.g. ``provider='claude', model='claude-haiku-4-5-20251001'``).
+    Surfaces as a small badge next to the caption with the model on hover.
     """
     conn = get_db()
     try:
+        sets = ["caption = ?"]
+        params = [caption]
         if provider is not None:
-            conn.execute(
-                "UPDATE generated_videos SET caption=?, caption_provider=? "
-                "WHERE id=?",
-                (caption, provider, video_id),
-            )
-        else:
-            conn.execute(
-                "UPDATE generated_videos SET caption=? WHERE id=?",
-                (caption, video_id),
-            )
+            sets.append("caption_provider = ?")
+            params.append(provider)
+        if model is not None:
+            sets.append("caption_model = ?")
+            params.append(model)
+        params.append(video_id)
+        conn.execute(
+            f"UPDATE generated_videos SET {', '.join(sets)} WHERE id = ?",
+            params,
+        )
         conn.commit()
     finally:
         conn.close()
@@ -1254,6 +1371,8 @@ def get_all_generated_videos():
             "drive_link": r["drive_link"] if "drive_link" in keys_avail else None,
             "caption_provider": r["caption_provider"] if "caption_provider" in keys_avail else None,
             "wizard_provider": r["wizard_provider"] if "wizard_provider" in keys_avail else None,
+            "caption_model": r["caption_model"] if "caption_model" in keys_avail else None,
+            "wizard_model":  r["wizard_model"]  if "wizard_model"  in keys_avail else None,
         } for r in rows]
     finally:
         conn.close()

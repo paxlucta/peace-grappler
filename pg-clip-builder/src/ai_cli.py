@@ -282,6 +282,30 @@ def get_provider_for_task(task):
     return get_config()["tasks"][task]
 
 
+def resolve_provider_model(task, provider=None, model=None):
+    """Resolve the (provider, model) pair that would actually be used for a
+    given *task* call, with optional per-call overrides — matches the logic
+    inside :func:`call_ai`.
+
+    Used by every save-time attribution call (analyze / captions / wizard)
+    so the DB records the *specific* model that ran, not just the brand.
+    Empty strings are normalized to None.
+
+    Returns ``(provider_name, model_name)``. Either may be ``None`` if the
+    task or provider isn't configured.
+    """
+    if task not in TASKS:
+        raise ValueError(f"Unknown task: {task}")
+    cfg = get_config()
+    p = (provider or "").strip() or cfg["tasks"].get(task) or None
+    if p and p not in PROVIDER_DEFAULTS:
+        return p, (model or None)
+    m = (model or "").strip() or None
+    if p and not m:
+        m = (cfg["providers"].get(p) or {}).get("model")
+    return p, m
+
+
 # ── Dispatch ─────────────────────────────────────────────────────────────────
 
 def call_ai(prompt_text, task="wizard", frames=None, model=None,

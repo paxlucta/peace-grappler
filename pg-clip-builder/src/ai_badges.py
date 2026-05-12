@@ -66,6 +66,21 @@ BADGES = {
             '</svg>'
         ),
     },
+    "whisper": {
+        "label": "Whisper (OpenAI)",
+        "color": "#9c27b0",
+        # Sound-wave glyph: three concentric arcs evoking audio output.
+        "svg": (
+            '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" '
+            'aria-label="Whisper">'
+            '<circle cx="12" cy="12" r="2.5" fill="#9c27b0"/>'
+            '<path fill="none" stroke="#9c27b0" stroke-width="2" '
+            'stroke-linecap="round" d="M7 8c-2 2-2 6 0 8"/>'
+            '<path fill="none" stroke="#9c27b0" stroke-width="2" '
+            'stroke-linecap="round" d="M17 8c2 2 2 6 0 8"/>'
+            '</svg>'
+        ),
+    },
 }
 
 

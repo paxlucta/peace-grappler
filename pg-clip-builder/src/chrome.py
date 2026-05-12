@@ -70,12 +70,15 @@ def header_html(active: str = "") -> str:
         parts.append("</div>")
         parts.append(
             "<style>"
-            ".pg-subnav{display:flex;gap:4px;padding:6px 20px;"
-            "background:#101015;border-bottom:1px solid #2a2a2a;"
-            "flex-shrink:0}"
-            ".pg-subnav a{color:#888;text-decoration:none;font-size:12px;"
-            "font-weight:600;padding:6px 14px;border-radius:6px;"
-            "transition:background .15s,color .15s}"
+            # Strip is transparent on purpose so it sits flush against the
+            # page chrome — only the active pill draws a background. Match
+            # the size/look used on the rating page (correct reference).
+            ".pg-subnav{display:flex;gap:10px;padding:16px 20px 14px;"
+            "background:transparent;flex-shrink:0;align-items:center}"
+            ".pg-subnav a{color:#888;text-decoration:none;font-size:14px;"
+            "font-weight:600;padding:8px 18px;border-radius:8px;"
+            "transition:background .15s,color .15s;"
+            "display:inline-flex;align-items:center;line-height:1}"
             ".pg-subnav a:hover{color:#fff;background:#1a1a22}"
             ".pg-subnav a.active{color:#fff;background:#e53935}"
             "</style>"
