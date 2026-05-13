@@ -180,7 +180,7 @@ SCENES_HTML = r"""<!DOCTYPE html>
 body{
   background:#0a0a0a;color:#e0e0e0;
   font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
-  display:flex;flex-direction:column;min-height:100vh;
+  display:flex;flex-direction:column;height:100vh;overflow:hidden;
 }
 header{
   background:#141414;border-bottom:1px solid #2a2a2a;
@@ -194,7 +194,57 @@ nav a{color:#aaa;text-decoration:none;font-size:12px;padding:4px 8px;
 nav a:hover{color:#fff;border-color:#888}
 nav a.active{color:#e53935;border-color:#e53935}
 
-.content{flex:1;padding:16px 20px;overflow-y:auto}
+.content{flex:1;padding:0;display:flex;flex-direction:column;min-height:0}
+
+/* -- Mac-Finder-style 3-column scene browser (mirrors /builder) -- */
+.bb-search-row{
+  display:flex;align-items:center;gap:12px;
+  padding:8px 20px;flex-shrink:0;
+  background:#111;border-bottom:1px solid #2a2a2a;
+}
+.bb-search-row input{
+  flex:1;background:#0c0c14;border:1px solid #2e2e3e;color:#eee;
+  border-radius:6px;padding:7px 12px;font-size:13px;outline:none;
+}
+.bb-search-row input:focus{border-color:#1976d2}
+.bb-search-row .bb-search-status{font-size:11px;color:#1976d2;font-weight:600;white-space:nowrap}
+.bb-search-row .bb-search-clear{
+  background:#1a1a1a;border:1px solid #333;color:#888;
+  border-radius:6px;padding:6px 10px;font-size:12px;cursor:pointer;
+}
+.bb-search-row .bb-search-clear:hover{color:#fff;border-color:#666}
+.bb-cols{
+  flex:1;display:grid;grid-template-columns:240px 220px 1fr;
+  min-height:0;overflow:hidden;background:#0a0a0a;
+}
+.bb-col{
+  display:flex;flex-direction:column;min-height:0;
+  border-right:1px solid #1a1a1a;background:#101013;
+}
+.bb-col:last-child{border-right:none;background:#0a0a0a}
+.bb-col-head{
+  padding:8px 14px;border-bottom:1px solid #1f1f24;background:#141418;
+  font-size:10px;color:#888;text-transform:uppercase;
+  letter-spacing:.6px;font-weight:700;flex-shrink:0;
+}
+.bb-list{flex:1;overflow-y:auto;min-height:0}
+.bb-row{
+  display:flex;align-items:center;justify-content:space-between;
+  gap:8px;padding:8px 12px;cursor:pointer;font-size:12px;color:#ccc;
+  border-bottom:1px solid #161620;line-height:1.3;
+}
+.bb-row:hover{background:#1a1a24;color:#fff}
+.bb-row.selected{background:#1f2a3a;color:#fff}
+.bb-row.bb-row-all{font-weight:600;border-bottom:1px solid #2a2a3a}
+.bb-row.bb-row-unrated{color:#ffb74d}
+.bb-row.bb-row-unrated.selected{background:#3a2a14;color:#ffd28a}
+.bb-row.bb-row-hidden{color:#ef9a9a}
+.bb-row.bb-row-hidden.selected{background:#3a1a1a;color:#ffc4c4}
+.bb-row-name{flex:1;min-width:0;word-break:break-word}
+.bb-row-count{color:#666;font-size:10px;flex-shrink:0;font-family:'SF Mono',Menlo,monospace}
+.bb-row.selected .bb-row-count{color:#9ec0e8}
+.bb-scenes-wrap{flex:1;overflow-y:auto;padding:12px;min-height:0}
+.bb-scenes-head-info{font-size:11px;color:#666;font-weight:400;margin-left:8px;text-transform:none;letter-spacing:0}
 
 /* -- Tag filters -- */
 .tag-bar{
@@ -456,33 +506,31 @@ nav a.active{color:#e53935;border-color:#e53935}
 <!-- pg-chrome -->
 
 <div class="content">
-  <div class="search-row">
-    <input id="search-input" class="search-input" type="search"
-           placeholder="Search transcript text — e.g. &quot;genitive case&quot; or a phrase the speaker said"
+  <div class="bb-search-row">
+    <input id="search-input" type="search"
+           placeholder="Search scene transcripts… (e.g. a phrase the speaker said)"
            autocomplete="off">
-    <span class="search-status" id="search-status"></span>
-    <button class="search-clear" id="search-clear" onclick="clearSearch()" style="display:none">Clear</button>
+    <span class="bb-search-status" id="search-status"></span>
+    <button class="bb-search-clear" id="search-clear" onclick="clearSearch()" style="display:none">Clear</button>
   </div>
-  <div class="search-row" style="margin-top:-4px">
-    <label style="font-size:12px;color:#888;flex-shrink:0">Filter by file:</label>
-    <div class="file-filter">
-      <button type="button" id="file-filter-btn" onclick="toggleFileFilter(event)">
-        <span id="file-filter-label">All files</span>
-        <span class="ff-caret">&#9662;</span>
-      </button>
-      <div id="file-filter-pop" class="ff-pop">
-        <div class="ff-actions">
-          <button type="button" onclick="ffSelectAll(true)">Select all</button>
-          <button type="button" onclick="ffSelectAll(false)">Deselect all</button>
-        </div>
-        <input type="search" id="ff-search" placeholder="Filter files&hellip;" oninput="ffRenderList()">
-        <div class="ff-list" id="ff-list"></div>
+  <div class="bb-cols">
+    <div class="bb-col">
+      <div class="bb-col-head">Files</div>
+      <div class="bb-list" id="bb-files-list"></div>
+    </div>
+    <div class="bb-col">
+      <div class="bb-col-head">Tags</div>
+      <div class="bb-list" id="bb-tags-list"></div>
+    </div>
+    <div class="bb-col">
+      <div class="bb-col-head">Scenes
+        <span class="bb-scenes-head-info" id="scene-count"></span>
+      </div>
+      <div class="bb-scenes-wrap">
+        <div class="scene-grid" id="scene-grid"></div>
       </div>
     </div>
   </div>
-  <div class="tag-bar" id="tag-bar"></div>
-  <div class="scene-count" id="scene-count"></div>
-  <div class="scene-grid" id="scene-grid"></div>
 </div>
 
 <div class="player-overlay" id="player-overlay">
@@ -520,175 +568,186 @@ nav a.active{color:#e53935;border-color:#e53935}
 
 <script>
 var allScenes = [];
-var activeTag = '';
 var searchQuery = '';        // current text query
 var searchHitIds = null;     // null = no search active; Set of scene_ids when active
 var searchTimer = null;
 
-// -- File-filter multi-select (mirrors the Builder/Wizard control) --
-var ffFiles = [];            // [{name, count}, ...] sorted alphabetically
-var ffSelected = null;       // Set<filename>; null until ffInit() runs
+// Mac-Finder-style column state.
+//   selectedFile: null = "All Files", else exact filename
+//   selectedTag : null = "All Tags",  else a real tag or a pseudo-tag
+//                 ('__unrated__' | '__hidden__')
+var selectedFile = null;
+var selectedTag  = null;
 
-async function init() {
-  allScenes = await fetch('/rate/api/scenes').then(function(r){return r.json()});
-  ffInit();
-  renderTagBar();
-  renderGrid();
-}
-
-function ffInit() {
-  var counts = {};
-  for (var i = 0; i < allScenes.length; i++) {
-    var fn = allScenes[i].filename || '';
-    if (!fn) continue;
-    counts[fn] = (counts[fn] || 0) + 1;
-  }
-  ffFiles = Object.keys(counts).sort(function(a, b){
-    return a.localeCompare(b);
-  }).map(function(fn){ return {name: fn, count: counts[fn]}; });
-  ffSelected = new Set(ffFiles.map(function(f){return f.name}));
-  ffRenderList();
-  ffUpdateLabel();
-}
-
-// Strip extension and replace underscores/dashes with spaces for
-// display only — actual filename stays on data-fn so selections + search
-// work against the original.
+// Strip extension + turn underscores/dashes into spaces for display.
 function _ffPretty(name) {
   var base = (name || '').replace(/\.[^.]+$/, '');
   return base.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-function ffRenderList() {
-  var list = document.getElementById('ff-list');
-  if (!list) return;
-  var q = (document.getElementById('ff-search').value || '').toLowerCase();
-  var html = '';
-  for (var i = 0; i < ffFiles.length; i++) {
-    var f = ffFiles[i];
-    if (q && f.name.toLowerCase().indexOf(q) < 0) continue;
-    var checked = ffSelected.has(f.name) ? ' checked' : '';
-    var safe = f.name.replace(/"/g, '&quot;');
-    var pretty = _ffPretty(f.name).replace(/"/g, '&quot;');
-    html += '<label class="ff-item">'
-      + '<input type="checkbox" data-fn="' + safe + '"' + checked
-      + ' onchange="ffToggle(this)">'
-      + '<span class="ff-name" title="' + safe + '">' + pretty + '</span>'
-      + '<span class="ff-count">' + f.count + '</span>'
-      + '</label>';
-  }
-  list.innerHTML = html || '<div style="font-size:11px;color:#666;padding:6px">No matching files.</div>';
+function _bbEsc(s) {
+  return (s || '').replace(/[&<>"']/g, function(c) {
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
 }
 
-function ffToggle(input) {
-  var fn = input.getAttribute('data-fn');
-  if (input.checked) ffSelected.add(fn);
-  else ffSelected.delete(fn);
-  ffUpdateLabel();
-  renderTagBar();
+async function init() {
+  allScenes = await fetch('/rate/api/scenes').then(function(r){return r.json()});
+  bbInit();
   renderGrid();
 }
 
-function ffSelectAll(on) {
-  ffSelected = on ? new Set(ffFiles.map(function(f){return f.name})) : new Set();
-  ffRenderList();
-  ffUpdateLabel();
-  renderTagBar();
-  renderGrid();
+function bbInit() {
+  bbRenderFilesCol();
+  bbRenderTagsCol();
+  // Delegated listeners — one per column. Avoids escaping filenames /
+  // tags into inline onclick strings.
+  document.getElementById('bb-files-list').addEventListener('click', function(e){
+    var row = e.target.closest('.bb-row');
+    if (!row) return;
+    bbSelectFile(row.getAttribute('data-fn'));
+  });
+  document.getElementById('bb-tags-list').addEventListener('click', function(e){
+    var row = e.target.closest('.bb-row');
+    if (!row) return;
+    bbSelectTag(row.getAttribute('data-tag'));
+  });
 }
 
-function ffUpdateLabel() {
-  var el = document.getElementById('file-filter-label');
-  if (!el) return;
-  var total = ffFiles.length;
-  var n = ffSelected.size;
-  if (n === total)        el.textContent = 'All files (' + total + ')';
-  else if (n === 0)       el.textContent = 'No files';
-  else if (n === 1)       el.textContent = '1 file';
-  else                    el.textContent = n + ' / ' + total + ' files';
-}
-
-function toggleFileFilter(e) {
-  if (e) e.stopPropagation();
-  var pop = document.getElementById('file-filter-pop');
-  pop.classList.toggle('open');
-}
-document.addEventListener('click', function(e) {
-  var pop = document.getElementById('file-filter-pop');
-  if (!pop || !pop.classList.contains('open')) return;
-  var btn = document.getElementById('file-filter-btn');
-  if (pop.contains(e.target) || btn.contains(e.target)) return;
-  pop.classList.remove('open');
-});
-
-function renderTagBar() {
-  var bar = document.getElementById('tag-bar');
-  // Collect tags + counts
-  var tagCounts = {};
-  var unratedCount = 0;
-  var hiddenCount = 0;
+function bbRenderFilesCol() {
+  // Match the visibility rules of the default grid: hide excluded scenes
+  // from the per-file counts unless the user is explicitly looking at the
+  // Hidden pseudo-tag. Counts shouldn't include them otherwise.
+  var includeExcluded = (selectedTag === '__hidden__');
+  var counts = {};
+  var totalAll = 0;
   for (var i = 0; i < allScenes.length; i++) {
     var s = allScenes[i];
-    if (s.status === 'unrated') unratedCount++;
-    if (s.excluded) hiddenCount++;
-    for (var j = 0; j < s.tags.length; j++) {
-      tagCounts[s.tags[j]] = (tagCounts[s.tags[j]] || 0) + 1;
-    }
+    if (!includeExcluded && s.excluded) continue;
+    var fn = s.filename || '';
+    if (!fn) continue;
+    counts[fn] = (counts[fn] || 0) + 1;
+    totalAll++;
   }
-
+  var files = Object.keys(counts).sort(function(a, b){
+    return _ffPretty(a).localeCompare(_ffPretty(b));
+  });
   var html = '';
-  // All chip
-  html += '<span class="tag-chip' + (activeTag === '' ? ' active' : '') + '" onclick="setTag(\'\')">'
-    + 'All <span class="chip-count">(' + allScenes.length + ')</span></span>';
-  // Unrated chip
-  if (unratedCount > 0) {
-    html += '<span class="tag-chip' + (activeTag === '__unrated__' ? ' active' : '')
-      + '" style="border-color:#ff9800;color:#ffb74d" onclick="setTag(\'__unrated__\')">'
-      + 'Unrated <span class="chip-count">(' + unratedCount + ')</span></span>';
+  html += '<div class="bb-row bb-row-all' + (selectedFile===null?' selected':'') + '"'
+       + ' data-fn=""><span class="bb-row-name">All Files</span>'
+       + '<span class="bb-row-count">' + totalAll + '</span></div>';
+  for (var i = 0; i < files.length; i++) {
+    var f = files[i];
+    var safe = _bbEsc(f);
+    var pretty = _bbEsc(_ffPretty(f));
+    html += '<div class="bb-row' + (selectedFile===f?' selected':'') + '"'
+         + ' data-fn="' + safe + '" title="' + safe + '">'
+         + '<span class="bb-row-name">' + pretty + '</span>'
+         + '<span class="bb-row-count">' + counts[f] + '</span></div>';
   }
-  // Hidden chip
-  if (hiddenCount > 0) {
-    html += '<span class="tag-chip' + (activeTag === '__hidden__' ? ' active' : '')
-      + '" style="border-color:#ef5350;color:#ef9a9a" onclick="setTag(\'__hidden__\')">'
-      + 'Hidden <span class="chip-count">(' + hiddenCount + ')</span></span>';
-  }
-  // Regular tags
-  var sortedTags = Object.keys(tagCounts).sort();
-  for (var k = 0; k < sortedTags.length; k++) {
-    var t = sortedTags[k];
-    html += '<span class="tag-chip' + (activeTag === t ? ' active' : '') + '" onclick="setTag(\'' + t + '\')">'
-      + t + ' <span class="chip-count">(' + tagCounts[t] + ')</span></span>';
-  }
-  bar.innerHTML = html;
+  document.getElementById('bb-files-list').innerHTML = html;
 }
 
-function setTag(tag) {
-  activeTag = tag;
-  renderTagBar();
+function bbRenderTagsCol() {
+  // Tag list is computed against the currently-selected file (or all
+  // scenes when no file is picked). Counts always exclude hidden scenes
+  // — except for the dedicated Hidden row, which exists precisely so
+  // the user can dig into them.
+  var poolForTags = allScenes.filter(function(s){
+    return !s.excluded
+        && (selectedFile === null || s.filename === selectedFile);
+  });
+  var tagCounts = {};
+  for (var i = 0; i < poolForTags.length; i++) {
+    var ts = poolForTags[i].tags || [];
+    for (var j = 0; j < ts.length; j++) {
+      tagCounts[ts[j]] = (tagCounts[ts[j]] || 0) + 1;
+    }
+  }
+  // Unrated / Hidden counts respect the file selection too.
+  var unrated = 0, hidden = 0;
+  for (var i = 0; i < allScenes.length; i++) {
+    var s = allScenes[i];
+    if (selectedFile && s.filename !== selectedFile) continue;
+    if (s.excluded) { hidden++; continue; }
+    if (s.status === 'unrated') unrated++;
+  }
+  var html = '';
+  html += '<div class="bb-row bb-row-all' + (selectedTag===null?' selected':'') + '"'
+       + ' data-tag=""><span class="bb-row-name">All Tags</span>'
+       + '<span class="bb-row-count">' + poolForTags.length + '</span></div>';
+  if (unrated > 0) {
+    html += '<div class="bb-row bb-row-unrated' + (selectedTag==='__unrated__'?' selected':'') + '"'
+         + ' data-tag="__unrated__"><span class="bb-row-name">Unrated</span>'
+         + '<span class="bb-row-count">' + unrated + '</span></div>';
+  }
+  if (hidden > 0) {
+    html += '<div class="bb-row bb-row-hidden' + (selectedTag==='__hidden__'?' selected':'') + '"'
+         + ' data-tag="__hidden__"><span class="bb-row-name">Hidden</span>'
+         + '<span class="bb-row-count">' + hidden + '</span></div>';
+  }
+  var tags = Object.keys(tagCounts).sort();
+  for (var i = 0; i < tags.length; i++) {
+    var t = tags[i];
+    var safe = _bbEsc(t);
+    html += '<div class="bb-row' + (selectedTag===t?' selected':'') + '"'
+         + ' data-tag="' + safe + '">'
+         + '<span class="bb-row-name">' + safe + '</span>'
+         + '<span class="bb-row-count">' + tagCounts[t] + '</span></div>';
+  }
+  document.getElementById('bb-tags-list').innerHTML = html;
+}
+
+function bbSelectFile(fn) {
+  selectedFile = fn || null;
+  // If the previously-selected tag isn't present in the new file's
+  // pool, fall back to All Tags so the grid never goes silently empty.
+  if (selectedTag && selectedTag !== '__hidden__' && selectedTag !== '__unrated__') {
+    var pool = allScenes.filter(function(s){
+      return !s.excluded
+          && (selectedFile === null || s.filename === selectedFile);
+    });
+    var has = pool.some(function(s){
+      return (s.tags || []).indexOf(selectedTag) >= 0;
+    });
+    if (!has) selectedTag = null;
+  }
+  bbRenderFilesCol();
+  bbRenderTagsCol();
+  renderGrid();
+}
+
+function bbSelectTag(t) {
+  selectedTag = t || null;
+  // The Hidden pseudo-tag changes which scenes the files column counts,
+  // so re-render that too. (No-op when switching between regular tags.)
+  bbRenderFilesCol();
+  bbRenderTagsCol();
   renderGrid();
 }
 
 function getFiltered() {
   var base;
-  if (activeTag === '__unrated__') {
-    base = allScenes.filter(function(s) { return s.status === 'unrated'; });
-  } else if (activeTag === '__hidden__') {
+  if (selectedTag === '__unrated__') {
+    base = allScenes.filter(function(s) { return s.status === 'unrated' && !s.excluded; });
+  } else if (selectedTag === '__hidden__') {
     base = allScenes.filter(function(s) { return s.excluded; });
-  } else if (activeTag) {
-    // For "hidden-by-design" tags (auto-hidden), show the excluded scenes
-    // they refer to — otherwise the chip would always be empty.
-    var includeExcluded = (activeTag === 'auto-hidden');
+  } else if (selectedTag) {
+    // Auto-hidden tags refer to excluded scenes; surface them so the row
+    // isn't empty when picked.
+    var includeExcluded = (selectedTag === 'auto-hidden');
     base = allScenes.filter(function(s) {
-      return s.tags.indexOf(activeTag) >= 0 && (includeExcluded || !s.excluded);
+      return s.tags.indexOf(selectedTag) >= 0
+          && (includeExcluded || !s.excluded);
     });
   } else {
     base = allScenes.filter(function(s) { return !s.excluded; });
   }
+  if (selectedFile) {
+    base = base.filter(function(s) { return s.filename === selectedFile; });
+  }
   if (searchHitIds) {
     base = base.filter(function(s) { return searchHitIds.has(s.id); });
-  }
-  if (ffSelected && ffSelected.size !== ffFiles.length) {
-    base = base.filter(function(s) { return ffSelected.has(s.filename); });
   }
   return base;
 }
@@ -789,7 +848,9 @@ async function vote(sceneId, action) {
       break;
     }
   }
-  renderTagBar();
+  // After a vote, counts in both columns may shift (e.g. now hidden).
+  bbRenderFilesCol();
+  bbRenderTagsCol();
   renderGrid();
 }
 
