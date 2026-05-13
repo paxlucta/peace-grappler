@@ -1335,6 +1335,55 @@ main{flex:1;overflow-y:auto;padding:12px;min-height:0}
 #clip-grid{
   display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;
 }
+
+/* -- Mac-style 3-column scene browser -- */
+.bb-search-row{
+  display:flex;align-items:center;gap:12px;
+  padding:8px 24px;flex-shrink:0;
+  background:#111;border-bottom:1px solid #2a2a2a;
+}
+.bb-search-row input{
+  flex:1;background:#0c0c14;border:1px solid #2e2e3e;color:#eee;
+  border-radius:6px;padding:7px 12px;font-size:13px;outline:none;
+}
+.bb-search-row input:focus{border-color:#1976d2}
+.bb-search-status{font-size:11px;color:#1976d2;font-weight:600;white-space:nowrap}
+main.bb-cols{
+  flex:1;display:grid;grid-template-columns:240px 220px 1fr;
+  min-height:0;padding:0;overflow:hidden;
+  background:#0a0a0a;border-bottom:1px solid #1a1a1a;
+}
+.bb-col{
+  display:flex;flex-direction:column;min-height:0;
+  border-right:1px solid #1a1a1a;background:#101013;
+}
+.bb-col:last-child{border-right:none;background:#0a0a0a}
+.bb-col-head{
+  padding:8px 14px;border-bottom:1px solid #1f1f24;background:#141418;
+  font-size:10px;color:#888;text-transform:uppercase;
+  letter-spacing:.6px;font-weight:700;flex-shrink:0;
+}
+.bb-list{flex:1;overflow-y:auto;min-height:0}
+.bb-row{
+  display:flex;align-items:center;justify-content:space-between;
+  gap:8px;padding:8px 12px;cursor:pointer;font-size:12px;color:#ccc;
+  border-bottom:1px solid #161620;line-height:1.3;
+}
+.bb-row:hover{background:#1a1a24;color:#fff}
+.bb-row.selected{background:#1f2a3a;color:#fff}
+.bb-row.bb-row-all{font-weight:600;border-bottom:1px solid #2a2a3a}
+.bb-row-name{
+  flex:1;min-width:0;word-break:break-word;
+}
+.bb-row-count{
+  color:#666;font-size:10px;flex-shrink:0;
+  font-family:'SF Mono',Menlo,monospace;
+}
+.bb-row.selected .bb-row-count{color:#9ec0e8}
+.bb-scenes-wrap{flex:1;overflow-y:auto;padding:10px;min-height:0}
+.bb-empty{
+  color:#666;font-size:13px;text-align:center;padding:40px 16px;
+}
 .clip-card{
   background:#1a1a1a;border-radius:8px;overflow:hidden;
   cursor:grab;transition:transform .15s,opacity .2s;position:relative;
@@ -2087,29 +2136,34 @@ footer{
 
 <!-- pg-chrome -->
 
-<div class="sub-toolbar">
-  <select id="tag-filter" onchange="filterByTag()">
-    <option value="">All Tags</option>
-  </select>
-  <div class="file-filter">
-    <button type="button" id="file-filter-btn" onclick="toggleFileFilter(event)">
-      <span id="file-filter-label">All files</span>
-      <span class="ff-caret">▾</span>
-    </button>
-    <div id="file-filter-pop" class="ff-pop">
-      <div class="ff-actions">
-        <button type="button" onclick="ffSelectAll(true)">Select all</button>
-        <button type="button" onclick="ffSelectAll(false)">Deselect all</button>
-      </div>
-      <input type="search" id="ff-search" placeholder="Filter files…" oninput="ffRenderList()">
-      <div class="ff-list" id="ff-list"></div>
-    </div>
-  </div>
+<!-- Hidden legacy controls — kept so existing JS that reads
+     tag-filter.value / writes options to it doesn't need to be ripped
+     out. The new column-based browser drives all filtering. -->
+<select id="tag-filter" style="display:none"><option value="">All Tags</option></select>
+
+<div class="bb-search-row">
+  <input type="search" id="bb-search"
+         placeholder="Search scene transcripts… (e.g. a phrase the speaker said)"
+         oninput="onBbSearchInput()" autocomplete="off">
+  <span class="bb-search-status" id="bb-search-status"></span>
   <span id="clip-count"></span>
 </div>
 
-<main>
-  <div id="clip-grid"></div>
+<main class="bb-cols">
+  <div class="bb-col bb-files">
+    <div class="bb-col-head">Files</div>
+    <div class="bb-list" id="bb-files-list"></div>
+  </div>
+  <div class="bb-col bb-tags">
+    <div class="bb-col-head">Tags</div>
+    <div class="bb-list" id="bb-tags-list"></div>
+  </div>
+  <div class="bb-col bb-scenes">
+    <div class="bb-col-head" id="bb-scenes-head">Scenes</div>
+    <div class="bb-scenes-wrap">
+      <div id="clip-grid"></div>
+    </div>
+  </div>
 </main>
 
 <footer>
@@ -2492,7 +2546,7 @@ async function init() {
   }
 
   allClips = await fetch('/api/clips').then(function(r){return r.json()});
-  ffInit();
+  bbInit();
   renderGrid();
 
   /* Load fonts for text editor */
@@ -3919,22 +3973,23 @@ function cardHTML(c) {
 }
 
 function renderGrid() {
-  var tag = document.getElementById('tag-filter').value;
-  var clips;
-  if (tag === 'hidden') {
-    clips = allClips.filter(function(c){return c.ignored});
-  } else if (tag) {
-    clips = allClips.filter(function(c){return c.tags.indexOf(tag)>=0 && !c.ignored});
-  } else {
-    clips = allClips.filter(function(c){return !c.ignored});
+  // Column-based filter chain: File → Tag → transcript search.
+  var clips = allClips.filter(function(c){return !c.ignored});
+  if (selectedFile) {
+    clips = clips.filter(function(c){return c.filename === selectedFile});
   }
-  // File filter — when ffSelected is non-null, restrict to clips whose
-  // source filename is in the set. Default (null) = no filtering.
-  if (ffSelected) {
-    clips = clips.filter(function(c){return ffSelected.has(c.filename)});
+  if (selectedTag) {
+    clips = clips.filter(function(c){return (c.tags||[]).indexOf(selectedTag) >= 0});
+  }
+  if (searchHitIds) {
+    clips = clips.filter(function(c){return searchHitIds.has(c.id)});
   }
   var grid = document.getElementById('clip-grid');
-  grid.innerHTML = clips.map(cardHTML).join('');
+  if (!clips.length) {
+    grid.innerHTML = '<div class="bb-empty">No scenes match the current filters.</div>';
+  } else {
+    grid.innerHTML = clips.map(cardHTML).join('');
+  }
   document.getElementById('clip-count').textContent =
     clips.length + ' scene' + (clips.length === 1 ? '' : 's');
 
@@ -4070,102 +4125,172 @@ function syncTl() {
 
 function filterByTag() { renderGrid(); }
 
-// ── File filter (multi-select dropdown) ───────────────────────────────────
-// ffSelected: null = "all files included" (no filtering applied),
-// Set<filename> = explicit selection. Stored as a Set so re-render is O(1).
-var ffSelected = null;
-var ffFiles = [];   // [{name, count}, ...] sorted alphabetically.
+// ── Mac-Finder-style 3-column scene browser ──────────────────────────────
+//
+// Column 1 = files (single-select; "All Files" row clears the filter).
+// Column 2 = tags present in the currently-selected file (or all clips
+//   when no file is picked). "All Tags" clears the tag filter.
+// Column 3 = the existing scene grid, filtered by file → tag → transcript
+//   search (column 3 has no UI of its own; it just reacts to columns 1/2
+//   and the search bar at the top).
 
-function ffInit() {
-  var counts = {};
-  for (var i = 0; i < allClips.length; i++) {
-    var fn = allClips[i].filename || '';
-    if (!fn) continue;
-    counts[fn] = (counts[fn] || 0) + 1;
-  }
-  ffFiles = Object.keys(counts).sort().map(function(fn){
-    return {name: fn, count: counts[fn]};
-  });
-  // Default: every file selected (functionally equivalent to "no filter"
-  // but having the explicit set means deselect-all immediately works).
-  ffSelected = new Set(ffFiles.map(function(f){return f.name}));
-  ffRenderList();
-  ffUpdateLabel();
-}
+var selectedFile = null;   // null = "All Files"
+var selectedTag  = null;   // null = "All Tags"
+var searchHitIds = null;   // null = no search active; Set<sceneId> when active
+var _bbSearchTimer = null;
 
 // Strip the extension and turn underscores/dashes into spaces so the
-// list is human-readable. Underlying filename is still stored on the
-// checkbox via data-fn so saved selections keep matching.
+// files column reads like prose instead of a slug.
 function _ffPretty(name) {
   var base = (name || '').replace(/\.[^.]+$/, '');
   return base.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-function ffRenderList() {
-  var list = document.getElementById('ff-list');
-  if (!list) return;
-  var q = (document.getElementById('ff-search').value || '').toLowerCase();
+function _bbEsc(s) {
+  return (s || '').replace(/[&<>"']/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+
+function bbInit() {
+  bbRenderFilesCol();
+  bbRenderTagsCol();
+  // Single delegated listener per column handles row clicks; cheaper
+  // than re-binding every render and dodges the filename-quoting
+  // problem an inline onclick would have.
+  var filesList = document.getElementById('bb-files-list');
+  filesList.addEventListener('click', function(e) {
+    var row = e.target.closest('.bb-row');
+    if (!row) return;
+    bbSelectFile(row.getAttribute('data-fn'));
+  });
+  var tagsList = document.getElementById('bb-tags-list');
+  tagsList.addEventListener('click', function(e) {
+    var row = e.target.closest('.bb-row');
+    if (!row) return;
+    bbSelectTag(row.getAttribute('data-tag'));
+  });
+}
+
+function bbRenderFilesCol() {
+  var counts = {};
+  var totalAll = 0;
+  for (var i = 0; i < allClips.length; i++) {
+    var c = allClips[i];
+    if (c.ignored) continue;
+    var fn = c.filename || '';
+    if (!fn) continue;
+    counts[fn] = (counts[fn] || 0) + 1;
+    totalAll++;
+  }
+  var files = Object.keys(counts).sort(function(a, b){
+    return _ffPretty(a).localeCompare(_ffPretty(b));
+  });
   var html = '';
-  for (var i = 0; i < ffFiles.length; i++) {
-    var f = ffFiles[i];
-    // Search matches against the real filename so users can still type
-    // underscores or extensions if they remember them that way.
-    if (q && f.name.toLowerCase().indexOf(q) < 0) continue;
-    var checked = ffSelected.has(f.name) ? ' checked' : '';
-    var safe = f.name.replace(/"/g, '&quot;');
-    var pretty = _ffPretty(f.name).replace(/"/g, '&quot;');
-    html += '<label class="ff-item">'
-      + '<input type="checkbox" data-fn="' + safe + '"' + checked
-      + ' onchange="ffToggle(this)">'
-      + '<span class="ff-name" title="' + safe + '">' + pretty + '</span>'
-      + '<span class="ff-count">' + f.count + '</span>'
-      + '</label>';
+  html += '<div class="bb-row bb-row-all' + (selectedFile===null?' selected':'') + '"'
+       + ' data-fn="">'
+       + '<span class="bb-row-name">All Files</span>'
+       + '<span class="bb-row-count">' + totalAll + '</span>'
+       + '</div>';
+  for (var i = 0; i < files.length; i++) {
+    var f = files[i];
+    var pretty = _bbEsc(_ffPretty(f));
+    var safe = _bbEsc(f);
+    html += '<div class="bb-row' + (selectedFile===f?' selected':'') + '"'
+         + ' data-fn="' + safe + '" title="' + safe + '">'
+         + '<span class="bb-row-name">' + pretty + '</span>'
+         + '<span class="bb-row-count">' + counts[f] + '</span>'
+         + '</div>';
   }
-  list.innerHTML = html || '<div style="font-size:11px;color:#666;padding:6px">No matching files.</div>';
+  document.getElementById('bb-files-list').innerHTML = html;
 }
 
-function ffToggle(input) {
-  var fn = input.getAttribute('data-fn');
-  if (input.checked) ffSelected.add(fn);
-  else ffSelected.delete(fn);
-  ffUpdateLabel();
+function bbRenderTagsCol() {
+  var pool = allClips.filter(function(c){return !c.ignored});
+  if (selectedFile) {
+    pool = pool.filter(function(c){return c.filename === selectedFile});
+  }
+  var counts = {};
+  for (var i = 0; i < pool.length; i++) {
+    var ts = pool[i].tags || [];
+    for (var j = 0; j < ts.length; j++) counts[ts[j]] = (counts[ts[j]] || 0) + 1;
+  }
+  var tags = Object.keys(counts).sort();
+  var html = '';
+  html += '<div class="bb-row bb-row-all' + (selectedTag===null?' selected':'') + '"'
+       + ' data-tag="">'
+       + '<span class="bb-row-name">All Tags</span>'
+       + '<span class="bb-row-count">' + pool.length + '</span>'
+       + '</div>';
+  for (var i = 0; i < tags.length; i++) {
+    var t = tags[i];
+    var safe = _bbEsc(t);
+    html += '<div class="bb-row' + (selectedTag===t?' selected':'') + '"'
+         + ' data-tag="' + safe + '">'
+         + '<span class="bb-row-name">' + safe + '</span>'
+         + '<span class="bb-row-count">' + counts[t] + '</span>'
+         + '</div>';
+  }
+  document.getElementById('bb-tags-list').innerHTML = html;
+}
+
+function bbSelectFile(fn) {
+  selectedFile = fn || null;
+  // If the previously-active tag isn't in the new file, fall back to
+  // "All Tags" so the scene grid doesn't go silently empty.
+  if (selectedTag) {
+    var pool = allClips.filter(function(c){
+      return !c.ignored
+          && (selectedFile === null || c.filename === selectedFile);
+    });
+    var has = pool.some(function(c){
+      return (c.tags || []).indexOf(selectedTag) >= 0;
+    });
+    if (!has) selectedTag = null;
+  }
+  bbRenderFilesCol();
+  bbRenderTagsCol();
   renderGrid();
 }
 
-function ffSelectAll(on) {
-  if (on) {
-    ffSelected = new Set(ffFiles.map(function(f){return f.name}));
-  } else {
-    ffSelected = new Set();
-  }
-  ffRenderList();
-  ffUpdateLabel();
+function bbSelectTag(t) {
+  selectedTag = t || null;
+  bbRenderTagsCol();
   renderGrid();
 }
 
-function ffUpdateLabel() {
-  var el = document.getElementById('file-filter-label');
-  if (!el) return;
-  var total = ffFiles.length;
-  var n = ffSelected.size;
-  if (n === total)        el.textContent = 'All files (' + total + ')';
-  else if (n === 0)       el.textContent = 'No files';
-  else if (n === 1)       el.textContent = '1 file';
-  else                    el.textContent = n + ' / ' + total + ' files';
+function onBbSearchInput() {
+  var q = (document.getElementById('bb-search').value || '').trim();
+  if (_bbSearchTimer) clearTimeout(_bbSearchTimer);
+  // Debounce so each keystroke doesn't hit the server.
+  _bbSearchTimer = setTimeout(function(){ _bbDoSearch(q); }, 280);
 }
 
-function toggleFileFilter(e) {
-  if (e) e.stopPropagation();
-  var pop = document.getElementById('file-filter-pop');
-  pop.classList.toggle('open');
+async function _bbDoSearch(q) {
+  var status = document.getElementById('bb-search-status');
+  if (!q) {
+    searchHitIds = null;
+    if (status) status.textContent = '';
+    renderGrid();
+    return;
+  }
+  if (status) status.textContent = 'searching…';
+  try {
+    // Reuse the Scenes-page transcript search endpoint — same dataset,
+    // same indexing, so the result set is identical.
+    var r = await fetch('/rate/api/search?q=' + encodeURIComponent(q));
+    var data = await r.json();
+    searchHitIds = new Set(data.scene_ids || []);
+  } catch (e) {
+    searchHitIds = new Set();
+  }
+  if (status) {
+    status.textContent = searchHitIds.size
+      ? (searchHitIds.size + ' transcript match' + (searchHitIds.size !== 1 ? 'es' : ''))
+      : 'no transcript matches';
+  }
+  renderGrid();
 }
-document.addEventListener('click', function(e) {
-  var pop = document.getElementById('file-filter-pop');
-  if (!pop || !pop.classList.contains('open')) return;
-  var btn = document.getElementById('file-filter-btn');
-  if (pop.contains(e.target) || btn.contains(e.target)) return;
-  pop.classList.remove('open');
-});
 
 // -- Context menu (hide / unhide) --
 var ctxEl = null;
@@ -4211,16 +4336,11 @@ async function toggleIgnore(id, ignore) {
   var clip = allClips.find(function(c){return c.id===id});
   if (clip) clip.ignored = ignore;
 
-  var sel = document.getElementById('tag-filter');
-  var cur = sel.value;
-  sel.innerHTML = '<option value="">All Tags</option>';
-  for (var tag in data.tags) {
-    var o = document.createElement('option');
-    o.value = tag; o.textContent = tag + ' (' + data.tags[tag] + ')';
-    sel.appendChild(o);
-  }
-  sel.value = cur;
-
+  // Refresh the file / tag columns so counts (and disappearing tags) stay
+  // accurate after a hide / unhide. Render order matters: files first so
+  // the tags column sees the up-to-date selectedFile pool.
+  bbRenderFilesCol();
+  bbRenderTagsCol();
   renderGrid();
 }
 
