@@ -266,6 +266,15 @@ def get_db():
         except sqlite3.OperationalError:
             conn.execute(f"ALTER TABLE videos ADD COLUMN {col} TEXT")
             needs_backfill = True
+    # Scene favorite flag — a heart toggle on each scene card. Independent
+    # of the file-level favorites store (which is per-filename in
+    # folders.json) so a user can favorite individual scenes without
+    # marking the whole source video.
+    try:
+        conn.execute("SELECT favorite FROM scenes LIMIT 0")
+    except sqlite3.OperationalError:
+        conn.execute("ALTER TABLE scenes ADD COLUMN favorite INTEGER DEFAULT 0")
+        conn.commit()
     if needs_backfill:
         # Speech: whoever has transcript rows.
         conn.execute(
@@ -402,7 +411,7 @@ def get_all_scenes(include_ignored=False, include_excluded=False):
 
         rows = conn.execute(f"""
             SELECT s.id, s.video_id, s.start_time, s.end_time,
-                   s.excluded, s.ignored,
+                   s.excluded, s.ignored, s.favorite,
                    v.path, v.filename, v.wide, v.duration as video_duration,
                    v.analyzer_provider, v.analyzer_model,
                    v.visual_analyzer_provider, v.visual_analyzer_model,
@@ -426,6 +435,7 @@ def get_all_scenes(include_ignored=False, include_excluded=False):
                 "end_time": row["end_time"],
                 "excluded": bool(row["excluded"]),
                 "ignored": bool(row["ignored"]),
+                "favorite": bool(row["favorite"]) if "favorite" in row.keys() else False,
                 "video_path": row["path"],
                 "video_filename": row["filename"],
                 "wide": bool(row["wide"]),
@@ -565,6 +575,21 @@ def set_scene_excluded(scene_id, excluded):
             (1 if excluded else 0, scene_id),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def set_scene_favorite(scene_id, favorite):
+    """Toggle the heart-icon favorite flag on a scene. Returns the new
+    boolean state (matches what the UI optimistically sets)."""
+    conn = get_db()
+    try:
+        conn.execute(
+            "UPDATE scenes SET favorite=? WHERE id=?",
+            (1 if favorite else 0, scene_id),
+        )
+        conn.commit()
+        return bool(favorite)
     finally:
         conn.close()
 
@@ -1077,7 +1102,7 @@ def get_scene_by_id(scene_id):
     try:
         row = conn.execute("""
             SELECT s.id, s.video_id, s.start_time, s.end_time,
-                   s.excluded, s.ignored,
+                   s.excluded, s.ignored, s.favorite,
                    v.path, v.filename, v.wide
             FROM scenes s
             JOIN videos v ON v.id = s.video_id
@@ -1096,6 +1121,7 @@ def get_scene_by_id(scene_id):
             "end_time": row["end_time"],
             "excluded": bool(row["excluded"]),
             "ignored": bool(row["ignored"]),
+            "favorite": bool(row["favorite"]) if "favorite" in row.keys() else False,
             "video_path": row["path"],
             "video_filename": row["filename"],
             "wide": bool(row["wide"]),

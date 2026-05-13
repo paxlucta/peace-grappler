@@ -58,6 +58,7 @@ from flask import Flask, jsonify, redirect, send_file
 from db import get_db
 from clip_builder import clip_builder_bp
 from analyzer import analyzer_bp
+from folders import folders_bp
 
 from library import library_bp
 from wizard import wizard_bp
@@ -70,6 +71,7 @@ import features
 app = Flask(__name__)
 app.register_blueprint(clip_builder_bp)
 app.register_blueprint(analyzer_bp)
+app.register_blueprint(folders_bp)
 
 app.register_blueprint(library_bp)
 app.register_blueprint(wizard_bp)

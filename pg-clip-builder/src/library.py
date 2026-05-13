@@ -175,7 +175,7 @@ LIBRARY_HTML = r"""<!DOCTYPE html>
 body{
   background:#0a0a0a;color:#e0e0e0;
   font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
-  display:flex;flex-direction:column;min-height:100vh;
+  display:flex;flex-direction:column;height:100vh;overflow:hidden;
 }
 
 /* -- Header (consistent) -- */
@@ -217,11 +217,58 @@ select:focus{outline:none;border-color:#e53935}
 .tag-chip:hover{border-color:#666;color:#fff}
 .tag-chip.active{background:#e53935;border-color:#e53935;color:#fff}
 
-/* -- Video grid -- */
-.content{flex:1;padding:16px 20px;overflow-y:auto}
+/* -- Folders column + video grid -- */
+.content{flex:1;display:grid;grid-template-columns:200px 1fr;
+  min-height:0;overflow:hidden;background:#0a0a0a;padding:0}
+.bb-col{display:flex;flex-direction:column;min-height:0;
+  border-right:1px solid #1a1a1a;background:#101013}
+.bb-col:last-child{border-right:none;background:#0a0a0a}
+.bb-col-head{
+  padding:0 14px;border-bottom:1px solid #1f1f24;background:#141418;
+  font-size:10px;color:#888;text-transform:uppercase;
+  letter-spacing:.6px;font-weight:700;flex-shrink:0;
+  height:34px;display:flex;align-items:center;justify-content:space-between;
+}
+.bb-col-head .bb-col-head-action{
+  background:transparent;border:1px solid #2e2e3e;color:#aaa;
+  border-radius:4px;padding:0;width:18px;height:18px;line-height:14px;
+  text-align:center;font-size:13px;cursor:pointer;
+  text-transform:none;letter-spacing:0;font-weight:400;flex-shrink:0;
+}
+.bb-col-head .bb-col-head-action:hover{border-color:#1976d2;color:#fff}
+.bb-list{flex:1;overflow-y:auto;min-height:0}
+.bb-row{
+  display:flex;align-items:center;justify-content:space-between;
+  gap:8px;padding:8px 12px;cursor:pointer;font-size:12px;color:#ccc;
+  border-bottom:1px solid #161620;line-height:1.3;
+}
+.bb-row:hover{background:#1a1a24;color:#fff}
+.bb-row.selected{background:#1f2a3a;color:#fff}
+.bb-row.bb-row-all{font-weight:600;border-bottom:1px solid #2a2a3a}
+.bb-row.bb-row-smart{color:#9ec0e8}
+.bb-row.bb-row-smart.selected{background:#1f2a3a}
+.bb-row .bb-row-smart-icon{
+  width:14px;height:14px;flex-shrink:0;opacity:.7;
+  display:inline-flex;align-items:center;justify-content:center;
+}
+.bb-row.bb-drop-target{outline:2px dashed #1976d2;outline-offset:-2px;background:#16223a}
+.bb-row .bb-row-icon-btn{
+  background:transparent;border:none;color:#666;cursor:pointer;
+  padding:2px 4px;border-radius:3px;font-size:12px;line-height:1;
+  opacity:0;transition:opacity .1s;
+}
+.bb-row:hover .bb-row-icon-btn{opacity:1}
+.bb-row .bb-row-icon-btn:hover{color:#fff;background:#2a3548}
+.bb-row .bb-row-icon-btn.bb-row-del:hover{background:#3a1a1a;color:#ef5350}
+.bb-row-name{flex:1;min-width:0;word-break:break-word}
+.bb-row-count{color:#666;font-size:10px;flex-shrink:0;font-family:'SF Mono',Menlo,monospace}
+.bb-row.selected .bb-row-count{color:#9ec0e8}
+.bb-videos-wrap{flex:1;overflow-y:auto;padding:16px;min-height:0}
 .video-grid{
   display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px;
 }
+.video-card[draggable="true"]{cursor:grab}
+.video-card[draggable="true"]:active{cursor:grabbing}
 .video-card{
   background:#1a1a1a;border-radius:10px;overflow:hidden;
   transition:transform .15s,box-shadow .15s;
@@ -421,14 +468,25 @@ select:focus{outline:none;border-color:#e53935}
   <span class="video-count" id="video-count"></span>
 </div>
 
-<div class="tag-filters" id="tag-filters"></div>
-
 <div class="content">
-  <div class="video-grid" id="video-grid"></div>
-  <div class="empty" id="empty-state" style="display:none">
-    <h2>No reels yet</h2>
-    <p>Generate one from the <a href="/builder">Builder</a> or
-       <a href="/wizard">AI Builder</a> and it'll show up here.</p>
+  <div class="bb-col">
+    <div class="bb-col-head">
+      Folders
+      <button type="button" class="bb-col-head-action" title="New folder"
+              onclick="bbCreateFolder()">+</button>
+    </div>
+    <div class="bb-list" id="bb-folders-list"></div>
+  </div>
+  <div class="bb-col">
+    <div class="bb-col-head">Videos</div>
+    <div class="bb-videos-wrap">
+      <div class="video-grid" id="video-grid"></div>
+      <div class="empty" id="empty-state" style="display:none">
+        <h2>No reels yet</h2>
+        <p>Generate one from the <a href="/wizard">AI</a> or
+           <a href="/builder">Manual</a> builder and it'll show up here.</p>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -444,76 +502,193 @@ select:focus{outline:none;border-color:#e53935}
 
 <script>
 var allVideos = [];
-var allTags = [];
-var activeTag = '';
 var selectedIds = new Set();
 var lastFilteredIds = [];   // ids currently shown (drives Select-all scope)
+
+// Folder column state (scope=library on the backend).
+var bbFolders = { smart: [], user: [], memberships: {} };
+var bbFolderFiles = null;     // Set<filename> for the currently-selected folder
+var selectedFolder = 'all';
+
+function _bbEsc(s) {
+  return (s || '').replace(/[&<>"']/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
 
 async function init() {
   var res = await fetch('/library/api/videos');
   allVideos = await res.json();
 
-  // Collect all unique tags
-  var tagSet = {};
-  for (var i = 0; i < allVideos.length; i++) {
-    var tags = allVideos[i].tags;
-    for (var j = 0; j < tags.length; j++) {
-      tagSet[tags[j]] = (tagSet[tags[j]] || 0) + 1;
-    }
-  }
-  allTags = Object.keys(tagSet).sort();
-  renderTagFilters(tagSet);
+  await bbReloadFolders();
+  bbRenderFolderCol();
+  _bbWireColumnHandlers();
   applyFilters();
 }
 
-function renderTagFilters(tagCounts) {
-  var container = document.getElementById('tag-filters');
-  container.innerHTML = '';
+// ── Folder column ──────────────────────────────────────────────────────────
 
-  if (allTags.length === 0) return;
-
-  // "All" chip
-  var allChip = document.createElement('span');
-  allChip.className = 'tag-chip active';
-  allChip.textContent = 'All';
-  allChip.dataset.tag = '';
-  allChip.onclick = function() { setActiveTag(''); };
-  container.appendChild(allChip);
-
-  for (var i = 0; i < allTags.length; i++) {
-    var tag = allTags[i];
-    var chip = document.createElement('span');
-    chip.className = 'tag-chip';
-    chip.textContent = tag + ' (' + (tagCounts[tag] || 0) + ')';
-    chip.dataset.tag = tag;
-    chip.onclick = (function(t) {
-      return function() { setActiveTag(t); };
-    })(tag);
-    container.appendChild(chip);
+async function bbReloadFolders() {
+  try {
+    var r = await fetch('/api/folders/list?scope=library');
+    bbFolders = await r.json();
+  } catch (e) {
+    bbFolders = { smart: [], user: [], memberships: {} };
   }
+  _bbRecomputeFolderFiles();
 }
 
-function setActiveTag(tag) {
-  activeTag = tag;
-  var chips = document.querySelectorAll('.tag-chip');
-  for (var i = 0; i < chips.length; i++) {
-    if (chips[i].dataset.tag === tag) {
-      chips[i].classList.add('active');
-    } else {
-      chips[i].classList.remove('active');
-    }
+function _bbRecomputeFolderFiles() {
+  var all = (bbFolders.smart || []).concat(bbFolders.user || []);
+  var match = all.find(function(f){ return f.id === selectedFolder; });
+  if (!match) {
+    selectedFolder = 'all';
+    match = all.find(function(f){ return f.id === 'all'; });
   }
+  bbFolderFiles = new Set(match ? match.files : []);
+}
+
+function bbRenderFolderCol() {
+  var html = '';
+  function rowHtml(f, isSmart) {
+    var safe = _bbEsc(f.id);
+    var name = _bbEsc(f.name);
+    var sel  = selectedFolder === f.id ? ' selected' : '';
+    var smartCls = isSmart ? ' bb-row-smart' : '';
+    var dropAttr = isSmart ? '' : ' data-droptarget="1"';
+    var actions = '';
+    if (!isSmart) {
+      actions = '<button class="bb-row-icon-btn" title="Rename" data-act="rename"'
+              + ' data-fid="' + safe + '">&#9998;</button>'
+              + '<button class="bb-row-icon-btn bb-row-del" title="Delete" data-act="delete"'
+              + ' data-fid="' + safe + '">&times;</button>';
+    }
+    var icon = isSmart
+      ? (f.id === 'all'   ? '<span class="bb-row-smart-icon">&#9776;</span>'
+        : f.id === 'today' ? '<span class="bb-row-smart-icon">&#9728;</span>'
+        : '<span class="bb-row-smart-icon">&#9733;</span>')
+      : '<span class="bb-row-smart-icon">&#128193;</span>';
+    return '<div class="bb-row' + sel + smartCls + '"'
+         + ' data-fid="' + safe + '"' + dropAttr + '>'
+         + icon
+         + '<span class="bb-row-name">' + name + '</span>'
+         + actions
+         + '<span class="bb-row-count">' + (f.files ? f.files.length : 0) + '</span>'
+         + '</div>';
+  }
+  (bbFolders.smart || []).forEach(function(f){ html += rowHtml(f, true); });
+  (bbFolders.user || []).forEach(function(f){ html += rowHtml(f, false); });
+  var list = document.getElementById('bb-folders-list');
+  list.innerHTML = html;
+  list.querySelectorAll('.bb-row-icon-btn').forEach(function(b){
+    b.addEventListener('click', function(e){
+      e.stopPropagation();
+      var fid = b.getAttribute('data-fid');
+      var act = b.getAttribute('data-act');
+      if (act === 'rename') bbRenameFolder(fid);
+      else if (act === 'delete') bbDeleteFolder(fid);
+    });
+  });
+}
+
+function _bbWireColumnHandlers() {
+  var foldersList = document.getElementById('bb-folders-list');
+  foldersList.addEventListener('click', function(e){
+    if (e.target.closest('.bb-row-icon-btn')) return;
+    var row = e.target.closest('.bb-row');
+    if (!row) return;
+    bbSelectFolder(row.getAttribute('data-fid'));
+  });
+  foldersList.addEventListener('dragover', _bbFolderDragOver);
+  foldersList.addEventListener('dragleave', _bbFolderDragLeave);
+  foldersList.addEventListener('drop', _bbFolderDrop);
+}
+
+function bbSelectFolder(fid) {
+  if (!fid) return;
+  selectedFolder = fid;
+  _bbRecomputeFolderFiles();
+  bbRenderFolderCol();
   applyFilters();
 }
+
+async function bbCreateFolder() {
+  var name = (window.prompt('New folder name:') || '').trim();
+  if (!name) return;
+  var r = await fetch('/api/folders', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name: name, scope: 'library'}),
+  });
+  if (!r.ok) { alert('Could not create folder.'); return; }
+  await bbReloadFolders();
+  bbRenderFolderCol();
+}
+
+async function bbRenameFolder(fid) {
+  var current = ((bbFolders.user || []).find(function(f){return f.id===fid}) || {}).name || '';
+  var name = (window.prompt('Rename folder:', current) || '').trim();
+  if (!name || name === current) return;
+  var r = await fetch('/api/folders/' + encodeURIComponent(fid) + '/rename', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name: name, scope: 'library'}),
+  });
+  if (!r.ok) { alert('Could not rename.'); return; }
+  await bbReloadFolders();
+  bbRenderFolderCol();
+}
+
+async function bbDeleteFolder(fid) {
+  if (!confirm('Delete this folder? Videos inside will return to All Videos.')) return;
+  var r = await fetch('/api/folders/' + encodeURIComponent(fid) + '?scope=library',
+                     {method:'DELETE'});
+  if (!r.ok) { alert('Could not delete.'); return; }
+  if (selectedFolder === fid) selectedFolder = 'all';
+  await bbReloadFolders();
+  bbRenderFolderCol();
+  applyFilters();
+}
+
+function _bbFolderDragOver(e) {
+  var row = e.target.closest('.bb-row[data-droptarget="1"]');
+  if (!row) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  row.classList.add('bb-drop-target');
+}
+
+function _bbFolderDragLeave(e) {
+  var row = e.target.closest('.bb-row');
+  if (row) row.classList.remove('bb-drop-target');
+}
+
+async function _bbFolderDrop(e) {
+  var row = e.target.closest('.bb-row[data-droptarget="1"]');
+  if (!row) return;
+  e.preventDefault();
+  row.classList.remove('bb-drop-target');
+  var fn = e.dataTransfer.getData('application/x-pg-video')
+        || e.dataTransfer.getData('text/plain');
+  if (!fn) return;
+  var fid = row.getAttribute('data-fid');
+  var r = await fetch('/api/folders/membership', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({filename: fn, folder_id: fid, scope: 'library'}),
+  });
+  if (!r.ok) { alert('Move failed.'); return; }
+  await bbReloadFolders();
+  bbRenderFolderCol();
+  applyFilters();
+}
+
 
 function applyFilters() {
   var sort = document.getElementById('sort-select').value;
   var filtered = allVideos.filter(function(v) { return v.exists; });
 
-  // Tag filter
-  if (activeTag) {
+  // Folder filter
+  if (bbFolderFiles) {
     filtered = filtered.filter(function(v) {
-      return v.tags.indexOf(activeTag) >= 0;
+      return bbFolderFiles.has(v.filename);
     });
   }
 
@@ -655,7 +830,9 @@ function renderGrid(videos) {
         }) : '';
     var isSel = selectedIds.has(v.id);
     var safeName = escHtml(v.filename);
-    html += '<div class="video-card' + (isSel ? ' selected' : '') + '" data-id="' + v.id + '">'
+    html += '<div class="video-card' + (isSel ? ' selected' : '') + '"'
+      + ' draggable="true"'
+      + ' data-id="' + v.id + '" data-fn="' + safeName + '">'
       + '<div class="thumb-wrap">'
       + '<video data-id="' + v.id + '" preload="none" playsinline'
       +   ' poster="/library/api/thumbnail/' + v.id + '"'
@@ -691,6 +868,21 @@ function renderGrid(videos) {
       + '</div>';
   }
   grid.innerHTML = html;
+  // Bind dragstart once, idempotent: removeEventListener with the same
+  // ref then re-add. Cards re-render often; the listener stays on the
+  // (stable) grid container so we only need to do this once-per-render.
+  if (!grid._pgDragBound) {
+    grid.addEventListener('dragstart', function(e){
+      var card = e.target.closest('.video-card[draggable="true"]');
+      if (!card) return;
+      var fn = card.getAttribute('data-fn');
+      if (!fn) return;
+      e.dataTransfer.setData('text/plain', fn);
+      e.dataTransfer.setData('application/x-pg-video', fn);
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    grid._pgDragBound = true;
+  }
 }
 
 function escHtml(s) {

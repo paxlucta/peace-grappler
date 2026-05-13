@@ -68,6 +68,7 @@ def api_scenes():
             "tags": s["tags"],
             "wide": s["wide"],
             "excluded": s.get("excluded", False),
+            "favorite": s.get("favorite", False),
             "status": status,
             "analyzer_provider": s.get("analyzer_provider") or "",
             "analyzer_model":    s.get("analyzer_model")    or "",
@@ -99,6 +100,28 @@ def api_grade():
         save_grade(scene_id, 1)
         set_scene_excluded(scene_id, True)
     return jsonify({"status": "ok", "action": action})
+
+
+@rating_bp.route("/rate/api/favorite", methods=["POST"])
+def api_favorite():
+    """Toggle the heart-icon favorite on a scene.
+
+    Body: ``{scene_id, favorite?}``. If ``favorite`` is omitted, flips
+    the stored value. Returns the new state."""
+    from db import set_scene_favorite, get_scene_by_id
+    data = request.json or {}
+    scene_id = data.get("scene_id")
+    if not scene_id:
+        return jsonify({"error": "scene_id required"}), 400
+    if "favorite" in data:
+        new_state = bool(data.get("favorite"))
+    else:
+        cur = get_scene_by_id(scene_id)
+        if not cur:
+            return jsonify({"error": "scene not found"}), 404
+        new_state = not bool(cur.get("favorite") or False)
+    set_scene_favorite(scene_id, new_state)
+    return jsonify({"ok": True, "scene_id": scene_id, "favorite": new_state})
 
 
 @rating_bp.route("/rate/api/search")
@@ -214,7 +237,7 @@ nav a.active{color:#e53935;border-color:#e53935}
 }
 .bb-search-row .bb-search-clear:hover{color:#fff;border-color:#666}
 .bb-cols{
-  flex:1;display:grid;grid-template-columns:240px 220px 1fr;
+  flex:1;display:grid;grid-template-columns:200px 240px 220px 1fr;
   min-height:0;overflow:hidden;background:#0a0a0a;
 }
 .bb-col{
@@ -223,9 +246,10 @@ nav a.active{color:#e53935;border-color:#e53935}
 }
 .bb-col:last-child{border-right:none;background:#0a0a0a}
 .bb-col-head{
-  padding:8px 14px;border-bottom:1px solid #1f1f24;background:#141418;
+  padding:0 14px;border-bottom:1px solid #1f1f24;background:#141418;
   font-size:10px;color:#888;text-transform:uppercase;
   letter-spacing:.6px;font-weight:700;flex-shrink:0;
+  height:34px;display:flex;align-items:center;justify-content:space-between;
 }
 .bb-list{flex:1;overflow-y:auto;min-height:0}
 .bb-row{
@@ -245,6 +269,51 @@ nav a.active{color:#e53935;border-color:#e53935}
 .bb-row.selected .bb-row-count{color:#9ec0e8}
 .bb-scenes-wrap{flex:1;overflow-y:auto;padding:12px;min-height:0}
 .bb-scenes-head-info{font-size:11px;color:#666;font-weight:400;margin-left:8px;text-transform:none;letter-spacing:0}
+
+/* Folders column extras (mirrors /builder) */
+.bb-col-head .bb-col-head-action{
+  background:transparent;border:1px solid #2e2e3e;color:#aaa;
+  border-radius:4px;padding:0;width:18px;height:18px;line-height:14px;
+  text-align:center;font-size:13px;cursor:pointer;
+  text-transform:none;letter-spacing:0;font-weight:400;flex-shrink:0;
+}
+.bb-col-head .bb-col-head-action:hover{border-color:#1976d2;color:#fff}
+.bb-row.bb-row-smart{color:#9ec0e8}
+.bb-row.bb-row-smart.selected{background:#1f2a3a}
+.bb-row .bb-row-smart-icon{
+  width:14px;height:14px;flex-shrink:0;opacity:.7;
+  display:inline-flex;align-items:center;justify-content:center;
+}
+.bb-row.bb-drop-target{outline:2px dashed #1976d2;outline-offset:-2px;background:#16223a}
+.bb-row .bb-row-icon-btn{
+  background:transparent;border:none;color:#666;cursor:pointer;
+  padding:2px 4px;border-radius:3px;font-size:12px;line-height:1;
+  opacity:0;transition:opacity .1s;
+}
+.bb-row:hover .bb-row-icon-btn{opacity:1}
+.bb-row .bb-row-icon-btn:hover{color:#fff;background:#2a3548}
+.bb-row .bb-row-icon-btn.bb-row-del:hover{background:#3a1a1a;color:#ef5350}
+.bb-row[draggable="true"]{cursor:grab}
+.bb-row[draggable="true"]:active{cursor:grabbing}
+
+/* -- Heart icon (file rows + scene cards) -- */
+.pg-heart{
+  background:transparent;border:none;padding:0;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;
+  width:22px;height:22px;flex-shrink:0;color:#555;
+}
+.pg-heart svg{width:14px;height:14px;fill:currentColor}
+.pg-heart:hover{color:#ef9a9a}
+.pg-heart.on{color:#ef5350}
+.pg-heart.on:hover{color:#e53935}
+.bb-row .pg-heart{margin:0 2px}
+.scene-card .pg-heart{
+  position:absolute;top:6px;right:6px;z-index:3;
+  background:rgba(0,0,0,.55);border-radius:50%;
+  width:26px;height:26px;
+}
+.scene-card .pg-heart svg{width:14px;height:14px}
+.scene-card .pg-heart.on{background:rgba(229,57,53,.85);color:#fff}
 
 /* -- Tag filters -- */
 .tag-bar{
@@ -515,6 +584,14 @@ nav a.active{color:#e53935;border-color:#e53935}
   </div>
   <div class="bb-cols">
     <div class="bb-col">
+      <div class="bb-col-head">
+        Folders
+        <button type="button" class="bb-col-head-action" title="New folder"
+                onclick="bbCreateFolder()">+</button>
+      </div>
+      <div class="bb-list" id="bb-folders-list"></div>
+    </div>
+    <div class="bb-col">
       <div class="bb-col-head">Files</div>
       <div class="bb-list" id="bb-files-list"></div>
     </div>
@@ -573,11 +650,21 @@ var searchHitIds = null;     // null = no search active; Set of scene_ids when a
 var searchTimer = null;
 
 // Mac-Finder-style column state.
-//   selectedFile: null = "All Files", else exact filename
-//   selectedTag : null = "All Tags",  else a real tag or a pseudo-tag
-//                 ('__unrated__' | '__hidden__')
+//   selectedFolder : smart-folder id or user-folder id; default "all".
+//   selectedFile   : null = "All Files" within the folder, else filename.
+//   selectedTag    : null = "All Tags",  else real tag or pseudo-tag
+//                    ('__unrated__' | '__hidden__').
+var selectedFolder = 'all';
 var selectedFile = null;
 var selectedTag  = null;
+var bbFolders = { smart: [], user: [], memberships: {} };
+var bbFolderFiles = null;   // Set<filename> for the currently-selected folder
+var bbFileFavorites = new Set();   // Set<filename> from the favorites smart folder
+
+// Shared heart-icon SVG (filled/outline are switched via .pg-heart.on
+// in CSS — same icon, just recolored / re-filled).
+var PG_HEART_SVG =
+  '<svg viewBox="0 0 24 24"><path d="M12 21s-7-4.35-9.5-9.13C.9 8.5 2.5 5 6 5c2 0 3.4 1.1 6 4 2.6-2.9 4-4 6-4 3.5 0 5.1 3.5 3.5 6.87C19 16.65 12 21 12 21z"/></svg>';
 
 // Strip extension + turn underscores/dashes into spaces for display.
 function _ffPretty(name) {
@@ -593,19 +680,46 @@ function _bbEsc(s) {
 
 async function init() {
   allScenes = await fetch('/rate/api/scenes').then(function(r){return r.json()});
-  bbInit();
+  await bbInit();
   renderGrid();
 }
 
-function bbInit() {
+async function bbInit() {
+  await bbReloadFolders();
+  bbRenderFolderCol();
   bbRenderFilesCol();
   bbRenderTagsCol();
-  // Delegated listeners — one per column. Avoids escaping filenames /
-  // tags into inline onclick strings.
-  document.getElementById('bb-files-list').addEventListener('click', function(e){
+  var foldersList = document.getElementById('bb-folders-list');
+  foldersList.addEventListener('click', function(e){
+    if (e.target.closest('.bb-row-icon-btn')) return;
+    var row = e.target.closest('.bb-row');
+    if (!row) return;
+    bbSelectFolder(row.getAttribute('data-fid'));
+  });
+  foldersList.addEventListener('dragover', _bbFolderDragOver);
+  foldersList.addEventListener('dragleave', _bbFolderDragLeave);
+  foldersList.addEventListener('drop', _bbFolderDrop);
+
+  var filesList = document.getElementById('bb-files-list');
+  filesList.addEventListener('click', function(e){
+    var heart = e.target.closest('.pg-heart[data-act="fav-file"]');
+    if (heart) {
+      e.stopPropagation();
+      bbToggleFileFavorite(heart.getAttribute('data-fn'));
+      return;
+    }
     var row = e.target.closest('.bb-row');
     if (!row) return;
     bbSelectFile(row.getAttribute('data-fn'));
+  });
+  filesList.addEventListener('dragstart', function(e){
+    var row = e.target.closest('.bb-row[draggable="true"]');
+    if (!row) return;
+    var fn = row.getAttribute('data-fn');
+    if (!fn) return;
+    e.dataTransfer.setData('text/plain', fn);
+    e.dataTransfer.setData('application/x-pg-file', fn);
+    e.dataTransfer.effectAllowed = 'move';
   });
   document.getElementById('bb-tags-list').addEventListener('click', function(e){
     var row = e.target.closest('.bb-row');
@@ -614,11 +728,159 @@ function bbInit() {
   });
 }
 
+async function bbReloadFolders() {
+  try {
+    var r = await fetch('/api/folders/list');
+    bbFolders = await r.json();
+  } catch (e) {
+    bbFolders = { smart: [], user: [], memberships: {} };
+  }
+  bbFileFavorites = new Set(bbFolders.favorites || []);
+  _bbRecomputeFolderFiles();
+}
+
+function _bbRecomputeFolderFiles() {
+  var all = (bbFolders.smart || []).concat(bbFolders.user || []);
+  var match = all.find(function(f){ return f.id === selectedFolder; });
+  if (!match) {
+    selectedFolder = 'all';
+    match = all.find(function(f){ return f.id === 'all'; });
+  }
+  bbFolderFiles = new Set(match ? match.files : []);
+}
+
+function bbRenderFolderCol() {
+  var html = '';
+  function rowHtml(f, isSmart) {
+    var safe = _bbEsc(f.id);
+    var name = _bbEsc(f.name);
+    var sel  = selectedFolder === f.id ? ' selected' : '';
+    var smartCls = isSmart ? ' bb-row-smart' : '';
+    var dropAttr = isSmart ? '' : ' data-droptarget="1"';
+    var actions = '';
+    if (!isSmart) {
+      actions = '<button class="bb-row-icon-btn" title="Rename" data-act="rename"'
+              + ' data-fid="' + safe + '">&#9998;</button>'
+              + '<button class="bb-row-icon-btn bb-row-del" title="Delete" data-act="delete"'
+              + ' data-fid="' + safe + '">&times;</button>';
+    }
+    var icon = isSmart
+      ? (f.id === 'all'   ? '<span class="bb-row-smart-icon">&#9776;</span>'
+        : f.id === 'today' ? '<span class="bb-row-smart-icon">&#9728;</span>'
+        : '<span class="bb-row-smart-icon">&#9733;</span>')
+      : '<span class="bb-row-smart-icon">&#128193;</span>';
+    return '<div class="bb-row' + sel + smartCls + '"'
+         + ' data-fid="' + safe + '"' + dropAttr + '>'
+         + icon
+         + '<span class="bb-row-name">' + name + '</span>'
+         + actions
+         + '<span class="bb-row-count">' + (f.files ? f.files.length : 0) + '</span>'
+         + '</div>';
+  }
+  (bbFolders.smart || []).forEach(function(f){ html += rowHtml(f, true); });
+  (bbFolders.user || []).forEach(function(f){ html += rowHtml(f, false); });
+  var list = document.getElementById('bb-folders-list');
+  list.innerHTML = html;
+  list.querySelectorAll('.bb-row-icon-btn').forEach(function(b){
+    b.addEventListener('click', function(e){
+      e.stopPropagation();
+      var fid = b.getAttribute('data-fid');
+      var act = b.getAttribute('data-act');
+      if (act === 'rename') bbRenameFolder(fid);
+      else if (act === 'delete') bbDeleteFolder(fid);
+    });
+  });
+}
+
+function bbSelectFolder(fid) {
+  if (!fid) return;
+  selectedFolder = fid;
+  _bbRecomputeFolderFiles();
+  if (selectedFile && bbFolderFiles && !bbFolderFiles.has(selectedFile)) {
+    selectedFile = null;
+  }
+  bbRenderFolderCol();
+  bbRenderFilesCol();
+  bbRenderTagsCol();
+  renderGrid();
+}
+
+async function bbCreateFolder() {
+  var name = (window.prompt('New folder name:') || '').trim();
+  if (!name) return;
+  var r = await fetch('/api/folders', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({name: name}),
+  });
+  if (!r.ok) { alert('Could not create folder.'); return; }
+  await bbReloadFolders();
+  bbRenderFolderCol();
+}
+
+async function bbRenameFolder(fid) {
+  var current = ((bbFolders.user || []).find(function(f){return f.id===fid}) || {}).name || '';
+  var name = (window.prompt('Rename folder:', current) || '').trim();
+  if (!name || name === current) return;
+  var r = await fetch('/api/folders/' + encodeURIComponent(fid) + '/rename', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({name: name}),
+  });
+  if (!r.ok) { alert('Could not rename.'); return; }
+  await bbReloadFolders();
+  bbRenderFolderCol();
+}
+
+async function bbDeleteFolder(fid) {
+  if (!confirm('Delete this folder? Files inside will return to All Files.')) return;
+  var r = await fetch('/api/folders/' + encodeURIComponent(fid), {method:'DELETE'});
+  if (!r.ok) { alert('Could not delete.'); return; }
+  if (selectedFolder === fid) selectedFolder = 'all';
+  await bbReloadFolders();
+  bbRenderFolderCol();
+  bbRenderFilesCol();
+  bbRenderTagsCol();
+  renderGrid();
+}
+
+function _bbFolderDragOver(e) {
+  var row = e.target.closest('.bb-row[data-droptarget="1"]');
+  if (!row) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  row.classList.add('bb-drop-target');
+}
+
+function _bbFolderDragLeave(e) {
+  var row = e.target.closest('.bb-row');
+  if (row) row.classList.remove('bb-drop-target');
+}
+
+async function _bbFolderDrop(e) {
+  var row = e.target.closest('.bb-row[data-droptarget="1"]');
+  if (!row) return;
+  e.preventDefault();
+  row.classList.remove('bb-drop-target');
+  var fn = e.dataTransfer.getData('application/x-pg-file')
+        || e.dataTransfer.getData('text/plain');
+  if (!fn) return;
+  var fid = row.getAttribute('data-fid');
+  var r = await fetch('/api/folders/membership', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({filename: fn, folder_id: fid}),
+  });
+  if (!r.ok) { alert('Move failed.'); return; }
+  await bbReloadFolders();
+  bbRenderFolderCol();
+  bbRenderFilesCol();
+  renderGrid();
+}
+
 function bbRenderFilesCol() {
   // Match the visibility rules of the default grid: hide excluded scenes
   // from the per-file counts unless the user is explicitly looking at the
   // Hidden pseudo-tag. Counts shouldn't include them otherwise.
   var includeExcluded = (selectedTag === '__hidden__');
+  var folderSet = bbFolderFiles;   // null = no folder restriction
   var counts = {};
   var totalAll = 0;
   for (var i = 0; i < allScenes.length; i++) {
@@ -626,6 +888,7 @@ function bbRenderFilesCol() {
     if (!includeExcluded && s.excluded) continue;
     var fn = s.filename || '';
     if (!fn) continue;
+    if (folderSet && !folderSet.has(fn)) continue;
     counts[fn] = (counts[fn] || 0) + 1;
     totalAll++;
   }
@@ -640,12 +903,52 @@ function bbRenderFilesCol() {
     var f = files[i];
     var safe = _bbEsc(f);
     var pretty = _bbEsc(_ffPretty(f));
+    // draggable=true so the row can be dropped on a user folder.
+    var favCls = bbFileFavorites.has(f) ? ' on' : '';
     html += '<div class="bb-row' + (selectedFile===f?' selected':'') + '"'
+         + ' draggable="true"'
          + ' data-fn="' + safe + '" title="' + safe + '">'
+         + '<button class="pg-heart' + favCls + '" data-fn="' + safe + '"'
+         + ' data-act="fav-file" title="Toggle favorite">' + PG_HEART_SVG + '</button>'
          + '<span class="bb-row-name">' + pretty + '</span>'
          + '<span class="bb-row-count">' + counts[f] + '</span></div>';
   }
   document.getElementById('bb-files-list').innerHTML = html;
+}
+
+async function bbToggleFileFavorite(filename) {
+  var on = !bbFileFavorites.has(filename);
+  // Optimistic: flip locally, then sync with the server.
+  if (on) bbFileFavorites.add(filename);
+  else bbFileFavorites.delete(filename);
+  bbRenderFilesCol();
+  try {
+    await fetch('/api/folders/favorite', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({filename: filename, favorite: on, scope: 'source'}),
+    });
+  } catch (e) {}
+  // Refresh folder list so the Favorites smart folder's count updates.
+  await bbReloadFolders();
+  bbRenderFolderCol();
+  bbRenderFilesCol();
+  renderGrid();   // Favorites folder selection may have changed which scenes show
+}
+
+async function bbToggleSceneFavorite(sceneId) {
+  var s = allScenes.find(function(x){ return x.id === sceneId; });
+  if (!s) return;
+  var on = !s.favorite;
+  s.favorite = on;   // optimistic
+  // Update any rendered card without a full re-render.
+  var btn = document.querySelector('.scene-card[id="sc-' + sceneId + '"] .pg-heart');
+  if (btn) btn.classList.toggle('on', on);
+  try {
+    await fetch('/rate/api/favorite', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({scene_id: sceneId, favorite: on}),
+    });
+  } catch (e) {}
 }
 
 function bbRenderTagsCol() {
@@ -653,9 +956,11 @@ function bbRenderTagsCol() {
   // scenes when no file is picked). Counts always exclude hidden scenes
   // — except for the dedicated Hidden row, which exists precisely so
   // the user can dig into them.
+  var folderSet = bbFolderFiles;
   var poolForTags = allScenes.filter(function(s){
-    return !s.excluded
-        && (selectedFile === null || s.filename === selectedFile);
+    if (s.excluded) return false;
+    if (folderSet && !folderSet.has(s.filename)) return false;
+    return (selectedFile === null || s.filename === selectedFile);
   });
   var tagCounts = {};
   for (var i = 0; i < poolForTags.length; i++) {
@@ -664,10 +969,11 @@ function bbRenderTagsCol() {
       tagCounts[ts[j]] = (tagCounts[ts[j]] || 0) + 1;
     }
   }
-  // Unrated / Hidden counts respect the file selection too.
+  // Unrated / Hidden counts respect the folder + file selection too.
   var unrated = 0, hidden = 0;
   for (var i = 0; i < allScenes.length; i++) {
     var s = allScenes[i];
+    if (folderSet && !folderSet.has(s.filename)) continue;
     if (selectedFile && s.filename !== selectedFile) continue;
     if (s.excluded) { hidden++; continue; }
     if (s.status === 'unrated') unrated++;
@@ -743,6 +1049,9 @@ function getFiltered() {
   } else {
     base = allScenes.filter(function(s) { return !s.excluded; });
   }
+  if (bbFolderFiles) {
+    base = base.filter(function(s) { return bbFolderFiles.has(s.filename); });
+  }
   if (selectedFile) {
     base = base.filter(function(s) { return s.filename === selectedFile; });
   }
@@ -805,10 +1114,12 @@ function renderGrid() {
                   + (sceneModel ? ' · ' + sceneModel : ''),
           }) + '</span>'
       : '';
+    var heartCls = s.favorite ? ' on' : '';
     html += '<div class="' + cls + '" id="sc-' + s.id + '">'
       + '<img class="thumb" src="/api/thumbnail/' + s.id + '" loading="lazy" onclick="playScene(' + s.id + ')"/>'
       + '<div class="play-overlay" onclick="playScene(' + s.id + ')"><div class="play-circle">'
       + '<svg viewBox="0 0 24 24"><polygon points="8,5 19,12 8,19"/></svg></div></div>'
+      + '<button class="pg-heart' + heartCls + '" onclick="event.stopPropagation();bbToggleSceneFavorite(' + s.id + ')" title="Toggle favorite">' + PG_HEART_SVG + '</button>'
       + '<span class="dur-badge">' + s.duration + 's</span>'
       + aiBadge
       + badge

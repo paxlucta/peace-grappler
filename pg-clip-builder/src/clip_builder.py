@@ -182,6 +182,7 @@ def api_clips():
         "duration": round(s["end_time"] - s["start_time"], 1),
         "tags": s["tags"],
         "ignored": s["ignored"],
+        "favorite": s.get("favorite", False),
         "thumb_count": _get_thumb_count(s),
         "wide": s["wide"],
     } for s in clips])
@@ -1349,7 +1350,7 @@ main{flex:1;overflow-y:auto;padding:12px;min-height:0}
 .bb-search-row input:focus{border-color:#1976d2}
 .bb-search-status{font-size:11px;color:#1976d2;font-weight:600;white-space:nowrap}
 main.bb-cols{
-  flex:1;display:grid;grid-template-columns:240px 220px 1fr;
+  flex:1;display:grid;grid-template-columns:200px 240px 220px 1fr;
   min-height:0;padding:0;overflow:hidden;
   background:#0a0a0a;border-bottom:1px solid #1a1a1a;
 }
@@ -1359,9 +1360,10 @@ main.bb-cols{
 }
 .bb-col:last-child{border-right:none;background:#0a0a0a}
 .bb-col-head{
-  padding:8px 14px;border-bottom:1px solid #1f1f24;background:#141418;
+  padding:0 14px;border-bottom:1px solid #1f1f24;background:#141418;
   font-size:10px;color:#888;text-transform:uppercase;
   letter-spacing:.6px;font-weight:700;flex-shrink:0;
+  height:34px;display:flex;align-items:center;justify-content:space-between;
 }
 .bb-list{flex:1;overflow-y:auto;min-height:0}
 .bb-row{
@@ -1384,6 +1386,51 @@ main.bb-cols{
 .bb-empty{
   color:#666;font-size:13px;text-align:center;padding:40px 16px;
 }
+
+/* Folders column extras */
+.bb-col-head .bb-col-head-action{
+  background:transparent;border:1px solid #2e2e3e;color:#aaa;
+  border-radius:4px;padding:0;width:18px;height:18px;line-height:14px;
+  text-align:center;font-size:13px;cursor:pointer;
+  text-transform:none;letter-spacing:0;font-weight:400;flex-shrink:0;
+}
+.bb-col-head .bb-col-head-action:hover{border-color:#1976d2;color:#fff}
+.bb-row.bb-row-smart{color:#9ec0e8}
+.bb-row.bb-row-smart.selected{background:#1f2a3a}
+.bb-row .bb-row-smart-icon{
+  width:14px;height:14px;flex-shrink:0;opacity:.7;
+  display:inline-flex;align-items:center;justify-content:center;
+}
+.bb-row.bb-drop-target{outline:2px dashed #1976d2;outline-offset:-2px;background:#16223a}
+.bb-row .bb-row-icon-btn{
+  background:transparent;border:none;color:#666;cursor:pointer;
+  padding:2px 4px;border-radius:3px;font-size:12px;line-height:1;
+  opacity:0;transition:opacity .1s;
+}
+.bb-row:hover .bb-row-icon-btn{opacity:1}
+.bb-row .bb-row-icon-btn:hover{color:#fff;background:#2a3548}
+.bb-row .bb-row-icon-btn.bb-row-del:hover{background:#3a1a1a;color:#ef5350}
+.bb-row[draggable="true"]{cursor:grab}
+.bb-row[draggable="true"]:active{cursor:grabbing}
+
+/* -- Heart icon (file rows + clip cards) -- */
+.pg-heart{
+  background:transparent;border:none;padding:0;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;
+  width:22px;height:22px;flex-shrink:0;color:#555;
+}
+.pg-heart svg{width:14px;height:14px;fill:currentColor}
+.pg-heart:hover{color:#ef9a9a}
+.pg-heart.on{color:#ef5350}
+.pg-heart.on:hover{color:#e53935}
+.bb-row .pg-heart{margin:0 2px}
+.clip-card .pg-heart{
+  position:absolute;top:6px;right:6px;z-index:3;
+  background:rgba(0,0,0,.55);border-radius:50%;
+  width:26px;height:26px;
+}
+.clip-card .pg-heart svg{width:14px;height:14px}
+.clip-card .pg-heart.on{background:rgba(229,57,53,.85);color:#fff}
 .clip-card{
   background:#1a1a1a;border-radius:8px;overflow:hidden;
   cursor:grab;transition:transform .15s,opacity .2s;position:relative;
@@ -2150,6 +2197,14 @@ footer{
 </div>
 
 <main class="bb-cols">
+  <div class="bb-col bb-folders">
+    <div class="bb-col-head">
+      Folders
+      <button type="button" class="bb-col-head-action" title="New folder"
+              onclick="bbCreateFolder()">+</button>
+    </div>
+    <div class="bb-list" id="bb-folders-list"></div>
+  </div>
   <div class="bb-col bb-files">
     <div class="bb-col-head">Files</div>
     <div class="bb-list" id="bb-files-list"></div>
@@ -3958,9 +4013,11 @@ function cardHTML(c) {
     }
     dots += '</div>';
   }
+  var heartCls = c.favorite ? ' on' : '';
   return '<div class="' + cls + '" data-id="' + c.id + '" data-tc="' + (c.thumb_count||1) + '" oncontextmenu="showCtx(event,' + c.id + ')">'
     + '<img class="thumb" src="/api/thumbnail/' + c.id + '" loading="lazy"/>'
     + '<div class="play-overlay" onclick="event.stopPropagation();playScene(this,' + c.id + ')"><div class="play-circle"><svg viewBox="0 0 24 24"><polygon points="8,5 19,12 8,19"/></svg></div></div>'
+    + '<button class="pg-heart' + heartCls + '" onclick="event.stopPropagation();bbToggleClipFavorite(' + c.id + ')" title="Toggle favorite">' + PG_HEART_SVG + '</button>'
     + '<span class="dur">' + c.duration + 's</span>'
     + '<button class="hide-btn" title="' + (c.ignored ? 'Unhide' : 'Hide') + '" onclick="event.stopPropagation();toggleIgnore(' + c.id + ',' + !c.ignored + ')">' + (c.ignored ? '&#9711;' : '&#10005;') + '</button>'
     + '<span class="ignore-badge">HIDDEN</span>'
@@ -3973,8 +4030,11 @@ function cardHTML(c) {
 }
 
 function renderGrid() {
-  // Column-based filter chain: File → Tag → transcript search.
+  // Column-based filter chain: Folder → File → Tag → transcript search.
   var clips = allClips.filter(function(c){return !c.ignored});
+  if (bbFolderFiles) {
+    clips = clips.filter(function(c){return bbFolderFiles.has(c.filename)});
+  }
   if (selectedFile) {
     clips = clips.filter(function(c){return c.filename === selectedFile});
   }
@@ -4134,10 +4194,24 @@ function filterByTag() { renderGrid(); }
 //   search (column 3 has no UI of its own; it just reacts to columns 1/2
 //   and the search bar at the top).
 
-var selectedFile = null;   // null = "All Files"
-var selectedTag  = null;   // null = "All Tags"
-var searchHitIds = null;   // null = no search active; Set<sceneId> when active
+var selectedFolder = 'all'; // smart-folder id or user-folder id; default = "All Files"
+var selectedFile = null;    // null = "All Files" within folder
+var selectedTag  = null;    // null = "All Tags"
+var searchHitIds = null;    // null = no search active; Set<sceneId> when active
 var _bbSearchTimer = null;
+// Folder state (refreshed from /api/folders/list).
+var bbFolders = { smart: [], user: [], memberships: {} };
+// Set of filenames in the currently-selected folder. null = no folder
+// restriction (shouldn't normally happen since default is "all"); empty
+// Set = folder exists but contains nothing.
+var bbFolderFiles = null;
+// Filenames flagged as favorites (from /api/folders/list ?scope=source).
+var bbFileFavorites = new Set();
+
+// Shared heart-icon SVG (filled/outline are switched via .pg-heart.on
+// in CSS — same icon, just recolored / re-filled).
+var PG_HEART_SVG =
+  '<svg viewBox="0 0 24 24"><path d="M12 21s-7-4.35-9.5-9.13C.9 8.5 2.5 5 6 5c2 0 3.4 1.1 6 4 2.6-2.9 4-4 6-4 3.5 0 5.1 3.5 3.5 6.87C19 16.65 12 21 12 21z"/></svg>';
 
 // Strip the extension and turn underscores/dashes into spaces so the
 // files column reads like prose instead of a slug.
@@ -4152,17 +4226,51 @@ function _bbEsc(s) {
   });
 }
 
-function bbInit() {
+async function bbInit() {
+  await bbReloadFolders();
+  bbRenderFolderCol();
   bbRenderFilesCol();
   bbRenderTagsCol();
   // Single delegated listener per column handles row clicks; cheaper
   // than re-binding every render and dodges the filename-quoting
   // problem an inline onclick would have.
+  var foldersList = document.getElementById('bb-folders-list');
+  foldersList.addEventListener('click', function(e) {
+    // Action buttons (rename / delete) live inside the row; let their
+    // own handlers run instead of treating the click as row-selection.
+    if (e.target.closest('.bb-row-icon-btn')) return;
+    var row = e.target.closest('.bb-row');
+    if (!row) return;
+    bbSelectFolder(row.getAttribute('data-fid'));
+  });
+  // Drag-and-drop wiring for the folders column. Drop on a USER folder
+  // moves the dragged file there; smart folders refuse drops.
+  foldersList.addEventListener('dragover', _bbFolderDragOver);
+  foldersList.addEventListener('dragleave', _bbFolderDragLeave);
+  foldersList.addEventListener('drop', _bbFolderDrop);
+
   var filesList = document.getElementById('bb-files-list');
   filesList.addEventListener('click', function(e) {
+    var heart = e.target.closest('.pg-heart[data-act="fav-file"]');
+    if (heart) {
+      e.stopPropagation();
+      bbToggleFileFavorite(heart.getAttribute('data-fn'));
+      return;
+    }
     var row = e.target.closest('.bb-row');
     if (!row) return;
     bbSelectFile(row.getAttribute('data-fn'));
+  });
+  // Each file row carries its filename via dragstart; the folders column
+  // listener reads it from dataTransfer on drop.
+  filesList.addEventListener('dragstart', function(e) {
+    var row = e.target.closest('.bb-row[draggable="true"]');
+    if (!row) return;
+    var fn = row.getAttribute('data-fn');
+    if (!fn) return;
+    e.dataTransfer.setData('text/plain', fn);
+    e.dataTransfer.setData('application/x-pg-file', fn);
+    e.dataTransfer.effectAllowed = 'move';
   });
   var tagsList = document.getElementById('bb-tags-list');
   tagsList.addEventListener('click', function(e) {
@@ -4172,7 +4280,166 @@ function bbInit() {
   });
 }
 
+async function bbReloadFolders() {
+  try {
+    var r = await fetch('/api/folders/list');
+    bbFolders = await r.json();
+  } catch (e) {
+    bbFolders = { smart: [], user: [], memberships: {} };
+  }
+  bbFileFavorites = new Set(bbFolders.favorites || []);
+  _bbRecomputeFolderFiles();
+}
+
+function _bbRecomputeFolderFiles() {
+  var all = (bbFolders.smart || []).concat(bbFolders.user || []);
+  var match = all.find(function(f){ return f.id === selectedFolder; });
+  if (!match) {
+    // Fall back to All Files if the selection vanished (e.g. folder deleted).
+    selectedFolder = 'all';
+    match = all.find(function(f){ return f.id === 'all'; });
+  }
+  bbFolderFiles = new Set(match ? match.files : []);
+}
+
+function bbRenderFolderCol() {
+  var html = '';
+  function rowHtml(f, isSmart) {
+    var safe = _bbEsc(f.id);
+    var name = _bbEsc(f.name);
+    var sel  = selectedFolder === f.id ? ' selected' : '';
+    var smartCls = isSmart ? ' bb-row-smart' : '';
+    var dropAttr = isSmart ? '' : ' data-droptarget="1"';
+    var actions = '';
+    if (!isSmart) {
+      actions = '<button class="bb-row-icon-btn" title="Rename" data-act="rename"'
+              + ' data-fid="' + safe + '">&#9998;</button>'
+              + '<button class="bb-row-icon-btn bb-row-del" title="Delete" data-act="delete"'
+              + ' data-fid="' + safe + '">&times;</button>';
+    }
+    var icon = '';
+    if (isSmart) {
+      if (f.id === 'all') icon = '<span class="bb-row-smart-icon">&#9776;</span>';
+      else if (f.id === 'today') icon = '<span class="bb-row-smart-icon">&#9728;</span>';
+      else icon = '<span class="bb-row-smart-icon">&#9728;</span>';
+    } else {
+      icon = '<span class="bb-row-smart-icon">&#128193;</span>';
+    }
+    return '<div class="bb-row' + sel + smartCls + '"'
+         + ' data-fid="' + safe + '"' + dropAttr + '>'
+         + icon
+         + '<span class="bb-row-name">' + name + '</span>'
+         + actions
+         + '<span class="bb-row-count">' + (f.files ? f.files.length : 0) + '</span>'
+         + '</div>';
+  }
+  (bbFolders.smart || []).forEach(function(f){ html += rowHtml(f, true); });
+  (bbFolders.user || []).forEach(function(f){ html += rowHtml(f, false); });
+  var list = document.getElementById('bb-folders-list');
+  list.innerHTML = html;
+  // Wire per-row action buttons (rename / delete). One delegated handler
+  // would also work but doing it here keeps the click intent crystal.
+  list.querySelectorAll('.bb-row-icon-btn').forEach(function(b){
+    b.addEventListener('click', function(e){
+      e.stopPropagation();
+      var fid = b.getAttribute('data-fid');
+      var act = b.getAttribute('data-act');
+      if (act === 'rename') bbRenameFolder(fid);
+      else if (act === 'delete') bbDeleteFolder(fid);
+    });
+  });
+}
+
+function bbSelectFolder(fid) {
+  if (!fid) return;
+  selectedFolder = fid;
+  _bbRecomputeFolderFiles();
+  // Reset downstream selections if they no longer apply to the new pool.
+  if (selectedFile && bbFolderFiles && !bbFolderFiles.has(selectedFile)) {
+    selectedFile = null;
+  }
+  bbRenderFolderCol();
+  bbRenderFilesCol();
+  bbRenderTagsCol();
+  renderGrid();
+}
+
+async function bbCreateFolder() {
+  var name = (window.prompt('New folder name:') || '').trim();
+  if (!name) return;
+  var r = await fetch('/api/folders', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({name: name}),
+  });
+  if (!r.ok) { alert('Could not create folder.'); return; }
+  await bbReloadFolders();
+  bbRenderFolderCol();
+}
+
+async function bbRenameFolder(fid) {
+  var current = ((bbFolders.user || []).find(function(f){return f.id===fid}) || {}).name || '';
+  var name = (window.prompt('Rename folder:', current) || '').trim();
+  if (!name || name === current) return;
+  var r = await fetch('/api/folders/' + encodeURIComponent(fid) + '/rename', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({name: name}),
+  });
+  if (!r.ok) { alert('Could not rename.'); return; }
+  await bbReloadFolders();
+  bbRenderFolderCol();
+}
+
+async function bbDeleteFolder(fid) {
+  if (!confirm('Delete this folder? Files inside will return to All Files.')) return;
+  var r = await fetch('/api/folders/' + encodeURIComponent(fid), {method:'DELETE'});
+  if (!r.ok) { alert('Could not delete.'); return; }
+  // If we just deleted the active folder, snap back to All Files.
+  if (selectedFolder === fid) selectedFolder = 'all';
+  await bbReloadFolders();
+  bbRenderFolderCol();
+  bbRenderFilesCol();
+  bbRenderTagsCol();
+  renderGrid();
+}
+
+function _bbFolderDragOver(e) {
+  var row = e.target.closest('.bb-row[data-droptarget="1"]');
+  if (!row) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  row.classList.add('bb-drop-target');
+}
+
+function _bbFolderDragLeave(e) {
+  var row = e.target.closest('.bb-row');
+  if (row) row.classList.remove('bb-drop-target');
+}
+
+async function _bbFolderDrop(e) {
+  var row = e.target.closest('.bb-row[data-droptarget="1"]');
+  if (!row) return;
+  e.preventDefault();
+  row.classList.remove('bb-drop-target');
+  var fn = e.dataTransfer.getData('application/x-pg-file')
+        || e.dataTransfer.getData('text/plain');
+  if (!fn) return;
+  var fid = row.getAttribute('data-fid');
+  var r = await fetch('/api/folders/membership', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({filename: fn, folder_id: fid}),
+  });
+  if (!r.ok) { alert('Move failed.'); return; }
+  await bbReloadFolders();
+  bbRenderFolderCol();
+  bbRenderFilesCol();
+  renderGrid();
+}
+
 function bbRenderFilesCol() {
+  // Restrict the pool to files that live in the currently-selected
+  // folder. bbFolderFiles is a Set of filenames; null means no folder
+  // restriction (treated as "all").
+  var folderSet = bbFolderFiles;
   var counts = {};
   var totalAll = 0;
   for (var i = 0; i < allClips.length; i++) {
@@ -4180,6 +4447,7 @@ function bbRenderFilesCol() {
     if (c.ignored) continue;
     var fn = c.filename || '';
     if (!fn) continue;
+    if (folderSet && !folderSet.has(fn)) continue;
     counts[fn] = (counts[fn] || 0) + 1;
     totalAll++;
   }
@@ -4196,8 +4464,13 @@ function bbRenderFilesCol() {
     var f = files[i];
     var pretty = _bbEsc(_ffPretty(f));
     var safe = _bbEsc(f);
+    // draggable=true makes the row a drag source for the Folders column.
+    var favCls = bbFileFavorites.has(f) ? ' on' : '';
     html += '<div class="bb-row' + (selectedFile===f?' selected':'') + '"'
+         + ' draggable="true"'
          + ' data-fn="' + safe + '" title="' + safe + '">'
+         + '<button class="pg-heart' + favCls + '" data-fn="' + safe + '"'
+         + ' data-act="fav-file" title="Toggle favorite">' + PG_HEART_SVG + '</button>'
          + '<span class="bb-row-name">' + pretty + '</span>'
          + '<span class="bb-row-count">' + counts[f] + '</span>'
          + '</div>';
@@ -4205,8 +4478,43 @@ function bbRenderFilesCol() {
   document.getElementById('bb-files-list').innerHTML = html;
 }
 
+async function bbToggleFileFavorite(filename) {
+  var on = !bbFileFavorites.has(filename);
+  if (on) bbFileFavorites.add(filename);
+  else bbFileFavorites.delete(filename);
+  bbRenderFilesCol();
+  try {
+    await fetch('/api/folders/favorite', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({filename: filename, favorite: on, scope: 'source'}),
+    });
+  } catch (e) {}
+  await bbReloadFolders();
+  bbRenderFolderCol();
+  bbRenderFilesCol();
+  renderGrid();
+}
+
+async function bbToggleClipFavorite(sceneId) {
+  var c = allClips.find(function(x){ return x.id === sceneId; });
+  if (!c) return;
+  var on = !c.favorite;
+  c.favorite = on;
+  document.querySelectorAll('.clip-card[data-id="' + sceneId + '"] .pg-heart')
+    .forEach(function(b){ b.classList.toggle('on', on); });
+  try {
+    await fetch('/rate/api/favorite', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({scene_id: sceneId, favorite: on}),
+    });
+  } catch (e) {}
+}
+
 function bbRenderTagsCol() {
   var pool = allClips.filter(function(c){return !c.ignored});
+  if (bbFolderFiles) {
+    pool = pool.filter(function(c){return bbFolderFiles.has(c.filename)});
+  }
   if (selectedFile) {
     pool = pool.filter(function(c){return c.filename === selectedFile});
   }

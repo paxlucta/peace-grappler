@@ -1644,7 +1644,7 @@ body{
    * content below gets its own horizontal gutter via .controls / table
    * / .progress so we don't need the old `body { padding:20px }` +
    * `header { margin:-20px -20px 24px }` negative-margin workaround. */
-  display:flex;flex-direction:column;min-height:100vh;
+  display:flex;flex-direction:column;height:100vh;overflow:hidden;
 }
 header{
   display:flex;align-items:center;gap:16px;
@@ -1667,7 +1667,70 @@ button.primary{background:#e53935;color:#fff;border-color:#e53935}
 button.primary:hover{background:#c62828}
 button:disabled{opacity:.5;cursor:not-allowed}
 .controls{display:flex;gap:12px;align-items:center;
-  padding:0 20px;margin-bottom:20px}
+  padding:12px 20px 8px;margin-bottom:0}
+
+/* Page split: Folders column on the left, existing controls + table on
+   the right. The right side keeps its own scroll. */
+.page-cols{flex:1;display:grid;grid-template-columns:200px 1fr;
+  min-height:0;overflow:hidden;background:#0a0a0a;border-top:1px solid #1a1a1a}
+.page-main{display:flex;flex-direction:column;min-height:0;overflow-y:auto}
+.bb-col{display:flex;flex-direction:column;min-height:0;
+  border-right:1px solid #1a1a1a;background:#101013}
+.bb-col-head{
+  padding:0 14px;border-bottom:1px solid #1f1f24;background:#141418;
+  font-size:10px;color:#888;text-transform:uppercase;
+  letter-spacing:.6px;font-weight:700;flex-shrink:0;
+  height:34px;display:flex;align-items:center;justify-content:space-between;
+}
+.bb-col-head .bb-col-head-action{
+  background:transparent;border:1px solid #2e2e3e;color:#aaa;
+  border-radius:4px;padding:0;width:18px;height:18px;line-height:14px;
+  text-align:center;font-size:13px;cursor:pointer;
+  text-transform:none;letter-spacing:0;font-weight:400;flex-shrink:0;
+}
+.bb-col-head .bb-col-head-action:hover{border-color:#1976d2;color:#fff}
+.bb-list{flex:1;overflow-y:auto;min-height:0}
+.bb-row{
+  display:flex;align-items:center;justify-content:space-between;
+  gap:8px;padding:8px 12px;cursor:pointer;font-size:12px;color:#ccc;
+  border-bottom:1px solid #161620;line-height:1.3;
+}
+.bb-row:hover{background:#1a1a24;color:#fff}
+.bb-row.selected{background:#1f2a3a;color:#fff}
+.bb-row.bb-row-all{font-weight:600;border-bottom:1px solid #2a2a3a}
+.bb-row.bb-row-smart{color:#9ec0e8}
+.bb-row.bb-row-smart.selected{background:#1f2a3a}
+.bb-row .bb-row-smart-icon{
+  width:14px;height:14px;flex-shrink:0;opacity:.7;
+  display:inline-flex;align-items:center;justify-content:center;
+}
+.bb-row.bb-drop-target{outline:2px dashed #1976d2;outline-offset:-2px;background:#16223a}
+.bb-row .bb-row-icon-btn{
+  background:transparent;border:none;color:#666;cursor:pointer;
+  padding:2px 4px;border-radius:3px;font-size:12px;line-height:1;
+  opacity:0;transition:opacity .1s;
+}
+.bb-row:hover .bb-row-icon-btn{opacity:1}
+.bb-row .bb-row-icon-btn:hover{color:#fff;background:#2a3548}
+.bb-row .bb-row-icon-btn.bb-row-del:hover{background:#3a1a1a;color:#ef5350}
+.bb-row-name{flex:1;min-width:0;word-break:break-word}
+.bb-row-count{color:#666;font-size:10px;flex-shrink:0;font-family:'SF Mono',Menlo,monospace}
+.bb-row.selected .bb-row-count{color:#9ec0e8}
+tbody tr[draggable="true"]{cursor:grab}
+tbody tr[draggable="true"]:active{cursor:grabbing}
+
+/* -- Heart icon (file rows) -- */
+.pg-heart{
+  background:transparent;border:none;padding:0;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;
+  width:22px;height:22px;flex-shrink:0;color:#555;vertical-align:middle;
+  margin-right:6px;
+}
+.pg-heart svg{width:14px;height:14px;fill:currentColor}
+.pg-heart:hover{color:#ef9a9a}
+.pg-heart.on{color:#ef5350}
+.pg-heart.on:hover{color:#e53935}
+.bb-row .pg-heart{margin:0 2px}
 table{width:calc(100% - 40px);border-collapse:collapse;margin:12px 20px 0}
 th,td{padding:8px 12px;text-align:left;border-bottom:1px solid #222}
 th{color:#888;font-size:12px;font-weight:600;text-transform:uppercase}
@@ -2108,6 +2171,18 @@ td{font-size:13px}
 
 <!-- pg-chrome -->
 
+<div class="page-cols">
+<aside class="bb-col">
+  <div class="bb-col-head">
+    Folders
+    <button type="button" class="bb-col-head-action" title="New folder"
+            onclick="bbCreateFolder()">+</button>
+  </div>
+  <div class="bb-list" id="bb-folders-list"></div>
+</aside>
+
+<main class="page-main">
+
 <div class="controls">
   <button class="primary" onclick="openImports()" id="imports-btn"
           title="Browse videos from your IG/TikTok/YouTube channels, paste a URL, or upload from disk">
@@ -2256,6 +2331,9 @@ td{font-size:13px}
 
 <div class="progress" id="progress">
   <div id="progress-lines"></div>
+</div>
+
+</main>
 </div>
 
 <script>
@@ -2989,17 +3067,27 @@ function renderList() {
   _updateCancelBtn();
   var tbody = document.getElementById('video-list');
   tbody.innerHTML = '';
-  if (videos.length === 0) {
+  // Apply folder filter (set by the leftmost Folders column). When no
+  // folder restriction is active, bbFolderFiles is null and every video
+  // passes through.
+  var visible = (bbFolderFiles
+    ? videos.filter(function(v){ return bbFolderFiles.has(v.filename); })
+    : videos);
+  if (visible.length === 0) {
     // colspan bumped to 7 to cover the new select-all checkbox column.
+    var msg = videos.length === 0
+      ? 'No source videos yet. Click <b>Import Video</b> above '
+        + 'to add files from your social channels, a URL, or disk.'
+      : 'No videos in this folder. Drag a file row into a folder to '
+        + 'add it.';
     tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:36px 0;color:#666">'
-      + 'No source videos yet. Click <b>Import Video</b> above '
-      + 'to add files from your social channels, a URL, or disk.</td></tr>';
+      + msg + '</td></tr>';
     _refreshSelectAll();
     _updateBulkDeleteBtn();
     return;
   }
-  for (var i = 0; i < videos.length; i++) {
-    var v = videos[i];
+  for (var i = 0; i < visible.length; i++) {
+    var v = visible[i];
     var dims = v.width + 'x' + v.height;
     if (v.wide) dims += ' (wide)';
     var disabled = analyzing ? ' disabled' : '';
@@ -3028,13 +3116,18 @@ function renderList() {
       +   '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>'
       +   '</button>'
       + '</div>';
-    tbody.innerHTML += '<tr>'
+    var favCls = bbFileFavorites.has(v.filename) ? ' on' : '';
+    var heartBtn = '<button class="pg-heart' + favCls + '"'
+      + ' data-fn="' + escImp(v.filename) + '"'
+      + ' onclick="event.stopPropagation();bbToggleFileFavorite(\'' + escImp(v.filename).replace(/'/g,"\\'") + '\')"'
+      + ' title="Toggle favorite">' + PG_HEART_SVG + '</button>';
+    tbody.innerHTML += '<tr draggable="true" data-fn="' + escImp(v.filename) + '">'
       + '<td style="text-align:center">'
       +   '<input type="checkbox" class="row-sel" data-vid="' + v.id + '"'
       +     rowChecked + ' onchange="onRowSelectToggle(this)"'
       +     ' style="accent-color:#e53935;cursor:pointer">'
       + '</td>'
-      + '<td>' + v.filename + '</td>'
+      + '<td>' + heartBtn + v.filename + '</td>'
       + '<td>' + v.duration + 's</td>'
       + '<td>' + dims + '</td>'
       + '<td><div class="status-stack">'
@@ -3845,6 +3938,216 @@ function addLine(text, cls) {
   var prog = document.getElementById('progress');
   prog.scrollTop = prog.scrollHeight;
 }
+
+// ── Folders column (source scope; shared with /builder and /rate) ──────────
+
+var bbFolders = { smart: [], user: [], memberships: {} };
+var bbFolderFiles = null;
+var selectedFolder = 'all';
+var bbFileFavorites = new Set();
+
+var PG_HEART_SVG =
+  '<svg viewBox="0 0 24 24"><path d="M12 21s-7-4.35-9.5-9.13C.9 8.5 2.5 5 6 5c2 0 3.4 1.1 6 4 2.6-2.9 4-4 6-4 3.5 0 5.1 3.5 3.5 6.87C19 16.65 12 21 12 21z"/></svg>';
+
+function _bbEsc(s) {
+  return (s || '').replace(/[&<>"']/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+
+async function bbReloadFolders() {
+  try {
+    var r = await fetch('/api/folders/list?scope=source');
+    bbFolders = await r.json();
+  } catch (e) {
+    bbFolders = { smart: [], user: [], memberships: {} };
+  }
+  bbFileFavorites = new Set(bbFolders.favorites || []);
+  _bbRecomputeFolderFiles();
+}
+
+async function bbToggleFileFavorite(filename) {
+  var on = !bbFileFavorites.has(filename);
+  if (on) bbFileFavorites.add(filename);
+  else bbFileFavorites.delete(filename);
+  // Update any rendered hearts inline.
+  document.querySelectorAll('.pg-heart[data-fn="' + filename.replace(/"/g, '\\"') + '"]')
+    .forEach(function(b){ b.classList.toggle('on', on); });
+  try {
+    await fetch('/api/folders/favorite', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({filename: filename, favorite: on, scope: 'source'}),
+    });
+  } catch (e) {}
+  await bbReloadFolders();
+  bbRenderFolderCol();
+  renderList();
+}
+
+function _bbRecomputeFolderFiles() {
+  var all = (bbFolders.smart || []).concat(bbFolders.user || []);
+  var match = all.find(function(f){ return f.id === selectedFolder; });
+  if (!match) {
+    selectedFolder = 'all';
+    match = all.find(function(f){ return f.id === 'all'; });
+  }
+  bbFolderFiles = new Set(match ? match.files : []);
+}
+
+function bbRenderFolderCol() {
+  var html = '';
+  function rowHtml(f, isSmart) {
+    var safe = _bbEsc(f.id);
+    var name = _bbEsc(f.name);
+    var sel  = selectedFolder === f.id ? ' selected' : '';
+    var smartCls = isSmart ? ' bb-row-smart' : '';
+    var dropAttr = isSmart ? '' : ' data-droptarget="1"';
+    var actions = '';
+    if (!isSmart) {
+      actions = '<button class="bb-row-icon-btn" title="Rename" data-act="rename"'
+              + ' data-fid="' + safe + '">&#9998;</button>'
+              + '<button class="bb-row-icon-btn bb-row-del" title="Delete" data-act="delete"'
+              + ' data-fid="' + safe + '">&times;</button>';
+    }
+    var icon = isSmart
+      ? (f.id === 'all'   ? '<span class="bb-row-smart-icon">&#9776;</span>'
+        : f.id === 'today' ? '<span class="bb-row-smart-icon">&#9728;</span>'
+        : '<span class="bb-row-smart-icon">&#9733;</span>')
+      : '<span class="bb-row-smart-icon">&#128193;</span>';
+    return '<div class="bb-row' + sel + smartCls + '"'
+         + ' data-fid="' + safe + '"' + dropAttr + '>'
+         + icon
+         + '<span class="bb-row-name">' + name + '</span>'
+         + actions
+         + '<span class="bb-row-count">' + (f.files ? f.files.length : 0) + '</span>'
+         + '</div>';
+  }
+  (bbFolders.smart || []).forEach(function(f){ html += rowHtml(f, true); });
+  (bbFolders.user || []).forEach(function(f){ html += rowHtml(f, false); });
+  var list = document.getElementById('bb-folders-list');
+  list.innerHTML = html;
+  list.querySelectorAll('.bb-row-icon-btn').forEach(function(b){
+    b.addEventListener('click', function(e){
+      e.stopPropagation();
+      var fid = b.getAttribute('data-fid');
+      var act = b.getAttribute('data-act');
+      if (act === 'rename') bbRenameFolder(fid);
+      else if (act === 'delete') bbDeleteFolder(fid);
+    });
+  });
+}
+
+function bbSelectFolder(fid) {
+  if (!fid) return;
+  selectedFolder = fid;
+  _bbRecomputeFolderFiles();
+  bbRenderFolderCol();
+  renderList();
+}
+
+async function bbCreateFolder() {
+  var name = (window.prompt('New folder name:') || '').trim();
+  if (!name) return;
+  var r = await fetch('/api/folders', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name: name, scope: 'source'}),
+  });
+  if (!r.ok) { alert('Could not create folder.'); return; }
+  await bbReloadFolders();
+  bbRenderFolderCol();
+}
+
+async function bbRenameFolder(fid) {
+  var current = ((bbFolders.user || []).find(function(f){return f.id===fid}) || {}).name || '';
+  var name = (window.prompt('Rename folder:', current) || '').trim();
+  if (!name || name === current) return;
+  var r = await fetch('/api/folders/' + encodeURIComponent(fid) + '/rename', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name: name, scope: 'source'}),
+  });
+  if (!r.ok) { alert('Could not rename.'); return; }
+  await bbReloadFolders();
+  bbRenderFolderCol();
+}
+
+async function bbDeleteFolder(fid) {
+  if (!confirm('Delete this folder? Files inside will return to All Files.')) return;
+  var r = await fetch('/api/folders/' + encodeURIComponent(fid) + '?scope=source',
+                     {method:'DELETE'});
+  if (!r.ok) { alert('Could not delete.'); return; }
+  if (selectedFolder === fid) selectedFolder = 'all';
+  await bbReloadFolders();
+  bbRenderFolderCol();
+  renderList();
+}
+
+function _bbFolderDragOver(e) {
+  var row = e.target.closest('.bb-row[data-droptarget="1"]');
+  if (!row) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  row.classList.add('bb-drop-target');
+}
+function _bbFolderDragLeave(e) {
+  var row = e.target.closest('.bb-row');
+  if (row) row.classList.remove('bb-drop-target');
+}
+async function _bbFolderDrop(e) {
+  var row = e.target.closest('.bb-row[data-droptarget="1"]');
+  if (!row) return;
+  e.preventDefault();
+  row.classList.remove('bb-drop-target');
+  var fn = e.dataTransfer.getData('application/x-pg-file')
+        || e.dataTransfer.getData('text/plain');
+  if (!fn) return;
+  var fid = row.getAttribute('data-fid');
+  var r = await fetch('/api/folders/membership', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({filename: fn, folder_id: fid, scope: 'source'}),
+  });
+  if (!r.ok) { alert('Move failed.'); return; }
+  await bbReloadFolders();
+  bbRenderFolderCol();
+  renderList();
+}
+
+(function bbWire() {
+  var foldersList = document.getElementById('bb-folders-list');
+  if (foldersList) {
+    foldersList.addEventListener('click', function(e){
+      if (e.target.closest('.bb-row-icon-btn')) return;
+      var row = e.target.closest('.bb-row');
+      if (!row) return;
+      bbSelectFolder(row.getAttribute('data-fid'));
+    });
+    foldersList.addEventListener('dragover', _bbFolderDragOver);
+    foldersList.addEventListener('dragleave', _bbFolderDragLeave);
+    foldersList.addEventListener('drop', _bbFolderDrop);
+  }
+  // Drag source: each table row carries its filename via dragstart.
+  // Listener stays on the (stable) tbody so we don't have to re-bind
+  // after every renderList().
+  var tbody = document.getElementById('video-list');
+  if (tbody) {
+    tbody.addEventListener('dragstart', function(e){
+      var tr = e.target.closest('tr[draggable="true"]');
+      if (!tr) return;
+      var fn = tr.getAttribute('data-fn');
+      if (!fn) return;
+      e.dataTransfer.setData('text/plain', fn);
+      e.dataTransfer.setData('application/x-pg-file', fn);
+      e.dataTransfer.effectAllowed = 'move';
+    });
+  }
+})();
+
+(async function bbBoot() {
+  await bbReloadFolders();
+  bbRenderFolderCol();
+  // Re-render the file table now that the folder filter is known —
+  // scanVideos() may have already painted before folders loaded.
+  if (typeof renderList === 'function') renderList();
+})();
 
 scanVideos();
 checkState();
