@@ -233,6 +233,48 @@ def api_thumbnail_multi(scene_id, thumb_idx):
     return "", 204
 
 
+@clip_builder_bp.route("/api/scene-frame/<int:scene_id>")
+def api_scene_frame(scene_id):
+    """Extract a single 360-px-wide JPEG frame at *offset* seconds into
+    the scene (offset from ``scene.start_time``). Used by the text-overlay
+    editor's "Show video background" mode to preview how the overlay will
+    sit on top of the actual scene at that moment. Cached on disk by
+    (path, start, end, offset) so dragging the playhead is cheap."""
+    try:
+        offset = float(request.args.get("t", "0"))
+    except (TypeError, ValueError):
+        offset = 0.0
+    scene = get_scene_by_id(scene_id)
+    if not scene:
+        return "", 404
+    dur = max(0.0, float(scene["end_time"]) - float(scene["start_time"]))
+    if offset < 0:
+        offset = 0.0
+    if offset > max(0.0, dur - 0.05):
+        offset = max(0.0, dur - 0.05)
+    t = float(scene["start_time"]) + offset
+
+    THUMB_DIR.mkdir(parents=True, exist_ok=True)
+    key = hashlib.md5(
+        f"sf:{scene['video_path']}@{scene['start_time']}@{scene['end_time']}"
+        f"@o{offset:.2f}".encode()
+    ).hexdigest()
+    path = THUMB_DIR / f"{key}.jpg"
+    if not path.exists():
+        try:
+            subprocess.run(
+                ["ffmpeg", "-ss", f"{t:.2f}", "-i", scene["video_path"],
+                 "-frames:v", "1", "-vf", "scale=360:-2", "-q:v", "5",
+                 "-y", str(path)],
+                capture_output=True, timeout=15,
+            )
+        except Exception:
+            pass
+    if path.exists():
+        return send_file(str(path), mimetype="image/jpeg")
+    return "", 204
+
+
 @clip_builder_bp.route("/api/music")
 def api_music():
     return jsonify(_load_music_files())
@@ -1278,7 +1320,8 @@ select:focus,button:focus{outline:none;border-color:#e53935}
 .ff-item:hover{background:#1a1a24}
 .ff-item input{accent-color:#e53935;flex-shrink:0}
 .ff-item .ff-name{
-  flex:1;white-space:nowrap;
+  flex:1;white-space:normal;word-break:break-word;
+  line-height:1.35;
 }
 .ff-item .ff-count{color:#666;font-size:10px;flex-shrink:0}
 nav{display:flex;gap:8px;margin-left:auto;flex-shrink:0}
@@ -1900,6 +1943,52 @@ footer{
   width:360px;height:640px;
   background:#000;border:1px solid #333;border-radius:4px;
   position:relative;overflow:hidden;cursor:default;
+  background-size:cover;background-position:center center;
+  background-repeat:no-repeat;
+}
+
+/* -- Text overlay preview modal -- */
+#text-preview-modal .tp-container{
+  background:#0a0a0a;border-radius:12px;overflow:hidden;
+  display:flex;flex-direction:column;max-width:95vw;
+}
+#text-preview-modal .tp-stage{
+  position:relative;width:405px;height:720px;background:#000;
+  max-width:90vw;max-height:80vh;
+  aspect-ratio:9/16;
+}
+#text-preview-modal .tp-stage video{
+  width:100%;height:100%;object-fit:cover;display:block;background:#000;
+}
+#text-preview-modal .tp-overlays{
+  position:absolute;inset:0;pointer-events:none;
+}
+/* Cloned text boxes drop the editor's outline/cursor decorations. */
+#text-preview-modal .tp-overlays .te-box{
+  cursor:default;outline:none !important;
+}
+#text-preview-modal .tp-foot{
+  display:flex;align-items:center;gap:10px;padding:10px 14px;
+  background:#161616;border-top:1px solid #222;
+}
+#text-preview-modal .tp-foot-spacer{flex:1}
+#text-preview-modal .tp-info{font-size:11px;color:#888}
+
+.te-preview{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:6px 12px;font-size:12px;font-weight:600;
+  background:linear-gradient(135deg,#1976d2,#1565c0);
+  color:#fff;border:1px solid #1976d2;border-radius:6px;cursor:pointer;
+}
+.te-preview:hover{filter:brightness(1.1)}
+.te-preview svg{width:13px;height:13px;fill:currentColor}
+#te-canvas.te-has-bg{
+  /* Subtle dimming so white text reads on bright frames. */
+  box-shadow:inset 0 0 0 9999px rgba(0,0,0,.0);
+}
+#te-canvas.te-has-bg::after{
+  content:"";position:absolute;inset:0;pointer-events:none;
+  background:rgba(0,0,0,.15);
 }
 .te-box{
   position:absolute;
@@ -2164,6 +2253,12 @@ footer{
       <label class="te-label">BG</label>
       <input type="color" id="te-bgcolor" value="#000000"/>
       <button id="te-bg-none-btn" class="te-btn" onclick="teToggleBg()" title="Toggle background">&#8416;</button>
+      <div class="te-sep"></div>
+      <label class="te-label tl-check" style="display:flex;align-items:center;gap:6px;cursor:pointer"
+             title="Show the frame from the video at this overlay's start time as the canvas background, so you can see where the text will sit on screen">
+        <input type="checkbox" id="te-show-bg" onchange="teToggleVideoBg()">
+        <span>Display Video Background</span>
+      </label>
     </div>
     <div class="te-canvas-wrap">
       <div id="te-canvas"></div>
@@ -2174,12 +2269,33 @@ footer{
         <span>Gallery</span>
       </button>
       <div class="te-footer-spacer"></div>
+      <button class="te-preview" onclick="openTextPreview()" title="Play the underlying clip with this overlay on top">
+        <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="8,5 19,12 8,19"/></svg>
+        <span>Preview</span>
+      </button>
       <button class="te-cancel" onclick="closeTextEditor()">Cancel</button>
       <button class="te-apply" onclick="applyTextEditor()">Apply</button>
       <button class="te-save" onclick="saveTextOverlay()" title="Save to gallery">
         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/></svg>
         <span>Save</span>
       </button>
+    </div>
+  </div>
+</div>
+
+<!-- Text overlay preview modal — plays the underlying clip with the
+     in-editor text boxes overlaid in place so the user can see how the
+     overlay sits on top of the actual scene. -->
+<div class="overlay" id="text-preview-modal">
+  <div class="tp-container">
+    <div class="tp-stage" id="tp-stage">
+      <video id="tp-video" playsinline muted></video>
+      <div id="tp-overlays" class="tp-overlays"></div>
+    </div>
+    <div class="tp-foot">
+      <span class="tp-info" id="tp-info"></span>
+      <div class="tp-foot-spacer"></div>
+      <button class="te-cancel" onclick="closeTextPreview()">Close</button>
     </div>
   </div>
 </div>
@@ -3977,6 +4093,14 @@ function ffInit() {
   ffUpdateLabel();
 }
 
+// Strip the extension and turn underscores/dashes into spaces so the
+// list is human-readable. Underlying filename is still stored on the
+// checkbox via data-fn so saved selections keep matching.
+function _ffPretty(name) {
+  var base = (name || '').replace(/\.[^.]+$/, '');
+  return base.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 function ffRenderList() {
   var list = document.getElementById('ff-list');
   if (!list) return;
@@ -3984,13 +4108,16 @@ function ffRenderList() {
   var html = '';
   for (var i = 0; i < ffFiles.length; i++) {
     var f = ffFiles[i];
+    // Search matches against the real filename so users can still type
+    // underscores or extensions if they remember them that way.
     if (q && f.name.toLowerCase().indexOf(q) < 0) continue;
     var checked = ffSelected.has(f.name) ? ' checked' : '';
     var safe = f.name.replace(/"/g, '&quot;');
+    var pretty = _ffPretty(f.name).replace(/"/g, '&quot;');
     html += '<label class="ff-item">'
       + '<input type="checkbox" data-fn="' + safe + '"' + checked
       + ' onchange="ffToggle(this)">'
-      + '<span class="ff-name" title="' + safe + '">' + safe + '</span>'
+      + '<span class="ff-name" title="' + safe + '">' + pretty + '</span>'
       + '<span class="ff-count">' + f.count + '</span>'
       + '</label>';
   }
@@ -4619,6 +4746,10 @@ function openTextEditor(existingItem, startTime, endTime) {
   /* Live toolbar bindings */
   document.getElementById('te-fontcolor').oninput = teToolbarChanged;
   document.getElementById('te-bgcolor').oninput = teToolbarChanged;
+
+  /* If the "Display Video Background" toggle is still on from a previous
+   * edit, refresh the preview now that we know which clip we're on. */
+  teRefreshVideoBg();
 }
 
 function teCreateBox(opts) {
@@ -4970,8 +5101,144 @@ function applyTextEditor() {
 
 function closeTextEditor() {
   document.getElementById('text-editor-modal').classList.remove('active');
-  document.getElementById('te-canvas').innerHTML = '';
+  var canvas = document.getElementById('te-canvas');
+  canvas.innerHTML = '';
+  canvas.style.backgroundImage = '';
+  canvas.classList.remove('te-has-bg');
   teState = {editId: null, startTime: 0, endTime: 3, boxes: [], selectedBox: null, dragging: false};
+}
+
+/* ── Video-background preview ──────────────────────────────────────────
+ *
+ * When the user enables "Display Video Background" we paint the frame
+ * that will be playing at the overlay's start time onto the canvas, so
+ * they can see where the text sits relative to faces, captions, etc.
+ * Finds the topmost video clip on the timeline at teState.startTime,
+ * converts that to an in-scene offset, and asks /api/scene-frame for a
+ * cached JPEG. No-op when no clip covers that moment.
+ */
+function teFindClipAtTime(t) {
+  // Prefer the highest-numbered (front-most) track that has a clip
+  // covering t — that's what will be visible at composite time.
+  var best = null;
+  for (var i = 0; i < videoItems.length; i++) {
+    var v = videoItems[i];
+    var s = v.startTime, e = s + v.duration;
+    if (t >= s && t < e) {
+      if (!best || (v.track || 0) > (best.track || 0)) best = v;
+    }
+  }
+  return best;
+}
+
+function teRefreshVideoBg() {
+  var cb = document.getElementById('te-show-bg');
+  var canvas = document.getElementById('te-canvas');
+  if (!cb || !canvas) return;
+  if (!cb.checked) {
+    canvas.style.backgroundImage = '';
+    canvas.classList.remove('te-has-bg');
+    return;
+  }
+  var vi = teFindClipAtTime(teState.startTime);
+  if (!vi || vi.clip.id === undefined) {
+    canvas.style.backgroundImage = '';
+    canvas.classList.remove('te-has-bg');
+    return;
+  }
+  // Offset within the scene = how far past the clip's start on the
+  // timeline the overlay begins. The scene's own start_time inside the
+  // source video is added server-side by /api/scene-frame.
+  var offset = Math.max(0, teState.startTime - vi.startTime);
+  var url = '/api/scene-frame/' + vi.clip.id + '?t=' + offset.toFixed(2);
+  canvas.style.backgroundImage = "url('" + url + "')";
+  canvas.classList.add('te-has-bg');
+}
+
+function teToggleVideoBg() {
+  teRefreshVideoBg();
+}
+
+/* ── Text overlay preview ──────────────────────────────────────────────
+ *
+ * Plays the segment of the underlying source clip that this overlay
+ * applies to, with the current text boxes rendered on top in the same
+ * positions as the editor. Approximate (no transitions, no real burn-in
+ * font rendering), but instant and good enough to check placement.
+ */
+var _tpEndHandler = null;
+var _tpTimeHandler = null;
+
+function openTextPreview() {
+  var vi = teFindClipAtTime(teState.startTime);
+  if (!vi || vi.clip.id === undefined) {
+    alert('No timeline clip plays at this overlay’s start time. '
+        + 'Move the overlay onto a clip first.');
+    return;
+  }
+  // Translate the overlay's global timeline range into in-clip seconds.
+  // Clamp to the clip's own bounds so we don't seek past its end.
+  var clipDur = vi.duration;
+  var inStart = Math.max(0, teState.startTime - vi.startTime);
+  var inEnd   = Math.min(clipDur, teState.endTime - vi.startTime);
+  if (inEnd <= inStart) inEnd = Math.min(clipDur, inStart + 1.0);
+
+  // Mirror the canvas's text boxes into the preview overlay. Cloning
+  // preserves all inline styles (position, size, font, color, bg).
+  var srcCanvas = document.getElementById('te-canvas');
+  var dst = document.getElementById('tp-overlays');
+  dst.innerHTML = '';
+  var srcBoxes = srcCanvas.querySelectorAll('.te-box');
+  for (var i = 0; i < srcBoxes.length; i++) {
+    var clone = srcBoxes[i].cloneNode(true);
+    // Strip editor-only state from the clone.
+    clone.classList.remove('te-selected');
+    clone.removeAttribute('contenteditable');
+    dst.appendChild(clone);
+  }
+
+  var info = document.getElementById('tp-info');
+  info.textContent = (vi.clip.filename || 'clip')
+    + '  ' + inStart.toFixed(1) + 's – ' + inEnd.toFixed(1) + 's';
+
+  var video = document.getElementById('tp-video');
+  // Pull the same single-clip stream the Scenes page uses — already
+  // cached server-side so re-previewing is fast.
+  video.src = '/rate/api/clip/' + vi.clip.id;
+  video.muted = true;   // explicit so autoplay isn't blocked
+  // Remove any handlers from a prior open before wiring fresh ones.
+  if (_tpEndHandler)  video.removeEventListener('timeupdate', _tpEndHandler);
+  if (_tpTimeHandler) video.removeEventListener('loadedmetadata', _tpTimeHandler);
+  _tpTimeHandler = function() {
+    try { video.currentTime = inStart; } catch (e) {}
+    video.play().catch(function(){ /* autoplay denied; user clicks the controls */ });
+  };
+  _tpEndHandler = function() {
+    if (video.currentTime >= inEnd - 0.05) {
+      // Loop the segment so the user can study the placement instead
+      // of having to re-open the modal each time.
+      try { video.currentTime = inStart; } catch (e) {}
+      video.play().catch(function(){});
+    }
+  };
+  video.addEventListener('loadedmetadata', _tpTimeHandler);
+  video.addEventListener('timeupdate', _tpEndHandler);
+
+  document.getElementById('text-preview-modal').classList.add('active');
+}
+
+function closeTextPreview() {
+  var video = document.getElementById('tp-video');
+  if (video) {
+    if (_tpEndHandler)  video.removeEventListener('timeupdate', _tpEndHandler);
+    if (_tpTimeHandler) video.removeEventListener('loadedmetadata', _tpTimeHandler);
+    _tpEndHandler = _tpTimeHandler = null;
+    try { video.pause(); } catch (e) {}
+    video.removeAttribute('src');
+    video.load();
+  }
+  document.getElementById('tp-overlays').innerHTML = '';
+  document.getElementById('text-preview-modal').classList.remove('active');
 }
 
 /* ── Text overlay presets (save / gallery) ─────────────────────────── */

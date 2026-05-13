@@ -388,7 +388,7 @@ CREATIVE_PROMPT = """\
 You are an expert video editor creating an Instagram Reel for a {domain} \
 channel called {brand}. Your ONLY goal: MAXIMIZE ENGAGEMENT (views, \
 likes, shares, saves).
-
+{user_instructions}
 ## Instagram Reels Research
 {research}
 
@@ -471,11 +471,15 @@ or engagement hooks. null if no text needed for this clip.
 
 def _plan_video(model, research, scenes, music_files, feedback,
                 used_scene_ids=None, variation_ctx=None,
-                enable_text_overlays=False):
+                enable_text_overlays=False, ai_instructions=""):
     """Ask Claude to plan a single video.
 
     variation_ctx: optional dict {"num": 2, "total": 3,
                                   "prev_rationales": ["...", "..."]}
+    *ai_instructions* — free-form text the user pinned in the wizard UI.
+    Rendered at the top of the prompt and explicitly marked as taking
+    precedence over every other directive so it can override defaults
+    like clip length, music choice, etc.
     """
     if used_scene_ids is None:
         used_scene_ids = set()
@@ -614,7 +618,25 @@ def _plan_video(model, research, scenes, music_files, feedback,
         )
 
     import app_config
+    # Pin the user's instructions at the very top so the model sees them
+    # before anything else, and call them out as the highest-priority
+    # constraint. Empty string when the textarea is blank, so the prompt
+    # stays unchanged for the default case.
+    ai_text = (ai_instructions or "").strip()
+    if ai_text:
+        user_instructions_block = (
+            "\n\n## USER AI INSTRUCTIONS (HIGHEST PRIORITY — OVERRIDES "
+            "ALL OTHER GUIDANCE BELOW)\n"
+            "These directives come directly from the user. Treat them as "
+            "hard requirements: when they conflict with any rule, research "
+            "finding, feedback note, or instruction further down in this "
+            "prompt, FOLLOW THE USER'S INSTRUCTIONS.\n\n"
+            f"{ai_text}\n"
+        )
+    else:
+        user_instructions_block = ""
     prompt = CREATIVE_PROMPT.format(
+        user_instructions=user_instructions_block,
         research=json.dumps(research, indent=2),
         scenes="\n".join(scene_lines),
         music=music_str,
@@ -636,12 +658,22 @@ def _plan_video(model, research, scenes, music_files, feedback,
     emit(f"{label}...")
     raw = _call_claude(prompt, model, timeout=300)
     if not raw:
+        emit(f"{_active_provider_label()} returned no output. "
+             f"Common causes: prompt too large (you have many scenes — "
+             f"try filtering files), provider not authenticated, or a "
+             f"transient network error. Check the provider's CLI logs.")
         return None
 
     try:
         plan = _parse_json(raw)
     except (json.JSONDecodeError, ValueError) as e:
+        # Surface what the CLI actually said so the user can diagnose
+        # without us having to dig into stderr. Cap at 400 chars so a
+        # huge dump doesn't drown the log panel.
+        snippet = (raw or "").strip().replace("\n", " ")[:400]
         emit(f"Failed to parse {_active_provider_label()}'s plan: {e}")
+        emit(f"  Response preview: {snippet!r}")
+        emit(f"  Response length: {len(raw or '')} chars")
         return None
 
     # Validate plan
@@ -1063,7 +1095,7 @@ def _generate(model, num_videos, num_variations=1, folders=None,
               mute_source=False, enable_text_overlays=False,
               music_folders=None, include_wide=True, provider=None,
               no_music=False, add_captions=False, caption_style=None,
-              auto_crop_wide=False):
+              auto_crop_wide=False, ai_instructions=""):
     """Full wizard generation flow. Runs in a background thread.
 
     *no_music* — when True, the AI plans without a music track and the
@@ -1175,7 +1207,8 @@ def _generate(model, num_videos, num_variations=1, folders=None,
                 plan = _plan_video(model, research, scenes, music_files,
                                    feedback, used_scene_ids,
                                    variation_ctx=variation_ctx,
-                                   enable_text_overlays=enable_text_overlays)
+                                   enable_text_overlays=enable_text_overlays,
+                                   ai_instructions=ai_instructions)
                 if not plan or not plan.get("clips"):
                     emit(f"{var_label}: {_active_provider_label()} couldn't create a plan")
                     continue
@@ -1239,6 +1272,100 @@ def _generate(model, num_videos, num_variations=1, folders=None,
 
 
 # ── Routes ───────────────────────────────────────────────────────────────────
+
+# ── AI-instructions snippet store ──────────────────────────────────────────
+#
+# Lightweight JSON-on-disk store for the "AI Instructions" textarea on the
+# wizard page. Each snippet has a stable id (random hex), a name, the body
+# text, and an ISO-8601 modified timestamp. Stored under data/ so it
+# survives upgrades and isn't tied to any brand profile.
+
+_INSTRUCTIONS_PATH = None   # resolved lazily so tests don't import app_config
+
+def _instr_path():
+    global _INSTRUCTIONS_PATH
+    if _INSTRUCTIONS_PATH is None:
+        import app_config
+        _INSTRUCTIONS_PATH = app_config.DATA_DIR / "wizard_instructions.json"
+    return _INSTRUCTIONS_PATH
+
+
+def _instr_load_all():
+    p = _instr_path()
+    if not p.exists():
+        return []
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    items = raw.get("snippets") if isinstance(raw, dict) else None
+    return items if isinstance(items, list) else []
+
+
+def _instr_save_all(items):
+    p = _instr_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({"snippets": items}, indent=2, ensure_ascii=False),
+                 encoding="utf-8")
+
+
+def _instr_new_id():
+    import secrets
+    return secrets.token_hex(8)
+
+
+@wizard_bp.route("/wizard/api/instructions")
+def api_instructions_list():
+    """Return all saved AI-instruction snippets, most recently modified
+    first. Body included so the picker can show a preview without a
+    second roundtrip."""
+    items = _instr_load_all()
+    items = sorted(items, key=lambda s: s.get("modified") or "", reverse=True)
+    return jsonify(items)
+
+
+@wizard_bp.route("/wizard/api/instructions", methods=["POST"])
+def api_instructions_save():
+    """Save or update a snippet.
+
+    Body: ``{id?, name, content}``
+      * id given → overwrite the existing snippet (Save).
+      * id missing → create a new one (Save As New). Name is required.
+    Returns the saved snippet (with id + modified).
+    """
+    data = request.get_json(force=True) or {}
+    name = (data.get("name") or "").strip()
+    content = data.get("content", "")
+    sid = (data.get("id") or "").strip()
+    if not name:
+        return jsonify({"error": "Name is required"}), 400
+    items = _instr_load_all()
+    now = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    if sid:
+        for s in items:
+            if s.get("id") == sid:
+                s["name"] = name
+                s["content"] = content
+                s["modified"] = now
+                _instr_save_all(items)
+                return jsonify(s)
+        # Caller sent an id we no longer have — fall through to create.
+    new_snip = {"id": _instr_new_id(), "name": name,
+                "content": content, "modified": now}
+    items.append(new_snip)
+    _instr_save_all(items)
+    return jsonify(new_snip)
+
+
+@wizard_bp.route("/wizard/api/instructions/<sid>", methods=["DELETE"])
+def api_instructions_delete(sid):
+    items = _instr_load_all()
+    new_items = [s for s in items if s.get("id") != sid]
+    if len(new_items) == len(items):
+        return jsonify({"error": "not found"}), 404
+    _instr_save_all(new_items)
+    return jsonify({"ok": True})
+
 
 @wizard_bp.route("/wizard")
 def wizard_page():
@@ -1315,6 +1442,7 @@ def api_generate():
     add_captions = bool(data.get("add_captions", False))
     auto_crop_wide = bool(data.get("auto_crop_wide", False))
     caption_style = data.get("caption_style") or {}
+    ai_instructions = (data.get("ai_instructions") or "").strip()
 
     threading.Thread(
         target=_generate,
@@ -1333,6 +1461,7 @@ def api_generate():
             "add_captions": add_captions,
             "caption_style": caption_style,
             "auto_crop_wide": auto_crop_wide,
+            "ai_instructions": ai_instructions,
         },
         daemon=True,
     ).start()
@@ -1679,7 +1808,7 @@ input[type="number"]{width:80px}
 }
 .folder-item:hover{background:#333}
 .folder-item input{accent-color:#e53935}
-.folder-item .fi-name{flex:1;white-space:nowrap}
+.folder-item .fi-name{flex:1;white-space:normal;word-break:break-word;line-height:1.35}
 .folder-item .fi-count{color:#777;font-size:10px;margin-left:8px;flex-shrink:0}
 .folder-actions .folder-act-btn{
   flex:1;font-size:11px;padding:5px 10px;background:#1a1a1a;
@@ -1706,6 +1835,37 @@ button:disabled{opacity:.5;cursor:not-allowed}
 }
 .btn-primary:hover{background:#c62828}
 .btn-secondary{font-size:12px;padding:8px 14px}
+
+/* -- AI Instructions controls -- */
+.ai-instr-btn{
+  background:#1a1a1a;color:#ddd;border:1px solid #333;border-radius:6px;
+  padding:6px 14px;font-size:12px;cursor:pointer;
+}
+.ai-instr-btn:hover{border-color:#666;color:#fff}
+.ai-instr-row{
+  display:flex;align-items:flex-start;gap:10px;padding:10px 12px;
+  border:1px solid #2a2a2a;border-radius:6px;margin-bottom:6px;
+  background:#10131a;cursor:pointer;transition:border-color .1s,background .1s;
+}
+.ai-instr-row:hover{border-color:#3a4860;background:#161b27}
+.ai-instr-row .ai-instr-meta{flex:1;min-width:0}
+.ai-instr-row .ai-instr-name{
+  font-size:13px;font-weight:600;color:#e0e0e0;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.ai-instr-row .ai-instr-preview{
+  font-size:11px;color:#777;margin-top:2px;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+  overflow:hidden;
+}
+.ai-instr-row .ai-instr-date{
+  font-size:10px;color:#666;flex-shrink:0;font-family:'SF Mono',Menlo,monospace;
+}
+.ai-instr-row .ai-instr-del{
+  background:transparent;border:none;color:#666;font-size:18px;line-height:1;
+  cursor:pointer;padding:0 6px;border-radius:4px;
+}
+.ai-instr-row .ai-instr-del:hover{background:#3a1a1a;color:#ef5350}
 
 /* -- Progress -- */
 .progress{
@@ -1955,9 +2115,52 @@ button:disabled{opacity:.5;cursor:not-allowed}
       </div>
     </div>
 
+    <!-- AI Instructions: free-form text the user wants the planner to
+         respect on top of everything else (research, feedback, defaults). -->
+    <div class="config-row" style="margin-top:14px;flex-direction:column;align-items:stretch;gap:6px">
+      <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#aaa">
+        <span>AI Instructions</span>
+        <span id="ai-instr-loaded" style="font-size:11px;color:#666;font-style:italic"></span>
+      </label>
+      <textarea id="ai-instructions" rows="4"
+        placeholder="E.g. 'Always start with a wide establishing shot', 'Keep clips under 2 seconds', 'Use only scenes tagged training'… These instructions take precedence over all other guidance."
+        style="width:100%;resize:vertical;min-height:80px;
+               background:#0c0c14;border:1px solid #2e2e3e;color:#eee;
+               border-radius:6px;padding:8px 10px;font-size:13px;
+               font-family:inherit;box-sizing:border-box;outline:none"></textarea>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button type="button" class="ai-instr-btn" onclick="aiInstrSave(false)">Save</button>
+        <button type="button" class="ai-instr-btn" onclick="aiInstrSave(true)">Save As New</button>
+        <button type="button" class="ai-instr-btn" onclick="openAiInstrLoad()">Load</button>
+      </div>
+    </div>
+
     <!-- Generate button on its own row. -->
     <div class="config-row" style="margin-top:14px;justify-content:flex-end">
       <button class="btn-primary" id="gen-btn" onclick="startGeneration()">✨ Generate Video</button>
+    </div>
+
+    <!-- AI Instructions: snippet picker modal. Opens when user clicks Load. -->
+    <div id="ai-instr-modal"
+         style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);
+                z-index:9100;align-items:center;justify-content:center;padding:20px"
+         onclick="if(event.target===this)closeAiInstrLoad()">
+      <div style="background:#15151c;border:1px solid #2e2e3e;border-radius:10px;
+                  width:640px;max-width:95vw;max-height:80vh;display:flex;
+                  flex-direction:column;box-shadow:0 12px 40px rgba(0,0,0,.6)">
+        <div style="padding:14px 18px;border-bottom:1px solid #242424;
+                    display:flex;align-items:center;gap:10px">
+          <h3 style="flex:1;margin:0;font-size:14px;color:#fff">Load AI Instructions</h3>
+          <button onclick="closeAiInstrLoad()"
+                  style="background:none;border:none;color:#888;font-size:22px;
+                         cursor:pointer;padding:0 4px;line-height:1">&times;</button>
+        </div>
+        <div style="padding:10px 18px 4px;font-size:11px;color:#777">
+          Double-click a snippet to load it. Most recently modified first.
+        </div>
+        <div id="ai-instr-list"
+             style="flex:1;overflow-y:auto;padding:8px 12px 14px"></div>
+      </div>
     </div>
 
     <!-- Caption settings modal — opens via ⚙ button next to "Add captions".
@@ -2232,6 +2435,14 @@ async function loadFiles() {
   wizFileUpdateLabel();
 }
 
+// Strip extension and replace underscores/dashes with spaces for
+// display only — actual filename stays on data-fn so selections persist
+// and the search matches against the real name.
+function _wizPretty(name) {
+  var base = (name || '').replace(/\.[^.]+$/, '');
+  return base.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 function renderFileList() {
   var list = document.getElementById('file-list');
   if (!list) return;
@@ -2242,10 +2453,11 @@ function renderFileList() {
     if (q && f.name.toLowerCase().indexOf(q) < 0) continue;
     var checked = _wizFileSelected.has(f.name) ? ' checked' : '';
     var safe = f.name.replace(/"/g, '&quot;');
+    var pretty = _wizPretty(f.name).replace(/"/g, '&quot;');
     html += '<label class="folder-item">'
       + '<input type="checkbox" data-fn="' + safe + '"' + checked
       +   ' onchange="wizFileToggle(this)">'
-      + '<span class="fi-name" title="' + safe + '">' + safe + '</span>'
+      + '<span class="fi-name" title="' + safe + '">' + pretty + '</span>'
       + '<span class="fi-count">' + f.count + '</span>'
       + '</label>';
   }
@@ -2370,6 +2582,116 @@ function getSelectedFromPicker(ddId) {
   return selected;
 }
 
+// ── AI Instructions snippets ────────────────────────────────────────────
+var _aiInstrLoadedId = null;     // id of the snippet currently in the textarea
+var _aiInstrLoadedName = null;
+
+function _aiInstrSetLoaded(snip) {
+  _aiInstrLoadedId   = snip ? snip.id   : null;
+  _aiInstrLoadedName = snip ? snip.name : null;
+  var el = document.getElementById('ai-instr-loaded');
+  if (el) el.textContent = snip ? ('— ' + snip.name) : '';
+}
+
+function _aiInstrFormatDate(iso) {
+  if (!iso) return '';
+  try {
+    var d = new Date(iso);
+    return d.toLocaleDateString(undefined, {month: 'short', day: 'numeric',
+                                            year: 'numeric'})
+         + ' ' + d.toLocaleTimeString(undefined, {hour: '2-digit',
+                                                  minute: '2-digit'});
+  } catch (e) { return iso; }
+}
+
+function _aiInstrEsc(s) {
+  return (s || '').replace(/[&<>"']/g, function(c) {
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+
+async function aiInstrSave(asNew) {
+  var ta = document.getElementById('ai-instructions');
+  var content = (ta && ta.value) || '';
+  var sid = asNew ? '' : (_aiInstrLoadedId || '');
+  var name;
+  if (asNew || !sid) {
+    var fallback = _aiInstrLoadedName
+      ? (_aiInstrLoadedName + ' (copy)') : 'Untitled';
+    name = window.prompt('Name for this snippet:', fallback);
+    if (name === null) return;     // user cancelled
+    name = name.trim();
+    if (!name) { alert('Name is required.'); return; }
+  } else {
+    name = _aiInstrLoadedName || 'Untitled';
+  }
+  var body = {name: name, content: content};
+  if (sid) body.id = sid;
+  var r = await fetch('/wizard/api/instructions', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    var err = await r.json().catch(function(){return {};});
+    alert('Save failed: ' + (err.error || r.status));
+    return;
+  }
+  var saved = await r.json();
+  _aiInstrSetLoaded(saved);
+}
+
+async function openAiInstrLoad() {
+  document.getElementById('ai-instr-modal').style.display = 'flex';
+  var list = document.getElementById('ai-instr-list');
+  list.innerHTML = '<div style="color:#777;font-size:12px;padding:14px">Loading…</div>';
+  var r = await fetch('/wizard/api/instructions');
+  var items = await r.json();
+  if (!items.length) {
+    list.innerHTML = '<div style="color:#777;font-size:12px;padding:14px">'
+      + 'No snippets saved yet. Type instructions above and click Save As New.</div>';
+    return;
+  }
+  var html = '';
+  for (var i = 0; i < items.length; i++) {
+    var s = items[i];
+    var preview = _aiInstrEsc((s.content || '').slice(0, 220));
+    html += '<div class="ai-instr-row" data-id="' + _aiInstrEsc(s.id) + '"'
+      + ' ondblclick="aiInstrLoadById(\'' + _aiInstrEsc(s.id) + '\')">'
+      + '  <div class="ai-instr-meta">'
+      + '    <div class="ai-instr-name">' + _aiInstrEsc(s.name) + '</div>'
+      + '    <div class="ai-instr-preview">' + preview + '</div>'
+      + '  </div>'
+      + '  <div class="ai-instr-date">' + _aiInstrFormatDate(s.modified) + '</div>'
+      + '  <button class="ai-instr-del" title="Delete"'
+      + '   onclick="event.stopPropagation();aiInstrDelete(\'' + _aiInstrEsc(s.id) + '\')">&times;</button>'
+      + '</div>';
+  }
+  list.innerHTML = html;
+}
+
+function closeAiInstrLoad() {
+  document.getElementById('ai-instr-modal').style.display = 'none';
+}
+
+async function aiInstrLoadById(sid) {
+  var r = await fetch('/wizard/api/instructions');
+  var items = await r.json();
+  var snip = items.find(function(s){ return s.id === sid; });
+  if (!snip) { alert('Snippet not found.'); return; }
+  document.getElementById('ai-instructions').value = snip.content || '';
+  _aiInstrSetLoaded(snip);
+  closeAiInstrLoad();
+}
+
+async function aiInstrDelete(sid) {
+  if (!confirm('Delete this snippet?')) return;
+  var r = await fetch('/wizard/api/instructions/' + encodeURIComponent(sid),
+                     {method: 'DELETE'});
+  if (!r.ok) { alert('Delete failed.'); return; }
+  if (_aiInstrLoadedId === sid) _aiInstrSetLoaded(null);
+  openAiInstrLoad();   // refresh the list in place
+}
+
 function startGeneration() {
   if (generating) return;
   generating = true;
@@ -2419,6 +2741,7 @@ function startGeneration() {
       include_wide: document.getElementById('include-wide').checked,
       auto_crop_wide: document.getElementById('auto-crop-wide').checked,
       add_captions: document.getElementById('add-captions').checked,
+      ai_instructions: (document.getElementById('ai-instructions') || {}).value || '',
       caption_style: {
         font:     document.getElementById('cap-font').value,
         color:    document.getElementById('cap-color').value,

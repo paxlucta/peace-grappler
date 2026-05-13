@@ -26,8 +26,14 @@ inline CSS is overridden by the higher-specificity theme rules below.
 # either the parent key OR any sub-tab key, and a tab strip is rendered
 # under the header so the user can jump between the sub-pages.
 NAV_LINKS = [
-    ("wizard",   "/wizard",   "AI Builder", None),
-    ("builder",  "/builder",  "Builder",   None),
+    # "Builder" groups the AI-driven wizard and the manual editor under a
+    # single top-level entry. Parent href points to /wizard so clicking
+    # "Builder" lands on the AI tab by default. The sub-tab strip lets
+    # the user flip to Manual without going back to the main nav.
+    ("builder",  "/wizard",   "Builder", [
+        ("wizard",  "/wizard",  "AI"),
+        ("builder", "/builder", "Manual"),
+    ]),
     ("library",  "/library",  "Generated Videos", None),
     ("analyze",  "/analyze",  "Input Videos", [
         ("analyze", "/analyze", "Files"),

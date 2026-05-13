@@ -261,7 +261,7 @@ nav a.active{color:#e53935;border-color:#e53935}
 }
 .ff-item:hover{background:#1a1a24}
 .ff-item input{accent-color:#e53935;flex-shrink:0}
-.ff-item .ff-name{flex:1;white-space:nowrap}
+.ff-item .ff-name{flex:1;white-space:normal;word-break:break-word;line-height:1.35}
 .ff-item .ff-count{color:#666;font-size:10px;flex-shrink:0}
 
 /* -- Scene grid -- */
@@ -363,7 +363,17 @@ nav a.active{color:#e53935;border-color:#e53935}
   background:#161616;border:1px solid #2a2a2a;border-radius:10px;
   width:min(640px,92vw);max-height:80vh;display:flex;flex-direction:column;
   box-shadow:0 12px 40px rgba(0,0,0,.6);
+  transition:width .2s;
 }
+/* Wider modal when the user picks "Both" so the two columns get room. */
+.tx-modal.is-both{width:min(1080px,96vw)}
+.tx-both-cols{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:8px}
+.tx-both-cols > .tx-col{min-width:0}
+.tx-col-label{
+  font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;
+  color:#1976d2;padding:6px 0;border-bottom:1px solid #1f1f1f;margin-bottom:4px;
+}
+.tx-col.is-xlat .tx-col-label{color:#4caf50}
 .tx-head{
   padding:14px 18px;border-bottom:1px solid #242424;
   display:flex;align-items:center;gap:10px;
@@ -541,6 +551,14 @@ function ffInit() {
   ffUpdateLabel();
 }
 
+// Strip extension and replace underscores/dashes with spaces for
+// display only — actual filename stays on data-fn so selections + search
+// work against the original.
+function _ffPretty(name) {
+  var base = (name || '').replace(/\.[^.]+$/, '');
+  return base.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 function ffRenderList() {
   var list = document.getElementById('ff-list');
   if (!list) return;
@@ -551,10 +569,11 @@ function ffRenderList() {
     if (q && f.name.toLowerCase().indexOf(q) < 0) continue;
     var checked = ffSelected.has(f.name) ? ' checked' : '';
     var safe = f.name.replace(/"/g, '&quot;');
+    var pretty = _ffPretty(f.name).replace(/"/g, '&quot;');
     html += '<label class="ff-item">'
       + '<input type="checkbox" data-fn="' + safe + '"' + checked
       + ' onchange="ffToggle(this)">'
-      + '<span class="ff-name" title="' + safe + '">' + safe + '</span>'
+      + '<span class="ff-name" title="' + safe + '">' + pretty + '</span>'
       + '<span class="ff-count">' + f.count + '</span>'
       + '</label>';
   }
@@ -835,7 +854,7 @@ function clearSearch() {
 
 // -- Transcript modal state --
 var _txData = null;            // last loaded {groups, ...}
-var _txMode = 'native';         // 'native' | 'english' | 'both'
+var _txMode = 'both';           // 'native' | 'english' | 'both' — default both when both exist
 var _txHasNative = false;
 var _txHasEnglish = false;
 
@@ -875,7 +894,10 @@ async function openTranscript(sceneId) {
                               && (g.language || '').toLowerCase() === 'en';
                      });
     // Default: native wins. If only English exists, show English.
-    _txMode = _txHasNative ? 'native' : (_txHasEnglish ? 'english' : 'native');
+    // Default: Both when we have both versions, otherwise whichever exists.
+    _txMode = (_txHasNative && _txHasEnglish) ? 'both'
+            : (_txHasNative ? 'native'
+            : (_txHasEnglish ? 'english' : 'native'));
     syncLangToggle();
     toolbar.style.display = '';
     renderTxContent();
@@ -932,16 +954,9 @@ function _txHighlight(text, query) {
   return {html: html, count: count};
 }
 
-function renderTxContent() {
-  var content = document.getElementById('tx-content');
-  if (!content || !_txData) return;
-  var groups = _txGroupsForMode();
-  if (!groups.length) {
-    content.innerHTML = '<div class="tx-empty">No transcript in this view.</div>';
-    document.getElementById('tx-search-count').textContent = '';
-    return;
-  }
-  var q = (document.getElementById('tx-search') || {}).value || '';
+// Build the inner HTML for one stack of groups (segments only — no column
+// chrome). Returns {html, count} so the caller can sum highlight counts.
+function _txBuildGroupsHtml(groups, q) {
   var totalHits = 0;
   var html = '';
   for (var i = 0; i < groups.length; i++) {
@@ -959,11 +974,71 @@ function renderTxContent() {
     }
     html += '</div>';
   }
+  return {html: html, count: totalHits};
+}
+
+function renderTxContent() {
+  var content = document.getElementById('tx-content');
+  if (!content || !_txData) return;
+  // Toggle a wide modal class so the side-by-side view has room.
+  var modal = document.querySelector('.tx-modal');
+  if (modal) modal.classList.toggle('is-both', _txMode === 'both');
+
+  var q = (document.getElementById('tx-search') || {}).value || '';
+  var totalHits = 0;
+  var html = '';
+
+  if (_txMode === 'both') {
+    // Split groups into native (left) and English (right). The "English"
+    // side prefers true translations; if none exist, fall back to English
+    // originals so the column isn't empty when the source was English.
+    var nativeGroups = _txData.groups.filter(function(g){ return !g.is_translation; });
+    var engGroups = _txData.groups.filter(function(g){ return g.is_translation; });
+    if (!engGroups.length) {
+      engGroups = _txData.groups.filter(function(g){
+        return !g.is_translation && (g.language || '').toLowerCase() === 'en';
+      });
+    }
+    if (!nativeGroups.length && !engGroups.length) {
+      content.innerHTML = '<div class="tx-empty">No transcript in this view.</div>';
+      document.getElementById('tx-search-count').textContent = '';
+      return;
+    }
+    var L = _txBuildGroupsHtml(nativeGroups, q);
+    var R = _txBuildGroupsHtml(engGroups,    q);
+    totalHits = L.count + R.count;
+    var nLang = (nativeGroups[0] && nativeGroups[0].language)
+                ? ' [' + escHtml(nativeGroups[0].language) + ']' : '';
+    var eLang = (engGroups[0] && engGroups[0].language
+                 && engGroups[0].language.toLowerCase() !== 'en')
+                ? ' (translated from ' + escHtml(engGroups[0].language) + ')'
+                : '';
+    html = '<div class="tx-both-cols">'
+      +     '<div class="tx-col">'
+      +       '<div class="tx-col-label">Native' + nLang + '</div>'
+      +       (L.html || '<div class="tx-empty">No native transcript.</div>')
+      +     '</div>'
+      +     '<div class="tx-col is-xlat">'
+      +       '<div class="tx-col-label">English' + eLang + '</div>'
+      +       (R.html || '<div class="tx-empty">No English transcript.</div>')
+      +     '</div>'
+      +   '</div>';
+  } else {
+    var groups = _txGroupsForMode();
+    if (!groups.length) {
+      content.innerHTML = '<div class="tx-empty">No transcript in this view.</div>';
+      document.getElementById('tx-search-count').textContent = '';
+      return;
+    }
+    var built = _txBuildGroupsHtml(groups, q);
+    html = built.html;
+    totalHits = built.count;
+  }
+
   content.innerHTML = html;
   var countEl = document.getElementById('tx-search-count');
   if (q) {
     countEl.textContent = totalHits + ' match' + (totalHits !== 1 ? 'es' : '');
-    // Scroll the first match into view.
     var first = content.querySelector('mark');
     if (first) {
       first.classList.add('active');

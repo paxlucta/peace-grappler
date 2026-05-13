@@ -1829,7 +1829,17 @@ td{font-size:13px}
   background:#15151c;border:1px solid #2e2e3e;border-radius:12px;
   width:min(760px,94vw);max-height:88vh;display:flex;flex-direction:column;
   box-shadow:0 20px 60px rgba(0,0,0,.7);overflow:hidden;
+  transition:width .2s;
 }
+/* Widen modal when "Both" is active so the side-by-side columns have room. */
+.vtx-modal.is-both{width:min(1180px,96vw)}
+.vtx-both-cols{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:6px}
+.vtx-both-cols > .vtx-col{min-width:0}
+.vtx-col-label{
+  font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;
+  color:#1976d2;padding:6px 0;border-bottom:1px solid #1f1f1f;margin-bottom:6px;
+}
+.vtx-col.is-xlat .vtx-col-label{color:#4caf50}
 .vtx-head{
   display:flex;align-items:center;gap:12px;padding:14px 18px;
   border-bottom:1px solid #1e1e2a;
@@ -3335,7 +3345,7 @@ var _vtxState = { videoId: null, selectionStart: null, selectionEnd: null,
 // fetched payload so we can re-render when the user flips the toggle or
 // types in the search box without re-hitting the API.
 var _vtxData = null;
-var _vtxMode = 'native';
+var _vtxMode = 'both';     // default to side-by-side when both versions exist
 var _vtxHasNative = false;
 var _vtxHasEnglish = false;
 
@@ -3404,7 +3414,9 @@ async function openVideoTranscript(videoId) {
                        return !g.is_translation
                               && (g.language || '').toLowerCase() === 'en';
                      });
-    _vtxMode = _vtxHasNative ? 'native' : (_vtxHasEnglish ? 'english' : 'native');
+    _vtxMode = (_vtxHasNative && _vtxHasEnglish) ? 'both'
+             : (_vtxHasNative ? 'native'
+             : (_vtxHasEnglish ? 'english' : 'native'));
     var s = document.getElementById('vtx-search');
     if (s) s.value = '';
     document.getElementById('vtx-search-count').textContent = '';
@@ -3460,17 +3472,8 @@ function _vtxHighlight(text, query) {
   return {html: html, count: count};
 }
 
-function renderVtxContent() {
-  var body = document.getElementById('vtx-body');
-  if (!body || !_vtxData) return;
-  var groups = _vtxGroupsForMode();
-  if (!groups.length) {
-    body.innerHTML = '<div style="color:#666;text-align:center;padding:24px">'
-      + 'No transcript in this view.</div>';
-    document.getElementById('vtx-search-count').textContent = '';
-    return;
-  }
-  var q = (document.getElementById('vtx-search') || {}).value || '';
+// Build the inner HTML for a stack of groups. Returns {html, count}.
+function _vtxBuildGroupsHtml(groups, q) {
   var totalHits = 0;
   var html = '';
   for (var i = 0; i < groups.length; i++) {
@@ -3499,6 +3502,66 @@ function renderVtxContent() {
     }
     html += '</div>';
   }
+  return {html: html, count: totalHits};
+}
+
+function renderVtxContent() {
+  var body = document.getElementById('vtx-body');
+  if (!body || !_vtxData) return;
+  // Widen the modal when showing side-by-side columns.
+  var modal = document.querySelector('.vtx-modal');
+  if (modal) modal.classList.toggle('is-both', _vtxMode === 'both');
+
+  var q = (document.getElementById('vtx-search') || {}).value || '';
+  var totalHits = 0;
+  var html = '';
+
+  if (_vtxMode === 'both') {
+    var nativeGroups = _vtxData.groups.filter(function(g){ return !g.is_translation; });
+    var engGroups = _vtxData.groups.filter(function(g){ return g.is_translation; });
+    if (!engGroups.length) {
+      engGroups = _vtxData.groups.filter(function(g){
+        return !g.is_translation && (g.language || '').toLowerCase() === 'en';
+      });
+    }
+    if (!nativeGroups.length && !engGroups.length) {
+      body.innerHTML = '<div style="color:#666;text-align:center;padding:24px">'
+        + 'No transcript in this view.</div>';
+      document.getElementById('vtx-search-count').textContent = '';
+      return;
+    }
+    var L = _vtxBuildGroupsHtml(nativeGroups, q);
+    var R = _vtxBuildGroupsHtml(engGroups,    q);
+    totalHits = L.count + R.count;
+    var nLang = (nativeGroups[0] && nativeGroups[0].language)
+                ? ' [' + _vtxEsc(nativeGroups[0].language) + ']' : '';
+    var eLang = (engGroups[0] && engGroups[0].language
+                 && engGroups[0].language.toLowerCase() !== 'en')
+                ? ' (translated from ' + _vtxEsc(engGroups[0].language) + ')'
+                : '';
+    html = '<div class="vtx-both-cols">'
+      +     '<div class="vtx-col">'
+      +       '<div class="vtx-col-label">Native' + nLang + '</div>'
+      +       (L.html || '<div style="color:#666;padding:12px">No native transcript.</div>')
+      +     '</div>'
+      +     '<div class="vtx-col is-xlat">'
+      +       '<div class="vtx-col-label">English' + eLang + '</div>'
+      +       (R.html || '<div style="color:#666;padding:12px">No English transcript.</div>')
+      +     '</div>'
+      +   '</div>';
+  } else {
+    var groups = _vtxGroupsForMode();
+    if (!groups.length) {
+      body.innerHTML = '<div style="color:#666;text-align:center;padding:24px">'
+        + 'No transcript in this view.</div>';
+      document.getElementById('vtx-search-count').textContent = '';
+      return;
+    }
+    var built = _vtxBuildGroupsHtml(groups, q);
+    html = built.html;
+    totalHits = built.count;
+  }
+
   body.innerHTML = html;
   var countEl = document.getElementById('vtx-search-count');
   if (q) {
