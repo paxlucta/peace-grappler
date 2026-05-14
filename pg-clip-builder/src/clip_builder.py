@@ -922,6 +922,12 @@ def _generate_multitrack(data):
             clip_data["crop_x_frac"] = (
                 float(cx) if isinstance(cx, (int, float)) else None
             )
+            # Free-mode crops — list of {src,dst,z} rectangle pairs. When
+            # present, this overrides crop_x_frac and produces a multi-
+            # window composite at render time (see video.py).
+            fc = item.get("free_crops")
+            if isinstance(fc, list) and fc:
+                clip_data["free_crops"] = fc
             clips.append(clip_data)
 
     # Track-level settings (mute + default wide-clip position).
@@ -1062,6 +1068,9 @@ def _generate_multitrack(data):
                     "muted": bool(c.get("muted")),
                     "stack_order": int(c.get("stack_order", 0)),
                     "crop_x_frac": c.get("effective_crop_x_frac"),
+                    # Free-mode multi-rectangle composite. Overrides
+                    # crop_x_frac when present (handled in renderer).
+                    "free_crops": c.get("free_crops") or None,
                 })
 
             seg_out = os.path.join(tmp, f"seg{si:03d}_layered.mp4")
@@ -1836,6 +1845,95 @@ footer{
 /* Track-header crop button */
 .th-btn.crop-btn.active{color:#90caf9}
 
+/* -- Crop modal: mode tabs + free-mode panes -- */
+.crop-mode-tabs{
+  display:flex;gap:4px;margin:0 0 12px 0;
+  border-bottom:1px solid #2a2a2a;
+}
+.crop-mode-tabs button{
+  background:transparent;border:none;color:#888;font-size:12px;font-weight:600;
+  padding:8px 16px;letter-spacing:.5px;cursor:pointer;
+  border-bottom:2px solid transparent;margin-bottom:-1px;text-transform:uppercase;
+}
+.crop-mode-tabs button:hover{color:#fff}
+.crop-mode-tabs button.active{color:#fff;border-bottom-color:#2196f3}
+
+.cf-toolbar{
+  display:flex;align-items:center;gap:6px;
+  padding:6px 8px;background:#111;border-radius:6px;margin-bottom:10px;
+}
+.cf-toolbar .cf-btn{
+  background:#1a1a1a;border:1px solid #333;color:#ddd;border-radius:4px;
+  padding:4px 10px;font-size:13px;line-height:1;cursor:pointer;
+}
+.cf-toolbar .cf-btn:hover{border-color:#2196f3;color:#fff}
+.cf-toolbar .cf-sep{width:1px;height:18px;background:#2a2a2a;margin:0 4px}
+.cf-toolbar .cf-status{font-size:11px;color:#888;margin-left:8px;flex:1;text-align:right}
+
+/* Flex (not grid) so each pane's width is derived from aspect-ratio *
+ * height, not forced to share an equal column width. Without this, a   *
+ * 9:16 pane and a 16:9 pane both forced to identical column widths     *
+ * end up with the same on-screen shape, breaking the aspect lock that  *
+ * the rectangle math is built on. */
+.cf-stage{display:flex;gap:14px;justify-content:center;align-items:flex-start}
+.cf-pane{display:flex;flex-direction:column;gap:6px;min-width:0}
+.cf-pane-label{
+  font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.6px;
+  font-weight:700;
+}
+.cf-src-wrap,.cf-dst-wrap{
+  position:relative;background:#0a0a0a;border:1px solid #2a2a2a;border-radius:6px;
+  overflow:hidden;user-select:none;
+  /* Height is the load-bearing constraint; width derives from aspect.  *
+   * Cap at 60vh so the modal stays usable on short windows.            */
+  height:min(60vh,460px);width:auto;
+}
+.cf-src-wrap{aspect-ratio:16/9}     /* default; overridden once we know src aspect */
+.cf-dst-wrap{aspect-ratio:9/16}
+.cf-src-wrap img{
+  width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;
+}
+.cf-rects{position:absolute;inset:0;pointer-events:none}
+.cf-rect{
+  position:absolute;border:3px solid #e53935;box-sizing:border-box;
+  pointer-events:auto;cursor:grab;
+  background:rgba(255,255,255,0.03);
+}
+.cf-rect.selected{box-shadow:0 0 0 2px #fff;outline:2px solid #fff}
+.cf-rect:active{cursor:grabbing}
+.cf-rect .cf-handle{
+  position:absolute;width:12px;height:12px;background:#fff;border:2px solid #111;
+  border-radius:50%;
+}
+.cf-rect .cf-handle.h-nw{left:-6px;top:-6px;cursor:nwse-resize}
+.cf-rect .cf-handle.h-ne{right:-6px;top:-6px;cursor:nesw-resize}
+.cf-rect .cf-handle.h-sw{left:-6px;bottom:-6px;cursor:nesw-resize}
+.cf-rect .cf-handle.h-se{right:-6px;bottom:-6px;cursor:nwse-resize}
+.cf-rect .cf-label{
+  position:absolute;top:-22px;left:-3px;
+  font-size:10px;color:#fff;background:#222;padding:1px 6px;border-radius:3px;
+  font-family:'SF Mono',Menlo,monospace;letter-spacing:.5px;
+}
+.cf-dst-wrap .cf-rect{background-size:cover;background-position:center;background-repeat:no-repeat}
+.cf-dst-wrap .cf-rect .cf-handle.h-nw,
+.cf-dst-wrap .cf-rect .cf-handle.h-ne,
+.cf-dst-wrap .cf-rect .cf-handle.h-sw{display:none}   /* only SE handle on dst (uniform scale) */
+
+/* Preset picker rows */
+.cf-preset-row{
+  display:flex;align-items:center;gap:10px;padding:10px 12px;
+  border:1px solid #2a2a2a;border-radius:6px;margin:6px 4px;
+  cursor:pointer;background:#10131a;
+}
+.cf-preset-row:hover{border-color:#3a4860;background:#161b27}
+.cf-preset-row .cf-preset-name{flex:1;color:#e0e0e0;font-size:13px;font-weight:600}
+.cf-preset-row .cf-preset-meta{font-size:11px;color:#666}
+.cf-preset-row .cf-preset-del{
+  background:transparent;border:none;color:#666;cursor:pointer;font-size:18px;
+  padding:0 6px;line-height:1;
+}
+.cf-preset-row .cf-preset-del:hover{color:#ef5350}
+
 /* Sound blocks */
 .sblock{border:1px solid rgba(255,255,255,.15);color:#fff}
 .sblock .blk-vol{
@@ -2304,23 +2402,75 @@ footer{
 <div class="scene-editor" id="scene-editor"></div>
 
 <div class="overlay" id="crop-modal">
-  <div class="modal" style="max-width:560px">
-    <h2 style="color:#2196f3">Crop Wide Scene</h2>
-    <p id="crop-info" style="font-size:12px;color:#aaa;margin-bottom:12px">
-      Drag the 9:16 frame to pick the cropped region. The selection fills the full output frame.
-    </p>
-    <div id="crop-stage" class="crop-stage">
-      <div id="crop-thumb-wrap" class="crop-thumb-wrap">
-        <img id="crop-thumb" alt="">
-        <div id="crop-mask-l" class="crop-mask"></div>
-        <div id="crop-mask-r" class="crop-mask"></div>
-        <div id="crop-frame" class="crop-frame"></div>
+  <div class="modal" id="crop-modal-inner" style="max-width:560px">
+    <h2 style="color:#2196f3">Crop Scene</h2>
+    <div class="crop-mode-tabs">
+      <button type="button" data-mode="strip" class="active" onclick="setCropMode('strip')">Standard</button>
+      <button type="button" data-mode="free" onclick="setCropMode('free')">Free</button>
+    </div>
+
+    <!-- Standard (legacy single-strip) mode pane -->
+    <div id="crop-mode-strip" class="crop-mode-pane">
+      <p id="crop-info" style="font-size:12px;color:#aaa;margin-bottom:12px">
+        Drag the 9:16 frame to pick the cropped region. The selection fills the full output frame.
+      </p>
+      <div id="crop-stage" class="crop-stage">
+        <div id="crop-thumb-wrap" class="crop-thumb-wrap">
+          <img id="crop-thumb" alt="">
+          <div id="crop-mask-l" class="crop-mask"></div>
+          <div id="crop-mask-r" class="crop-mask"></div>
+          <div id="crop-frame" class="crop-frame"></div>
+        </div>
       </div>
     </div>
+
+    <!-- Free mode pane: source view on the left, 9:16 preview on the
+         right, with a toolbar above them. -->
+    <div id="crop-mode-free" class="crop-mode-pane" style="display:none">
+      <div class="cf-toolbar">
+        <button type="button" class="cf-btn" onclick="cfAddRect()" title="Add rectangle">+</button>
+        <button type="button" class="cf-btn" onclick="cfDeleteSelected()" title="Delete selected (Del)">×</button>
+        <span class="cf-sep"></span>
+        <button type="button" class="cf-btn" onclick="cfBumpZ(1)" title="Bring forward">↑</button>
+        <button type="button" class="cf-btn" onclick="cfBumpZ(-1)" title="Send back">↓</button>
+        <span class="cf-sep"></span>
+        <button type="button" class="cf-btn" onclick="cfOpenPresetLoad()">Load…</button>
+        <button type="button" class="cf-btn" onclick="cfSavePreset()">Save preset…</button>
+        <span class="cf-status" id="cf-status"></span>
+      </div>
+      <div class="cf-stage">
+        <div class="cf-pane">
+          <div class="cf-pane-label">Source</div>
+          <div class="cf-src-wrap" id="cf-src-wrap">
+            <img id="cf-src-img" alt="">
+            <div class="cf-rects" id="cf-src-rects"></div>
+          </div>
+        </div>
+        <div class="cf-pane">
+          <div class="cf-pane-label">Output (9:16)</div>
+          <div class="cf-dst-wrap" id="cf-dst-wrap">
+            <div class="cf-rects" id="cf-dst-rects"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div style="margin-top:14px;display:flex;gap:8px;justify-content:center;align-items:center">
       <button onclick="clearCrop()">Remove Crop</button>
       <button onclick="closeCropModal()">Cancel</button>
       <button onclick="saveCrop()" class="primary" style="background:#2196f3;border-color:#2196f3;color:#fff">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Crop-preset picker (Load…) -->
+<div class="overlay" id="cf-preset-modal">
+  <div class="modal" style="max-width:560px;max-height:80vh;display:flex;flex-direction:column">
+    <h2 style="color:#2196f3;margin-top:0">Load Crop Preset</h2>
+    <p style="color:#888;font-size:11px;margin:0 0 10px 0">Double-click a preset to apply it to this clip.</p>
+    <div id="cf-preset-list" style="flex:1;overflow-y:auto;margin:0 -4px"></div>
+    <div style="margin-top:12px;text-align:right">
+      <button onclick="cfClosePresetLoad()">Close</button>
     </div>
   </div>
 </div>
@@ -3656,9 +3806,14 @@ function openCropModal(target) {
   var existing;
   var thumbUrl = null;
   var info = '';
+  // Per-clip free-mode state. Reset on every open; rehydrate if the
+  // target clip already has saved free_crops.
+  _cfRects = [];
+  _cfSelected = null;
+  _cfThumbUrl = null;
   if (target.clipIdx !== undefined) {
     var vi = videoItems[target.clipIdx];
-    if (!vi || !vi.clip || !vi.clip.wide) return;
+    if (!vi || !vi.clip) return;
     existing = (typeof vi.crop_x_frac === 'number') ? vi.crop_x_frac : null;
     if (existing === null) {
       // Seed from layer default so the user starts from where the layer is.
@@ -3669,6 +3824,21 @@ function openCropModal(target) {
     }
     if (vi.clip.id !== undefined) {
       thumbUrl = '/api/thumbnail/' + vi.clip.id;
+      _cfThumbUrl = thumbUrl;
+    }
+    // Pre-load any existing free-mode crops on this clip.
+    if (Array.isArray(vi.free_crops) && vi.free_crops.length) {
+      _cfRects = vi.free_crops.map(function(r, i){
+        return {
+          id: ++_cfNextId,
+          sx: r.src && r.src.x_frac || 0, sy: r.src && r.src.y_frac || 0,
+          sw: r.src && r.src.w_frac || 0.3, sh: r.src && r.src.h_frac || 0.3,
+          dx: r.dst && r.dst.x_frac || 0,  dy: r.dst && r.dst.y_frac || 0,
+          dw: r.dst && r.dst.w_frac || 0.3, dh: r.dst && r.dst.h_frac || 0.3,
+          z:  (typeof r.z === 'number') ? r.z : i,
+          color: r.color || CF_COLORS[i % CF_COLORS.length],
+        };
+      });
     }
     info = (vi.clip.filename || 'Scene')
       + ' — drag the 9:16 frame to pick the cropped region.';
@@ -3708,6 +3878,11 @@ function openCropModal(target) {
   _cropWireDrag();
   // Layout once even if image is cached.
   setTimeout(_cropLayout, 0);
+  // Initialize free-mode pane (image + any existing rects). Default
+  // mode is Standard; switch to Free if this clip already has free crops.
+  _cfWire();
+  _cfLoadImage(thumbUrl);
+  setCropMode((_cfRects.length && target.clipIdx !== undefined) ? 'free' : 'strip');
 }
 
 function _cropLayout() {
@@ -3793,10 +3968,33 @@ function _cropWireDrag() {
 
 function saveCrop() {
   if (!_cropTarget) { closeCropModal(); return; }
+  if (_cropMode === 'free' && _cropTarget.clipIdx !== undefined) {
+    // Free-mode: write the multi-rectangle composite to this clip.
+    var vi = videoItems[_cropTarget.clipIdx];
+    if (vi) {
+      if (_cfRects.length) {
+        vi.free_crops = _cfRects.map(function(r){
+          return {
+            src: {x_frac:r.sx, y_frac:r.sy, w_frac:r.sw, h_frac:r.sh},
+            dst: {x_frac:r.dx, y_frac:r.dy, w_frac:r.dw, h_frac:r.dh},
+            z: r.z, color: r.color,
+          };
+        });
+        // Free crops override the legacy single-strip crop.
+        vi.crop_x_frac = null;
+      } else {
+        delete vi.free_crops;
+      }
+    }
+    closeCropModal();
+    renderVideoTrack();
+    saveBuilderState();
+    return;
+  }
   var f = Math.max(0, Math.min(1, _cropFrac));
   if (_cropTarget.clipIdx !== undefined) {
     var vi = videoItems[_cropTarget.clipIdx];
-    if (vi) vi.crop_x_frac = f;
+    if (vi) { vi.crop_x_frac = f; delete vi.free_crops; }
   } else if (_cropTarget.trackIdx !== undefined) {
     trackSettings[_cropTarget.trackIdx].default_crop_x_frac = f;
     renderTrackHeaders();
@@ -3810,7 +4008,7 @@ function clearCrop() {
   if (!_cropTarget) { closeCropModal(); return; }
   if (_cropTarget.clipIdx !== undefined) {
     var vi = videoItems[_cropTarget.clipIdx];
-    if (vi) vi.crop_x_frac = null;
+    if (vi) { vi.crop_x_frac = null; delete vi.free_crops; }
   } else if (_cropTarget.trackIdx !== undefined) {
     trackSettings[_cropTarget.trackIdx].default_crop_x_frac = null;
     renderTrackHeaders();
@@ -3823,13 +4021,354 @@ function clearCrop() {
 function closeCropModal() {
   _cropTarget = null;
   _cropDrag = null;
+  _cfDrag = null;
   document.getElementById('crop-modal').classList.remove('active');
 }
 
 window.addEventListener('resize', function() {
   var m = document.getElementById('crop-modal');
-  if (m && m.classList.contains('active')) _cropLayout();
+  if (m && m.classList.contains('active')) {
+    _cropLayout();
+    _cfLayout();
+  }
 });
+
+/* ── Free-mode crop ───────────────────────────────────────────────────
+ *
+ * Two synchronized panes — Source (left, source aspect) and Output
+ * (right, locked 9:16). The user adds N rectangles on the source; each
+ * one mirrors to the right at locked aspect ratio. On render, every
+ * rectangle becomes a crop+overlay step in the ffmpeg filter graph.
+ */
+var CF_COLORS = ['#e53935','#1976d2','#43a047','#fb8c00','#8e24aa','#00acc1'];
+var _cropMode = 'strip';
+var _cfRects = [];
+var _cfSelected = null;
+var _cfNextId = 0;
+var _cfDrag = null;
+var _cfSrcAspect = 16/9;
+var _cfThumbUrl = null;
+
+function setCropMode(mode) {
+  _cropMode = mode;
+  var stripBtn = document.querySelector('.crop-mode-tabs button[data-mode="strip"]');
+  var freeBtn  = document.querySelector('.crop-mode-tabs button[data-mode="free"]');
+  if (stripBtn) stripBtn.classList.toggle('active', mode === 'strip');
+  if (freeBtn)  freeBtn.classList.toggle('active',  mode === 'free');
+  document.getElementById('crop-mode-strip').style.display = mode === 'strip' ? '' : 'none';
+  document.getElementById('crop-mode-free').style.display  = mode === 'free'  ? '' : 'none';
+  // Widen the modal in free mode so two panes fit.
+  var inner = document.getElementById('crop-modal-inner');
+  if (inner) inner.style.maxWidth = (mode === 'free') ? '960px' : '560px';
+  if (mode === 'free') setTimeout(function(){ _cfLayout(); _cfRender(); }, 0);
+}
+
+function _cfLoadImage(url) {
+  var img = document.getElementById('cf-src-img');
+  if (!img) return;
+  img.onload = function() {
+    if (img.naturalWidth && img.naturalHeight) {
+      _cfSrcAspect = img.naturalWidth / img.naturalHeight;
+      var wrap = document.getElementById('cf-src-wrap');
+      if (wrap) wrap.style.aspectRatio = (img.naturalWidth + '/' + img.naturalHeight);
+    }
+    _cfLayout(); _cfRender();
+  };
+  img.onerror = function(){ _cfLayout(); _cfRender(); };
+  if (url) img.src = url;
+  else img.removeAttribute('src');
+}
+
+function _cfLayout() {
+  // Heights + widths are driven entirely by CSS (height: min(60vh, 460px)
+  // + aspect-ratio set on the wrap). Nothing to do here — kept as a hook
+  // for the resize listener so future tweaks have a home.
+}
+
+function cfAddRect() {
+  var idx = _cfRects.length;
+  var color = CF_COLORS[idx % CF_COLORS.length];
+  // Default: 40% wide, centered. Source aspect drives dst height.
+  var sw = 0.4, sh = 0.4, sx = 0.3, sy = 0.3;
+  // Lock the destination rectangle to the source rectangle's PIXEL
+  // aspect ratio inside the 9:16 output canvas.
+  //   srcRectAspect = (srcW*sw) / (srcH*sh) = _cfSrcAspect * (sw/sh)
+  //   dstRectAspect = (W*dw)   / (H*dh)     = (dw/dh) * (9/16)
+  //   match → dh = dw * (sh/sw) * (9/16) / _cfSrcAspect
+  var dw = 0.5;
+  var dh = dw * (sh / sw) * (9 / 16) / _cfSrcAspect;
+  if (!isFinite(dh) || dh <= 0) dh = 0.5;
+  dh = Math.min(0.9, dh);
+  var r = {
+    id: ++_cfNextId,
+    sx: sx, sy: sy, sw: sw, sh: sh,
+    dx: (1 - dw) / 2, dy: (1 - dh) / 2, dw: dw, dh: dh,
+    z: _cfRects.length, color: color,
+  };
+  _cfRects.push(r);
+  _cfSelected = r.id;
+  _cfRender();
+}
+
+function cfDeleteSelected() {
+  if (!_cfSelected) return;
+  _cfRects = _cfRects.filter(function(r){ return r.id !== _cfSelected; });
+  _cfSelected = null;
+  _cfRender();
+}
+
+function cfBumpZ(dir) {
+  if (!_cfSelected) return;
+  var r = _cfRects.find(function(x){ return x.id === _cfSelected; });
+  if (!r) return;
+  r.z += dir;
+  _cfRender();
+}
+
+function _cfRecomputeDstAspect(r) {
+  // Lock dst rect's pixel aspect to the source rect's pixel aspect:
+  //   dh = dw * (sh/sw) * (9/16) / _cfSrcAspect
+  // (See cfAddRect for the derivation.)
+  var dh = r.dw * (r.sh / r.sw) * (9 / 16) / _cfSrcAspect;
+  if (!isFinite(dh) || dh <= 0) dh = r.dw;
+  r.dh = Math.min(1.0, Math.max(0.02, dh));
+  if (r.dy + r.dh > 1) r.dy = Math.max(0, 1 - r.dh);
+}
+
+function _cfRender() {
+  var srcCt = document.getElementById('cf-src-rects');
+  var dstCt = document.getElementById('cf-dst-rects');
+  if (!srcCt || !dstCt) return;
+  srcCt.innerHTML = '';
+  dstCt.innerHTML = '';
+  // Sort by z ascending so the last one rendered is on top in the DOM.
+  var sorted = _cfRects.slice().sort(function(a,b){ return a.z - b.z; });
+  for (var i = 0; i < sorted.length; i++) {
+    var r = sorted[i];
+    var sel = (r.id === _cfSelected) ? ' selected' : '';
+    var idx = _cfRects.indexOf(r);
+
+    // SOURCE rectangle (resizable + draggable). 4 handles.
+    var sEl = document.createElement('div');
+    sEl.className = 'cf-rect' + sel;
+    sEl.style.cssText = 'border-color:' + r.color + ';'
+      + 'left:' + (r.sx*100) + '%;top:' + (r.sy*100) + '%;'
+      + 'width:' + (r.sw*100) + '%;height:' + (r.sh*100) + '%;';
+    sEl.dataset.rid = r.id; sEl.dataset.pane = 'src';
+    sEl.innerHTML =
+      '<span class="cf-label">' + (idx+1) + '  z=' + r.z + '</span>' +
+      '<div class="cf-handle h-nw" data-h="nw"></div>' +
+      '<div class="cf-handle h-ne" data-h="ne"></div>' +
+      '<div class="cf-handle h-sw" data-h="sw"></div>' +
+      '<div class="cf-handle h-se" data-h="se"></div>';
+    srcCt.appendChild(sEl);
+
+    // DST rectangle (uniform-scale on SE corner + drag to move).
+    var dEl = document.createElement('div');
+    dEl.className = 'cf-rect' + sel;
+    var bg = _cfThumbUrl
+      ? ("background-image:url('" + _cfThumbUrl + "');"
+         + "background-size:" + (100/r.sw) + "% " + (100/r.sh) + "%;"
+         + "background-position:" + (-r.sx/(1-r.sw)*100) + "% " + (-r.sy/(1-r.sh)*100) + "%;")
+      : '';
+    dEl.style.cssText = 'border-color:' + r.color + ';'
+      + 'left:' + (r.dx*100) + '%;top:' + (r.dy*100) + '%;'
+      + 'width:' + (r.dw*100) + '%;height:' + (r.dh*100) + '%;' + bg;
+    dEl.dataset.rid = r.id; dEl.dataset.pane = 'dst';
+    dEl.innerHTML =
+      '<span class="cf-label">' + (idx+1) + '</span>' +
+      '<div class="cf-handle h-se" data-h="se"></div>';
+    dstCt.appendChild(dEl);
+  }
+  // Status line: count of rects.
+  var st = document.getElementById('cf-status');
+  if (st) st.textContent = _cfRects.length
+    ? (_cfRects.length + ' rectangle' + (_cfRects.length !== 1 ? 's' : '')
+       + (_cfSelected ? ' (selected #' + (_cfRects.findIndex(function(x){return x.id===_cfSelected})+1) + ')' : ''))
+    : 'No rectangles yet. Click + to add one.';
+}
+
+function _cfWire() {
+  ['cf-src-wrap','cf-dst-wrap'].forEach(function(id){
+    var wrap = document.getElementById(id);
+    if (!wrap || wrap._cfWired) return;
+    wrap._cfWired = true;
+    wrap.addEventListener('mousedown', _cfOnMouseDown);
+  });
+  if (!window._cfGlobalWired) {
+    window._cfGlobalWired = true;
+    document.addEventListener('mousemove', _cfOnMouseMove);
+    document.addEventListener('mouseup',   _cfOnMouseUp);
+    document.addEventListener('keydown', function(e){
+      var modal = document.getElementById('crop-modal');
+      if (!modal || !modal.classList.contains('active') || _cropMode !== 'free') return;
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (_cfSelected) { cfDeleteSelected(); e.preventDefault(); }
+      }
+    });
+  }
+}
+
+function _cfOnMouseDown(e) {
+  var rectEl = e.target.closest('.cf-rect');
+  var wrap = e.currentTarget;
+  var pane = (wrap.id === 'cf-src-wrap') ? 'src' : 'dst';
+  if (!rectEl) {
+    // Click on empty area = deselect.
+    _cfSelected = null;
+    _cfRender();
+    return;
+  }
+  e.preventDefault();
+  var rid = parseInt(rectEl.dataset.rid, 10);
+  _cfSelected = rid;
+  var rc = _cfRects.find(function(x){ return x.id === rid; });
+  if (!rc) return;
+  var handle = e.target.closest('.cf-handle');
+  var b = wrap.getBoundingClientRect();
+  _cfDrag = {
+    pane: pane, rid: rid,
+    paneW: b.width, paneH: b.height,
+    paneL: b.left, paneT: b.top,
+    startX: e.clientX, startY: e.clientY,
+    init: {sx:rc.sx, sy:rc.sy, sw:rc.sw, sh:rc.sh,
+           dx:rc.dx, dy:rc.dy, dw:rc.dw, dh:rc.dh},
+    handle: handle ? handle.dataset.h : null,
+  };
+  _cfRender();
+}
+
+function _cfOnMouseMove(e) {
+  if (!_cfDrag) return;
+  var rc = _cfRects.find(function(x){ return x.id === _cfDrag.rid; });
+  if (!rc) return;
+  var dxFrac = (e.clientX - _cfDrag.startX) / _cfDrag.paneW;
+  var dyFrac = (e.clientY - _cfDrag.startY) / _cfDrag.paneH;
+  var I = _cfDrag.init;
+  if (_cfDrag.pane === 'src') {
+    if (!_cfDrag.handle) {
+      // Move
+      rc.sx = Math.max(0, Math.min(1 - I.sw, I.sx + dxFrac));
+      rc.sy = Math.max(0, Math.min(1 - I.sh, I.sy + dyFrac));
+    } else {
+      // Resize handles — free aspect on the source side.
+      if (_cfDrag.handle.indexOf('e') >= 0) rc.sw = Math.max(0.02, Math.min(1 - I.sx, I.sw + dxFrac));
+      if (_cfDrag.handle.indexOf('s') >= 0) rc.sh = Math.max(0.02, Math.min(1 - I.sy, I.sh + dyFrac));
+      if (_cfDrag.handle.indexOf('w') >= 0) {
+        var nsx = Math.max(0, Math.min(I.sx + I.sw - 0.02, I.sx + dxFrac));
+        rc.sw = (I.sx + I.sw) - nsx; rc.sx = nsx;
+      }
+      if (_cfDrag.handle.indexOf('n') >= 0) {
+        var nsy = Math.max(0, Math.min(I.sy + I.sh - 0.02, I.sy + dyFrac));
+        rc.sh = (I.sy + I.sh) - nsy; rc.sy = nsy;
+      }
+      // Recompute dst aspect to stay locked to source.
+      _cfRecomputeDstAspect(rc);
+    }
+  } else {
+    // dst pane
+    if (!_cfDrag.handle) {
+      rc.dx = Math.max(0, Math.min(1 - I.dw, I.dx + dxFrac));
+      rc.dy = Math.max(0, Math.min(1 - I.dh, I.dy + dyFrac));
+    } else if (_cfDrag.handle === 'se') {
+      // Uniform scale by SE corner — drive from dw, then re-lock dh.
+      var newDw = Math.max(0.05, Math.min(1 - I.dx, I.dw + dxFrac));
+      rc.dw = newDw;
+      _cfRecomputeDstAspect(rc);
+    }
+  }
+  _cfRender();
+}
+
+function _cfOnMouseUp() { _cfDrag = null; }
+
+/* ── Crop presets (save/load) ────────────────────────────────────── */
+
+async function cfSavePreset() {
+  if (!_cfRects.length) { alert('Add at least one rectangle to save.'); return; }
+  var name = (window.prompt('Preset name:') || '').trim();
+  if (!name) return;
+  var body = {
+    name: name,
+    rects: _cfRects.map(function(r){
+      return {
+        src: {x_frac:r.sx, y_frac:r.sy, w_frac:r.sw, h_frac:r.sh},
+        dst: {x_frac:r.dx, y_frac:r.dy, w_frac:r.dw, h_frac:r.dh},
+        z: r.z, color: r.color,
+      };
+    }),
+  };
+  var r = await fetch('/api/crop-presets', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) { alert('Save failed.'); return; }
+  document.getElementById('cf-status').textContent = 'Saved as "' + name + '"';
+}
+
+async function cfOpenPresetLoad() {
+  var modal = document.getElementById('cf-preset-modal');
+  var list = document.getElementById('cf-preset-list');
+  list.innerHTML = '<div style="color:#777;padding:14px;font-size:12px">Loading…</div>';
+  modal.classList.add('active');
+  try {
+    var items = await fetch('/api/crop-presets').then(function(r){return r.json()});
+    if (!items.length) {
+      list.innerHTML = '<div style="color:#777;padding:14px;font-size:12px">'
+        + 'No presets saved yet. Build a layout and click "Save preset…".</div>';
+      return;
+    }
+    list.innerHTML = '';
+    for (var i = 0; i < items.length; i++) {
+      var p = items[i];
+      var row = document.createElement('div');
+      row.className = 'cf-preset-row';
+      row.dataset.pid = p.id;
+      row.innerHTML = '<span class="cf-preset-name">' + (p.name || 'Untitled')
+        + '</span><span class="cf-preset-meta">'
+        + (p.rects ? p.rects.length : 0) + ' rect'
+        + ((p.rects && p.rects.length !== 1) ? 's' : '')
+        + '</span><button class="cf-preset-del" title="Delete"'
+        + ' data-pid="' + p.id + '">&times;</button>';
+      row.ondblclick = (function(pp){ return function(){ cfApplyPreset(pp); }; })(p);
+      list.appendChild(row);
+    }
+    list.querySelectorAll('.cf-preset-del').forEach(function(b){
+      b.addEventListener('click', async function(e){
+        e.stopPropagation();
+        if (!confirm('Delete this preset?')) return;
+        await fetch('/api/crop-presets/' + encodeURIComponent(b.dataset.pid),
+                   {method:'DELETE'});
+        cfOpenPresetLoad();
+      });
+    });
+  } catch (e) {
+    list.innerHTML = '<div style="color:#ef5350;padding:14px;font-size:12px">'
+      + 'Failed to load presets.</div>';
+  }
+}
+
+function cfClosePresetLoad() {
+  document.getElementById('cf-preset-modal').classList.remove('active');
+}
+
+function cfApplyPreset(p) {
+  _cfRects = (p.rects || []).map(function(r, i){
+    return {
+      id: ++_cfNextId,
+      sx: r.src && r.src.x_frac || 0, sy: r.src && r.src.y_frac || 0,
+      sw: r.src && r.src.w_frac || 0.3, sh: r.src && r.src.h_frac || 0.3,
+      dx: r.dst && r.dst.x_frac || 0,  dy: r.dst && r.dst.y_frac || 0,
+      dw: r.dst && r.dst.w_frac || 0.3, dh: r.dst && r.dst.h_frac || 0.3,
+      z:  (typeof r.z === 'number') ? r.z : i,
+      color: r.color || CF_COLORS[i % CF_COLORS.length],
+    };
+  });
+  _cfSelected = null;
+  cfClosePresetLoad();
+  setCropMode('free');
+  _cfRender();
+}
 
 /* Last-chance save so transient state changes (toggles, drags, drops that
  * happen between syncTl calls) always reach localStorage. */
@@ -4701,6 +5240,7 @@ function buildTimeline() {
       muted:!!vi.muted, position:vi.position||null,
       trans_in:vi.trans_in||null, trans_out:vi.trans_out||null,
       crop_x_frac: (typeof vi.crop_x_frac === 'number') ? vi.crop_x_frac : null,
+      free_crops: (Array.isArray(vi.free_crops) && vi.free_crops.length) ? vi.free_crops : null,
       captions: (function(){
         var v = vi.captions;
         if (v === true)  return 'bottom';   // legacy in-memory state
@@ -4947,6 +5487,7 @@ function loadNewTimeline(data) {
         return 'inherit';
       })(),
       crop_x_frac: (typeof item.crop_x_frac === 'number') ? item.crop_x_frac : null,
+      free_crops: Array.isArray(item.free_crops) ? item.free_crops : null,
     });
     if (itemTrack > 0 && itemTrack >= tlTrackCount) setTrackCount(itemTrack + 1);
     pendTrans = null;

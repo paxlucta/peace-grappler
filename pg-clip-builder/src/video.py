@@ -709,11 +709,75 @@ def composite_layered_segment(placements, seg_dur, out_path):
     # Build filter graph.
     filters = []
 
-    # Per-clip video processing: scale + pad to slot size, normalize PTS.
-    # When a wide clip has crop_x_frac set, crop it to a 9:16 region of the
-    # source (full-frame, not slot) at the user-selected horizontal offset.
+    # Per-clip video processing. Three modes:
+    #   1. free_crops (a list of {src,dst,z} fractions) → split the source
+    #      into N copies, crop+scale each to its destination rectangle. The
+    #      output of THIS branch is N labels [v{i}_0]..[v{i}_K-1] which the
+    #      overlay chain below composites in z-order at their dst positions.
+    #   2. wide clip with single-strip crop_x_frac → existing behavior
+    #      (one full-frame [v{i}]).
+    #   3. plain clip → existing behavior.
+    free_crop_outputs = {}   # i -> list of (label, x_px, y_px, z) tuples
     for i, p in enumerate(placements):
         src_idx = i + 2
+        free_crops = p.get("free_crops") or []
+        if free_crops:
+            # Normalize each rectangle. Drop anything degenerate so the
+            # filter graph doesn't blow up on a 0-pixel scale.
+            norm = []
+            for rc in free_crops:
+                try:
+                    s = rc.get("src") or {}
+                    d = rc.get("dst") or {}
+                    sx = max(0.0, min(1.0, float(s.get("x_frac", 0))))
+                    sy = max(0.0, min(1.0, float(s.get("y_frac", 0))))
+                    sw = max(0.001, min(1.0, float(s.get("w_frac", 0))))
+                    sh = max(0.001, min(1.0, float(s.get("h_frac", 0))))
+                    dx = max(0.0, min(1.0, float(d.get("x_frac", 0))))
+                    dy = max(0.0, min(1.0, float(d.get("y_frac", 0))))
+                    dw = max(0.001, min(1.0, float(d.get("w_frac", 0))))
+                    dh = max(0.001, min(1.0, float(d.get("h_frac", 0))))
+                except Exception:
+                    continue
+                if sx + sw > 1.0: sw = 1.0 - sx
+                if sy + sh > 1.0: sh = 1.0 - sy
+                if dx + dw > 1.0: dw = 1.0 - dx
+                if dy + dh > 1.0: dh = 1.0 - dy
+                z = int(rc.get("z", 0) or 0)
+                norm.append({
+                    "sx": sx, "sy": sy, "sw": sw, "sh": sh,
+                    "dx": dx, "dy": dy, "dw": dw, "dh": dh, "z": z,
+                })
+            if norm:
+                # split=N so we can run N independent crop+scale chains
+                # from the same source frame.
+                n = len(norm)
+                split_outs = "".join(f"[s{i}_{k}]" for k in range(n))
+                filters.append(
+                    f"[{src_idx}:v]setpts=PTS-STARTPTS,setsar=1,fps=30,"
+                    f"split={n}{split_outs}"
+                )
+                outs = []
+                for k, rc in enumerate(norm):
+                    dst_w = max(2, int(round(W * rc["dw"])))
+                    dst_h = max(2, int(round(H * rc["dh"])))
+                    # crop in source-pixel space, then resize to the
+                    # destination's pixel size on the 1080x1920 canvas.
+                    filters.append(
+                        f"[s{i}_{k}]"
+                        f"crop=iw*{rc['sw']:.5f}:ih*{rc['sh']:.5f}:"
+                        f"iw*{rc['sx']:.5f}:ih*{rc['sy']:.5f},"
+                        f"scale={dst_w}:{dst_h}[v{i}_{k}]"
+                    )
+                    x_px = int(round(W * rc["dx"]))
+                    y_px = int(round(H * rc["dy"]))
+                    outs.append((f"v{i}_{k}", x_px, y_px, rc["z"]))
+                # Lowest z first → overlaid earlier → drawn under.
+                outs.sort(key=lambda t: t[3])
+                free_crop_outputs[i] = outs
+                continue   # skip the legacy single-output branch below
+
+        # Legacy paths — single [v{i}] output.
         crop_frac = p.get("crop_x_frac")
         wide_cropped = p["is_wide"] and crop_frac is not None
         target_h = H if (not p["is_wide"] or wide_cropped) else SLOT_H
@@ -735,17 +799,30 @@ def composite_layered_segment(placements, seg_dur, out_path):
             )
 
     # Overlay chain — bottom layer first, top layer last.
+    #
+    # Each placement contributes either ONE overlay step (legacy paths)
+    # or N overlay steps (free-mode), composited at their own dst
+    # position in z-order before moving on to the next placement.
     prev_label = "[0:v]"
+    overlay_steps = []   # list of (label_no_brackets, x, y)
     for i, p in enumerate(placements):
-        is_last = (i == len(placements) - 1)
-        out_label = "[vout]" if is_last else f"[ov{i}]"
+        if i in free_crop_outputs:
+            for lbl, x, y, _z in free_crop_outputs[i]:
+                overlay_steps.append((lbl, x, y))
+            continue
         wide_cropped = p["is_wide"] and p.get("crop_x_frac") is not None
         if p["is_wide"] and not wide_cropped:
             y = SLOT_Y.get(p.get("position") or "top", 0)
         else:
             y = 0
+        overlay_steps.append((f"v{i}", 0, y))
+
+    # Now emit the actual overlay filters in order.
+    for idx, (lbl, x, y) in enumerate(overlay_steps):
+        is_last = (idx == len(overlay_steps) - 1)
+        out_label = "[vout]" if is_last else f"[ov{idx}]"
         filters.append(
-            f"{prev_label}[v{i}]overlay=x=0:y={y}:shortest=0{out_label}"
+            f"{prev_label}[{lbl}]overlay=x={x}:y={y}:shortest=0{out_label}"
         )
         prev_label = out_label
 

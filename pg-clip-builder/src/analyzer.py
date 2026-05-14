@@ -1666,14 +1666,48 @@ button:hover{border-color:#666}
 button.primary{background:#e53935;color:#fff;border-color:#e53935}
 button.primary:hover{background:#c62828}
 button:disabled{opacity:.5;cursor:not-allowed}
-.controls{display:flex;gap:12px;align-items:center;
-  padding:12px 20px 8px;margin-bottom:0}
+/* Old import / cancel / bulk-delete controls bar is hidden for now —
+   functionality has moved to the bottom-drop zone and the per-row
+   Analyze popover. Kept in the DOM (display:none) so the existing JS
+   that toggles cancel/bulk buttons doesn't break. */
+.controls{display:none !important}
 
 /* Page split: Folders column on the left, existing controls + table on
    the right. The right side keeps its own scroll. */
 .page-cols{flex:1;display:grid;grid-template-columns:200px 1fr;
   min-height:0;overflow:hidden;background:#0a0a0a;border-top:1px solid #1a1a1a}
-.page-main{display:flex;flex-direction:column;min-height:0;overflow-y:auto}
+.page-main{display:flex;flex-direction:column;min-height:0;overflow-y:auto;
+  position:relative}
+
+/* Table fills the full main area — no side gutters, header lines up
+   flush with the Folders column header. */
+table{margin:0;width:100%}
+thead th{
+  height:34px;padding:0 14px;
+  background:#141418;border-bottom:1px solid #1f1f24;
+  vertical-align:middle;
+}
+tbody td{padding:8px 14px}
+tbody tr:first-child td{padding-top:12px}
+
+/* Drop zone — sticky to the bottom of .page-main so it stays in view
+   while the user scrolls the file list. Drag a file over it to import. */
+.bb-drop{
+  position:sticky;bottom:0;left:0;right:0;
+  margin:12px 0 0;padding:18px 16px;
+  background:#0d1217;border:1.5px dashed #2e3a52;border-top:1.5px dashed #2e3a52;
+  border-radius:0;
+  color:#7888a0;font-size:13px;text-align:center;
+  transition:border-color .12s,background .12s,color .12s;
+  z-index:5;
+}
+.bb-drop.drag-over{
+  border-color:#1976d2;background:#10223a;color:#fff;border-style:solid;
+}
+.bb-drop strong{color:#bbb;font-weight:600}
+.bb-drop .bb-drop-status{
+  display:block;margin-top:4px;font-size:11px;color:#888;
+}
 .bb-col{display:flex;flex-direction:column;min-height:0;
   border-right:1px solid #1a1a1a;background:#101013}
 .bb-col-head{
@@ -2331,6 +2365,17 @@ td{font-size:13px}
 
 <div class="progress" id="progress">
   <div id="progress-lines"></div>
+</div>
+
+<div class="bb-drop" id="bb-drop"
+     ondragenter="_bbDropDragOver(event)"
+     ondragover="_bbDropDragOver(event)"
+     ondragleave="_bbDropDragLeave(event)"
+     ondrop="_bbDropOnZone(event)">
+  <strong>Drop Files In Here</strong>
+  <span class="bb-drop-status" id="bb-drop-status">
+    Files are imported into your configured source folder and added to the selected folder.
+  </span>
 </div>
 
 </main>
@@ -4155,6 +4200,92 @@ async function _bbFolderDrop(e) {
     });
   }
 })();
+
+// ── Drop zone (sticky bottom of .page-main) ────────────────────────────────
+//
+// Accepts dragged files from Finder / Desktop and reuses the existing
+// /analyze/imports/upload endpoint (the modal's "From Disk" path). After
+// each successful upload the file is added to the currently-selected
+// folder, but only when that folder is a user-created one — smart
+// folders (All Files, Today, Favorites) are computed from rules and
+// don't accept membership writes.
+
+function _bbDropDragOver(e) {
+  // Reject everything that isn't a file drag so we don't light up the
+  // zone when the user drags a row from the table or text from the page.
+  var types = (e.dataTransfer && e.dataTransfer.types) || [];
+  if (Array.prototype.indexOf.call(types, 'Files') < 0) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+  document.getElementById('bb-drop').classList.add('drag-over');
+}
+
+function _bbDropDragLeave(e) {
+  // Only clear the highlight when the cursor truly leaves the zone —
+  // dragleave also fires when crossing into a child element.
+  var zone = document.getElementById('bb-drop');
+  if (!zone) return;
+  var r = zone.getBoundingClientRect();
+  if (e.clientX < r.left || e.clientX > r.right
+      || e.clientY < r.top  || e.clientY > r.bottom) {
+    zone.classList.remove('drag-over');
+  }
+}
+
+async function _bbDropOnZone(e) {
+  e.preventDefault();
+  var zone = document.getElementById('bb-drop');
+  if (zone) zone.classList.remove('drag-over');
+  var files = (e.dataTransfer && e.dataTransfer.files) || [];
+  if (!files.length) return;
+  // The selected folder at drop time is what new files get added to;
+  // capture it now so re-render between uploads doesn't matter.
+  var folderForMembership = (
+    selectedFolder && bbFolders.smart
+    && !bbFolders.smart.some(function(f){ return f.id === selectedFolder; })
+  ) ? selectedFolder : null;
+  var status = document.getElementById('bb-drop-status');
+  var okCount = 0, failCount = 0;
+  for (var i = 0; i < files.length; i++) {
+    var f = files[i];
+    if (status) status.textContent = 'Uploading ' + f.name
+      + ' (' + (i + 1) + '/' + files.length + ')…';
+    try {
+      var fd = new FormData();
+      fd.append('file', f);
+      var r = await fetch('/analyze/imports/upload', {method:'POST', body: fd});
+      var d = await r.json();
+      if (!r.ok || d.ok === false) {
+        failCount++;
+        continue;
+      }
+      okCount++;
+      // If a user folder is selected, file lands there too.
+      if (folderForMembership && d.filename) {
+        try {
+          await fetch('/api/folders/membership', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({
+              filename: d.filename, folder_id: folderForMembership,
+              scope: 'source',
+            }),
+          });
+        } catch (e2) {}
+      }
+    } catch (e2) {
+      failCount++;
+    }
+  }
+  if (status) {
+    var msg = okCount + ' file' + (okCount === 1 ? '' : 's') + ' imported';
+    if (failCount) msg += ', ' + failCount + ' failed';
+    status.textContent = msg + '. Drop more here or use the Import button.';
+  }
+  // Refresh page state so the new rows + folder counts appear.
+  await bbReloadFolders();
+  bbRenderFolderCol();
+  if (typeof scanVideos === 'function') scanVideos();
+}
 
 (async function bbBoot() {
   _pgLoadState();

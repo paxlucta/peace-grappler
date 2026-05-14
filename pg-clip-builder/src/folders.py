@@ -153,18 +153,25 @@ def _collect_items_for_scope(scope):
     """
     out = {}
     if scope == "source":
+        # Read the videos table directly so newly-imported (but not yet
+        # analyzed) files show up in All Files / Today immediately —
+        # without waiting for scene extraction to populate get_all_scenes.
         try:
-            from db import get_all_scenes
-            scenes = get_all_scenes(include_ignored=True, include_excluded=True)
+            from db import get_all_videos
+            rows = get_all_videos()
         except Exception:
             return out
-        for s in scenes:
-            name = s["video_filename"]
-            if name in out:
-                continue
-            path = Path(s["video_path"]) if s.get("video_path") else None
+        for r in rows:
             try:
-                mtime = path.stat().st_mtime if path and path.exists() else None
+                name = r["filename"]
+                video_path = r["path"]
+            except Exception:
+                continue
+            if not name or name in out:
+                continue
+            p = Path(video_path) if video_path else None
+            try:
+                mtime = p.stat().st_mtime if p and p.exists() else None
             except Exception:
                 mtime = None
             out[name] = mtime
