@@ -84,12 +84,16 @@ def header_html(active: str = "", theme: str = "default") -> str:
         brand = "<h1>Clip<span>Builder</span></h1>"
 
     parts = ["<header>", brand, "<nav>"]
-    for key, href, label, _subs in NAV_LINKS:
+    for key, href, label, subs in NAV_LINKS:
         cls = ' class="active"' if key == parent_active else ""
         # Drive link is hidden on pages where the feature flag is off; the
         # tiny inline script at the bottom of the header takes care of it
         # so server-side rendering doesn't have to know feature state.
         extra = ' data-pg-drive="1"' if key == "drive" else ""
+        # Parent entries with sub-tabs get tagged so the inline script
+        # below can rewrite their href to the user's last-visited tab.
+        if subs:
+            extra += f' data-pg-parent="{key}"'
         parts.append(f'<a href="{href}"{cls}{extra}>{label}</a>')
     parts.append("</nav>")
     parts.append("</header>")
@@ -128,6 +132,39 @@ def header_html(active: str = "", theme: str = "default") -> str:
         "var on=window.PG_FEATURES&&window.PG_FEATURES.drive;"
         "if(!on){var els=document.querySelectorAll('[data-pg-drive]');"
         "for(var i=0;i<els.length;i++){els[i].style.display='none';}}"
+        "})();</script>"
+    )
+
+    # Remember which sub-tab the user last visited under each parent
+    # nav entry. When a parent label is clicked from a different page,
+    # send the user back to the tab they were on. Storage key is
+    # ``pg.lastTab.<parent_key>``; value is the absolute path.
+    #
+    # We build the parent→{sub_key:sub_href} map from NAV_LINKS at
+    # render time so client code never has to know the routes.
+    sub_map = {}
+    for key, _href, _label, subs in NAV_LINKS:
+        if not subs:
+            continue
+        sub_map[key] = {sk: sh for sk, sh, _sl in subs}
+    parts.append(
+        "<script>(function(){"
+        "var subs=" + repr(sub_map).replace("'", '"') + ";"
+        "var active=" + repr(active or "") + ";"
+        # If the active key is one of a parent's sub-tabs, remember the
+        # full path for that parent. Saves on every page-load so a fresh
+        # visit always updates the memory.
+        "for(var p in subs){"
+        "if(subs[p][active]){"
+        "try{localStorage.setItem('pg.lastTab.'+p,subs[p][active]);}catch(e){}"
+        "break;}}"
+        # Rewrite any parent link's href to the remembered path. Falls
+        # back to the server-rendered default when nothing is stored.
+        "var as=document.querySelectorAll('a[data-pg-parent]');"
+        "for(var i=0;i<as.length;i++){"
+        "var k=as[i].getAttribute('data-pg-parent');"
+        "try{var s=localStorage.getItem('pg.lastTab.'+k);"
+        "if(s)as[i].setAttribute('href',s);}catch(e){}}"
         "})();</script>"
     )
     return "".join(parts)

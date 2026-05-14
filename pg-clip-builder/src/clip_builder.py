@@ -4226,11 +4226,46 @@ function _bbEsc(s) {
   });
 }
 
+// Persist column selections + search query across navigations. The
+// keys are page-scoped so /builder doesn't read /rate's state.
+var _PG_STATE_KEY = 'pg.builder.state';
+function _pgSaveState() {
+  try {
+    localStorage.setItem(_PG_STATE_KEY, JSON.stringify({
+      folder: selectedFolder,
+      file:   selectedFile,
+      tag:    selectedTag,
+      search: (document.getElementById('bb-search') || {}).value || '',
+    }));
+  } catch (e) {}
+}
+function _pgLoadState() {
+  try {
+    var s = JSON.parse(localStorage.getItem(_PG_STATE_KEY) || '{}');
+    if (s && typeof s === 'object') {
+      if (s.folder) selectedFolder = s.folder;
+      if ('file' in s) selectedFile = s.file || null;
+      if ('tag'  in s) selectedTag  = s.tag  || null;
+      if (s.search) {
+        var i = document.getElementById('bb-search');
+        if (i) i.value = s.search;
+      }
+    }
+  } catch (e) {}
+}
+
 async function bbInit() {
+  _pgLoadState();
   await bbReloadFolders();
+  // _bbRecomputeFolderFiles (called from bbReloadFolders) snaps an
+  // unknown folder id back to "all" — guarantees a saved-but-deleted
+  // folder doesn't break the page.
   bbRenderFolderCol();
   bbRenderFilesCol();
   bbRenderTagsCol();
+  // Kick off transcript search if the stored value brings one back.
+  var s = (document.getElementById('bb-search') || {}).value || '';
+  if (s.trim()) _bbDoSearch(s.trim());
   // Single delegated listener per column handles row clicks; cheaper
   // than re-binding every render and dodges the filename-quoting
   // problem an inline onclick would have.
@@ -4362,6 +4397,7 @@ function bbSelectFolder(fid) {
   bbRenderFilesCol();
   bbRenderTagsCol();
   renderGrid();
+  _pgSaveState();
 }
 
 async function bbCreateFolder() {
@@ -4559,19 +4595,21 @@ function bbSelectFile(fn) {
   bbRenderFilesCol();
   bbRenderTagsCol();
   renderGrid();
+  _pgSaveState();
 }
 
 function bbSelectTag(t) {
   selectedTag = t || null;
   bbRenderTagsCol();
   renderGrid();
+  _pgSaveState();
 }
 
 function onBbSearchInput() {
   var q = (document.getElementById('bb-search').value || '').trim();
   if (_bbSearchTimer) clearTimeout(_bbSearchTimer);
   // Debounce so each keystroke doesn't hit the server.
-  _bbSearchTimer = setTimeout(function(){ _bbDoSearch(q); }, 280);
+  _bbSearchTimer = setTimeout(function(){ _bbDoSearch(q); _pgSaveState(); }, 280);
 }
 
 async function _bbDoSearch(q) {

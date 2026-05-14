@@ -453,7 +453,7 @@ select:focus{outline:none;border-color:#e53935}
 
 <div class="toolbar">
   <label>Sort by</label>
-  <select id="sort-select" onchange="applyFilters()">
+  <select id="sort-select" onchange="applyFilters();_pgSaveState()">
     <option value="date-desc">Newest First</option>
     <option value="date-asc">Oldest First</option>
     <option value="dur-desc">Longest First</option>
@@ -516,10 +516,34 @@ function _bbEsc(s) {
   });
 }
 
+// Persisted UI state (folder + sort). Re-applied on every init so a
+// user can jump between Generated Videos and other tabs without losing
+// their place.
+var _PG_STATE_KEY = 'pg.library.state';
+function _pgSaveState() {
+  try {
+    localStorage.setItem(_PG_STATE_KEY, JSON.stringify({
+      folder: selectedFolder,
+      sort:   (document.getElementById('sort-select') || {}).value || '',
+    }));
+  } catch (e) {}
+}
+function _pgLoadState() {
+  try {
+    var s = JSON.parse(localStorage.getItem(_PG_STATE_KEY) || '{}');
+    if (s && s.folder) selectedFolder = s.folder;
+    if (s && s.sort) {
+      var sel = document.getElementById('sort-select');
+      if (sel) sel.value = s.sort;
+    }
+  } catch (e) {}
+}
+
 async function init() {
   var res = await fetch('/library/api/videos');
   allVideos = await res.json();
 
+  _pgLoadState();
   await bbReloadFolders();
   bbRenderFolderCol();
   _bbWireColumnHandlers();
@@ -607,6 +631,7 @@ function _bbWireColumnHandlers() {
 function bbSelectFolder(fid) {
   if (!fid) return;
   selectedFolder = fid;
+  _pgSaveState();
   _bbRecomputeFolderFiles();
   bbRenderFolderCol();
   applyFilters();

@@ -678,10 +678,42 @@ function _bbEsc(s) {
   });
 }
 
+// Persist column selections + search query so coming back from another
+// tab restores the same view. Key is page-scoped.
+var _PG_STATE_KEY = 'pg.rate.state';
+function _pgSaveState() {
+  try {
+    localStorage.setItem(_PG_STATE_KEY, JSON.stringify({
+      folder: selectedFolder,
+      file:   selectedFile,
+      tag:    selectedTag,
+      search: (document.getElementById('search-input') || {}).value || '',
+    }));
+  } catch (e) {}
+}
+function _pgLoadState() {
+  try {
+    var s = JSON.parse(localStorage.getItem(_PG_STATE_KEY) || '{}');
+    if (s && typeof s === 'object') {
+      if (s.folder) selectedFolder = s.folder;
+      if ('file' in s) selectedFile = s.file || null;
+      if ('tag'  in s) selectedTag  = s.tag  || null;
+      if (s.search) {
+        var i = document.getElementById('search-input');
+        if (i) i.value = s.search;
+      }
+    }
+  } catch (e) {}
+}
+
 async function init() {
   allScenes = await fetch('/rate/api/scenes').then(function(r){return r.json()});
+  _pgLoadState();
   await bbInit();
   renderGrid();
+  // Re-fire transcript search if it was active on this page last visit.
+  var sq = (document.getElementById('search-input') || {}).value || '';
+  if (sq.trim()) onSearchInput(sq);
 }
 
 async function bbInit() {
@@ -799,6 +831,7 @@ function bbSelectFolder(fid) {
   if (selectedFile && bbFolderFiles && !bbFolderFiles.has(selectedFile)) {
     selectedFile = null;
   }
+  _pgSaveState();
   bbRenderFolderCol();
   bbRenderFilesCol();
   bbRenderTagsCol();
@@ -1018,6 +1051,7 @@ function bbSelectFile(fn) {
     });
     if (!has) selectedTag = null;
   }
+  _pgSaveState();
   bbRenderFilesCol();
   bbRenderTagsCol();
   renderGrid();
@@ -1025,6 +1059,7 @@ function bbSelectFile(fn) {
 
 function bbSelectTag(t) {
   selectedTag = t || null;
+  _pgSaveState();
   // The Hidden pseudo-tag changes which scenes the files column counts,
   // so re-render that too. (No-op when switching between regular tags.)
   bbRenderFilesCol();
@@ -1202,6 +1237,7 @@ function onSearchInput(value) {
     searchHitIds = null;
     document.getElementById('search-status').textContent = '';
     renderGrid();
+    _pgSaveState();
     return;
   }
   document.getElementById('search-status').textContent = 'Searching...';
@@ -1213,6 +1249,7 @@ function onSearchInput(value) {
       document.getElementById('search-status').textContent =
         searchHitIds.size + ' scene' + (searchHitIds.size !== 1 ? 's' : '') + ' match';
       renderGrid();
+      _pgSaveState();
     } catch (e) {
       document.getElementById('search-status').textContent = 'search failed';
     }

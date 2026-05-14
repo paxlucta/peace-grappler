@@ -3946,6 +3946,20 @@ var bbFolderFiles = null;
 var selectedFolder = 'all';
 var bbFileFavorites = new Set();
 
+// Persisted UI state — just the folder selection on this page.
+var _PG_STATE_KEY = 'pg.analyze.state';
+function _pgSaveState() {
+  try {
+    localStorage.setItem(_PG_STATE_KEY, JSON.stringify({folder: selectedFolder}));
+  } catch (e) {}
+}
+function _pgLoadState() {
+  try {
+    var s = JSON.parse(localStorage.getItem(_PG_STATE_KEY) || '{}');
+    if (s && s.folder) selectedFolder = s.folder;
+  } catch (e) {}
+}
+
 var PG_HEART_SVG =
   '<svg viewBox="0 0 24 24"><path d="M12 21s-7-4.35-9.5-9.13C.9 8.5 2.5 5 6 5c2 0 3.4 1.1 6 4 2.6-2.9 4-4 6-4 3.5 0 5.1 3.5 3.5 6.87C19 16.65 12 21 12 21z"/></svg>';
 
@@ -4040,6 +4054,7 @@ function bbRenderFolderCol() {
 function bbSelectFolder(fid) {
   if (!fid) return;
   selectedFolder = fid;
+  _pgSaveState();
   _bbRecomputeFolderFiles();
   bbRenderFolderCol();
   renderList();
@@ -4142,6 +4157,7 @@ async function _bbFolderDrop(e) {
 })();
 
 (async function bbBoot() {
+  _pgLoadState();
   await bbReloadFolders();
   bbRenderFolderCol();
   // Re-render the file table now that the folder filter is known —
