@@ -34,6 +34,7 @@ APP_SETTINGS_PATH = DATA_DIR / "app_settings.json"
 GENERAL_KEYS = (
     "analysis_mode",
     "transcribe_provider", "transcribe_model",
+    "transcribe_hint",
     "whisper_model", "whisper_language", "whisper_translate",
     "ai",
     "theme",
@@ -381,6 +382,7 @@ def _fill_defaults(raw, profile_name):
         "analysis_mode":       mode,
         "transcribe_provider": transcribe_provider,
         "transcribe_model":    transcribe_model,
+        "transcribe_hint":     (raw.get("transcribe_hint") or "").strip(),
         "whisper_model":       whisper_model,
         "whisper_language":    (raw.get("whisper_language") or "").strip(),
         "whisper_translate":   bool(raw.get("whisper_translate", False)),
@@ -481,6 +483,7 @@ def get_app_settings():
         "analysis_mode":       mode,
         "transcribe_provider": transcribe_provider,
         "transcribe_model":    transcribe_model,
+        "transcribe_hint":     (raw.get("transcribe_hint") or "").strip(),
         "whisper_model":       whisper_model,
         "whisper_language":    (raw.get("whisper_language") or "").strip(),
         "whisper_translate":   bool(raw.get("whisper_translate", False)),
@@ -522,6 +525,8 @@ def set_app_settings(**fields):
         raw["transcribe_provider"] = p or DEFAULT_TRANSCRIBE_PROVIDER
     if "transcribe_model" in fields and fields["transcribe_model"] is not None:
         raw["transcribe_model"] = (fields["transcribe_model"] or "").strip()
+    if "transcribe_hint" in fields and fields["transcribe_hint"] is not None:
+        raw["transcribe_hint"] = (fields["transcribe_hint"] or "").strip()
     if "theme" in fields and fields["theme"] is not None:
         t = (fields["theme"] or "").strip().lower()
         if t and t not in THEMES:

@@ -124,6 +124,48 @@ def api_favorite():
     return jsonify({"ok": True, "scene_id": scene_id, "favorite": new_state})
 
 
+@rating_bp.route("/rate/api/transcript/<int:transcript_id>", methods=["POST"])
+def api_transcript_edit(transcript_id):
+    """In-place edit of a transcript row's text. Body: ``{text}``.
+
+    The pristine original is preserved on the first edit so the user
+    can revert later. Returns the post-edit row (incl. ``original_text``
+    + the ``edited`` flag the UI uses to render diffs)."""
+    from db import update_transcript_text, get_transcript_by_id
+    data = request.json or {}
+    new_text = (data.get("text") or "").strip()
+    if not new_text:
+        return jsonify({"error": "text required"}), 400
+    if not update_transcript_text(transcript_id, new_text):
+        return jsonify({"error": "transcript not found"}), 404
+    row = get_transcript_by_id(transcript_id)
+    return jsonify({
+        "ok": True,
+        "id": row["id"],
+        "text": row["text"],
+        "original_text": row.get("original_text"),
+        "edited": row.get("original_text") is not None
+                  and row["original_text"] != row["text"],
+    })
+
+
+@rating_bp.route("/rate/api/transcript/<int:transcript_id>/revert",
+                 methods=["POST"])
+def api_transcript_revert(transcript_id):
+    """Restore the transcript row to its pristine original."""
+    from db import revert_transcript_text, get_transcript_by_id
+    if not revert_transcript_text(transcript_id):
+        return jsonify({"error": "nothing to revert"}), 400
+    row = get_transcript_by_id(transcript_id)
+    return jsonify({
+        "ok": True,
+        "id": row["id"] if row else transcript_id,
+        "text": row["text"] if row else "",
+        "original_text": None,
+        "edited": False,
+    })
+
+
 @rating_bp.route("/rate/api/search")
 def api_search():
     """Loose text search over transcripts. Returns scene IDs whose time

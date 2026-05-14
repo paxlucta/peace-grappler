@@ -95,7 +95,7 @@ def _extract_audio_wav(video_path, dest_wav):
 
 
 def transcribe(video_path, model="base", language=None, translate=False,
-               on_log=None, on_progress=None):
+               on_log=None, on_progress=None, initial_prompt=None):
     """Transcribe *video_path* and return ``{"segments": [...], "language":
     "..."}`` where:
 
@@ -169,6 +169,9 @@ def transcribe(video_path, model="base", language=None, translate=False,
                 beam_size=5,
                 vad_filter=True,           # skip non-speech regions
                 vad_parameters={"min_silence_duration_ms": 500},
+                # User-supplied hint biases the decoder's vocabulary —
+                # useful for proper nouns, code-switching cues, etc.
+                initial_prompt=(initial_prompt or None),
             )
             total_dur = float(getattr(info, "duration", 0) or 0)
             segments = []

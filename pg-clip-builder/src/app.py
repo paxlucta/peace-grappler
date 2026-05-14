@@ -669,6 +669,37 @@ def server_id():
     return jsonify({"id": _SERVER_ID})
 
 
+@app.route("/api/env-check")
+def env_check():
+    """Diagnostic: report whether each known API-key env var is set, and
+    show a masked preview so the user can verify which key is actually
+    loaded in this process. We never return the full key value.
+
+    Hit ``/api/env-check`` after a server restart to confirm an updated
+    ``.env`` actually took effect (vs. being shadowed by a shell export)."""
+    keys = (
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "MINIMAX_API_KEY",
+    )
+    out = {}
+    for k in keys:
+        v = os.environ.get(k) or ""
+        if not v:
+            out[k] = {"set": False}
+            continue
+        # Show first 6 + last 4 chars (typical key length is 30-50) so the
+        # user can compare against /ai.dev. Never log the middle.
+        if len(v) <= 12:
+            preview = v[:2] + "…"   # tiny / placeholder values
+        else:
+            preview = f"{v[:6]}…{v[-4:]}"
+        out[k] = {"set": True, "length": len(v), "preview": preview}
+    return jsonify(out)
+
+
 @app.route("/api/logo")
 def logo():
     """Serve the logo image. Prefers the high-res PNG under

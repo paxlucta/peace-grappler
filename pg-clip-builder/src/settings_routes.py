@@ -46,6 +46,7 @@ def api_app_set():
             theme=data.get("theme"),
             transcribe_provider=data.get("transcribe_provider"),
             transcribe_model=data.get("transcribe_model"),
+            transcribe_hint=data.get("transcribe_hint"),
             whisper_model=data.get("whisper_model"),
             whisper_language=data.get("whisper_language"),
             whisper_translate=data.get("whisper_translate"),
@@ -910,6 +911,20 @@ SETTINGS_PAGE = """<!doctype html>
           code-switching content where detection may flip-flop). Models
           download on first use to <code>~/.cache/huggingface/hub/</code>.
         </div>
+        <div style="height:12px"></div>
+        <label>Hint to the model (optional)</label>
+        <textarea id="tx-hint" rows="3"
+          placeholder="e.g. 'This audio mixes Russian and English. Keep each phrase in its native script. Do not translate or transliterate.'"
+          style="width:100%;resize:vertical;background:#0c0c14;border:1px solid #2e2e3e;color:#eee;border-radius:5px;padding:7px 10px;font-size:12px;font-family:inherit;outline:none;box-sizing:border-box"></textarea>
+        <div class="muted" style="margin-top:4px">
+          Free-form instruction sent to the transcription model. Most
+          useful for <b>bilingual / code-switching</b> audio. With Gemini
+          this is injected verbatim into the prompt — you can give
+          detailed instructions ("keep Russian in Cyrillic, English in
+          Latin", "the speaker is a linguistics teacher", etc). With
+          Whisper / OpenAI it biases vocabulary via the model's
+          <code>initial_prompt</code>; effect is real but more subtle.
+        </div>
       </div>
     </div>
   </div>
@@ -1093,7 +1108,7 @@ const TX_MODELS = {
     {value:'gemini-2.5-flash-lite', label:'gemini-2.5-flash-lite — cheapest'},
     {value:'gemini-2.5-flash',      label:'gemini-2.5-flash — default'},
     {value:'gemini-2.0-flash',      label:'gemini-2.0-flash'},
-    {value:'gemini-2.5-pro',        label:'gemini-2.5-pro — best quality'},
+    {value:'gemini-2.5-pro',        label:'gemini-2.5-pro — best quality (recommended for code-switching / bilingual content)'},
   ],
 };
 const TX_DEFAULT = {whisper:'base', openai:'whisper-1', gemini:'gemini-2.5-flash'};
@@ -1173,6 +1188,8 @@ function fillFromAppCfg(){
     appCfg.whisper_language || '';
   document.getElementById('whisper-translate').checked =
     !!appCfg.whisper_translate;
+  var hintEl = document.getElementById('tx-hint');
+  if (hintEl) hintEl.value = appCfg.transcribe_hint || '';
   refreshTxProviderHint();
   // Caption defaults
   var caps = appCfg.captions || {};
@@ -1724,6 +1741,7 @@ async function saveAll(){
     theme:             (document.getElementById('theme-select') || {}).value || 'default',
     transcribe_provider: document.getElementById('tx-provider').value,
     transcribe_model:    document.getElementById('tx-model').value,
+    transcribe_hint:     (document.getElementById('tx-hint') || {}).value || '',
     whisper_model:     document.getElementById('whisper-model').value,
     whisper_language:  document.getElementById('whisper-language').value,
     whisper_translate: document.getElementById('whisper-translate').checked,

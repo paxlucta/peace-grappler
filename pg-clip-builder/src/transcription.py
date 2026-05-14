@@ -22,6 +22,7 @@ import json
 import os
 import subprocess
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -111,9 +112,13 @@ def _hash_audio(video_path):
     return h.hexdigest()[:32]
 
 
-def _cache_path(content_hash, provider, model, language, translate):
+def _cache_path(content_hash, provider, model, language, translate, hint=""):
     safe_lang = (language or "auto").replace("/", "_")
     suffix = ".en" if translate else ""
+    # Hash the hint into the cache key so changing it invalidates cleanly.
+    if hint:
+        import hashlib as _h
+        suffix += "." + _h.sha1(hint.encode("utf-8")).hexdigest()[:8]
     return CACHE_DIR / (
         f"{content_hash}.{provider}.{model}.{safe_lang}{suffix}.json"
     )
@@ -136,7 +141,7 @@ def _extract_audio_m4a(video_path, dest_m4a, bitrate="64k"):
 
 def transcribe(video_path, provider="whisper", model=None,
                language=None, translate=False, on_log=None,
-               on_progress=None):
+               on_progress=None, hint=""):
     """Transcribe *video_path*. Returns ``{"segments": [...], "language": "..."}``.
 
     *provider*: one of ``PROVIDERS``. Unknown falls back to ``whisper``.
@@ -147,9 +152,14 @@ def transcribe(video_path, provider="whisper", model=None,
         for long-running steps so the caller can drive a progress bar.
         Whisper-local emits per-segment heartbeats; cloud providers emit
         coarser milestones (extract → upload → parse).
+    *hint*: optional free-text instruction for the model — most useful
+        for code-switching audio (e.g. ``"Mixes Russian and English;
+        keep each in its native script."``). Goes into Gemini's prompt
+        verbatim and into Whisper's ``initial_prompt``.
     """
     log = on_log or (lambda m: None)
     progress = on_progress or (lambda frac, label="": None)
+    hint = (hint or "").strip()
     empty = {"segments": [], "language": ""}
     video_path = Path(video_path)
     if not video_path.exists():
@@ -168,7 +178,8 @@ def transcribe(video_path, provider="whisper", model=None,
         return empty
 
     content_hash = _hash_audio(video_path)
-    cache_file = _cache_path(content_hash, provider, model, language, translate)
+    cache_file = _cache_path(content_hash, provider, model, language,
+                             translate, hint)
     if cache_file.exists():
         try:
             cached = json.loads(cache_file.read_text())
@@ -188,11 +199,14 @@ def transcribe(video_path, provider="whisper", model=None,
         out = audio_analysis.transcribe(
             video_path, model=model, language=language,
             translate=translate, on_log=log, on_progress=progress,
+            initial_prompt=hint or None,
         )
     elif provider == "openai":
-        out = _openai(video_path, model, language, translate, log, progress)
+        out = _openai(video_path, model, language, translate, log, progress,
+                      hint)
     elif provider == "gemini":
-        out = _gemini(video_path, model, language, translate, log, progress)
+        out = _gemini(video_path, model, language, translate, log, progress,
+                      hint)
     else:
         return empty
 
@@ -214,7 +228,7 @@ def transcribe(video_path, provider="whisper", model=None,
 
 # ── OpenAI Whisper API ─────────────────────────────────────────────────────
 
-def _openai(video_path, model, language, translate, log, progress):
+def _openai(video_path, model, language, translate, log, progress, hint=""):
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not api_key:
         log("OPENAI_API_KEY missing.")
@@ -266,6 +280,11 @@ def _openai(video_path, model, language, translate, log, progress):
             add_field("timestamp_granularities[]", "segment")
             if language:
                 add_field("language", language)
+        # OpenAI Whisper accepts a `prompt` field that biases vocabulary
+        # — not a true multilingual hint, but useful for proper nouns,
+        # spellings, and signaling code-switching.
+        if hint:
+            add_field("prompt", hint)
         with open(audio, "rb") as f:
             audio_bytes = f.read()
         add_file("file", "audio.m4a", audio_bytes)
@@ -325,11 +344,94 @@ _GEMINI_PROMPT_TEMPLATE = (
     "`end` (number, seconds), and `text` (string). "
     "Break the transcript into natural speech segments roughly 2–10 seconds "
     "long; do not output one giant segment. "
-    "{LANG_HINT}{XLAT_HINT}"
+    "If the audio mixes languages (code-switching), keep each phrase in "
+    "its original language and original script — do not translate or "
+    "transliterate.\n"
+    "{LANG_HINT}{XLAT_HINT}{USER_HINT}"
 )
 
 
-def _gemini(video_path, model, language, translate, log, progress):
+def _gemini_files_upload(api_key, audio_bytes, log, progress):
+    """Upload *audio_bytes* via the Gemini Files API and wait for the
+    resource to reach state=ACTIVE. Returns the file resource dict
+    (with ``uri`` / ``mime_type`` / ``name``) on success, or ``None``.
+
+    Used when the audio is too large for the inline_data path in
+    generateContent. Files API accepts up to 2 GB per upload."""
+    boundary = "----pgfiles" + hex(int(time.time() * 1000))[2:]
+    meta = json.dumps({"file": {"display_name": "audio.m4a"}})
+    parts = []
+    parts.append(f"--{boundary}\r\n"
+                 f"Content-Type: application/json; charset=UTF-8\r\n\r\n"
+                 f"{meta}\r\n".encode())
+    parts.append(f"--{boundary}\r\n"
+                 f"Content-Type: audio/mp4\r\n\r\n".encode())
+    parts.append(audio_bytes)
+    parts.append(f"\r\n--{boundary}--\r\n".encode())
+    payload = b"".join(parts)
+    upload_url = (
+        "https://generativelanguage.googleapis.com/upload/v1beta/files"
+        f"?uploadType=multipart&key={api_key}"
+    )
+    req = urllib.request.Request(
+        upload_url, data=payload, method="POST",
+        headers={"Content-Type": f"multipart/related; boundary={boundary}"},
+    )
+    progress(0.10, f"uploading {len(audio_bytes) / 1024 / 1024:.1f} MB to Files API")
+    try:
+        with urllib.request.urlopen(req, timeout=600) as resp:
+            up = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        err = e.read().decode("utf-8", errors="replace")
+        log(f"Gemini Files upload HTTP {e.code}: {err[:300]}")
+        return None
+    except Exception as e:
+        log(f"Gemini Files upload failed: {e}")
+        return None
+
+    file_res = up.get("file") if isinstance(up, dict) else None
+    if not file_res or not file_res.get("name"):
+        log(f"Gemini Files upload returned no file resource: {str(up)[:200]}")
+        return None
+    name = file_res["name"]      # e.g. "files/abc123"
+    file_id = name.split("/", 1)[-1]
+    poll_url = (f"https://generativelanguage.googleapis.com/v1beta/"
+                f"{name}?key={api_key}")
+    # Audio files usually flip to ACTIVE within 1-3s. Cap at 60s so a
+    # stuck upload doesn't hang the worker indefinitely.
+    deadline = time.time() + 60
+    state = (file_res.get("state") or "").upper()
+    while state == "PROCESSING" and time.time() < deadline:
+        time.sleep(1.5)
+        try:
+            with urllib.request.urlopen(poll_url, timeout=30) as r:
+                file_res = json.loads(r.read().decode("utf-8"))
+        except Exception as e:
+            log(f"Gemini Files poll failed: {e}")
+            return None
+        state = (file_res.get("state") or "").upper()
+    if state != "ACTIVE":
+        log(f"Gemini Files upload didn't become ACTIVE (state={state}).")
+        return None
+    log(f"Gemini Files: {file_id} ready (state={state}).")
+    return file_res
+
+
+def _gemini_files_delete(api_key, name, log):
+    """Best-effort cleanup of an uploaded file. Quota for Files is 20 GB
+    per project, so we tidy up after every transcription pass."""
+    if not name:
+        return
+    try:
+        del_url = (f"https://generativelanguage.googleapis.com/v1beta/"
+                   f"{name}?key={api_key}")
+        req = urllib.request.Request(del_url, method="DELETE")
+        urllib.request.urlopen(req, timeout=30).close()
+    except Exception as e:
+        log(f"(Gemini Files cleanup warning: {e})")
+
+
+def _gemini(video_path, model, language, translate, log, progress, hint=""):
     api_key = (os.environ.get("GEMINI_API_KEY")
                or os.environ.get("GOOGLE_API_KEY") or "").strip()
     if not api_key:
@@ -346,30 +448,41 @@ def _gemini(video_path, model, language, translate, log, progress):
         audio_bytes = audio.read_bytes()
 
     size = len(audio_bytes)
-    if size > _GEMINI_INLINE_MAX_BYTES:
-        log(f"Audio is {size / 1024 / 1024:.1f} MB — too large for an "
-            f"inline Gemini request. Use a shorter video or switch to "
-            f"local Whisper.")
-        return {"segments": [], "language": ""}
 
     lang_hint = (f"Source language code: {language}. " if language else "")
     xlat_hint = ("Translate the text fields to English. "
                  if translate else "")
+    user_hint = (f"User note: {hint}\n" if hint else "")
     prompt = (_GEMINI_PROMPT_TEMPLATE
               .replace("{LANG_HINT}", lang_hint)
-              .replace("{XLAT_HINT}", xlat_hint))
+              .replace("{XLAT_HINT}", xlat_hint)
+              .replace("{USER_HINT}", user_hint))
+
+    # Choose the transport: inline for small audio (lower latency, no
+    # extra roundtrips), Files API for anything over the inline cap so
+    # we don't crash on long videos.
+    uploaded_file = None
+    if size <= _GEMINI_INLINE_MAX_BYTES:
+        audio_part = {"inline_data": {
+            "mime_type": "audio/mp4",
+            "data": base64.b64encode(audio_bytes).decode(),
+        }}
+    else:
+        log(f"Audio is {size / 1024 / 1024:.1f} MB — using Gemini Files API "
+            f"(inline cap is {_GEMINI_INLINE_MAX_BYTES / 1024 / 1024:.0f} MB).")
+        uploaded_file = _gemini_files_upload(api_key, audio_bytes, log, progress)
+        if not uploaded_file:
+            return {"segments": [], "language": ""}
+        audio_part = {"file_data": {
+            "mime_type": uploaded_file.get("mimeType") or "audio/mp4",
+            "file_uri": uploaded_file["uri"],
+        }}
 
     url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
            f"{model}:generateContent?key={api_key}")
     body = {
         "contents": [{
-            "parts": [
-                {"inline_data": {
-                    "mime_type": "audio/mp4",
-                    "data": base64.b64encode(audio_bytes).decode(),
-                }},
-                {"text": prompt},
-            ],
+            "parts": [audio_part, {"text": prompt}],
         }],
         "generationConfig": {
             "responseMimeType": "application/json",
@@ -382,18 +495,54 @@ def _gemini(video_path, model, language, translate, log, progress):
         url, data=json.dumps(body).encode("utf-8"),
         method="POST", headers={"Content-Type": "application/json"},
     )
-    progress(0.30, f"uploading {len(audio_bytes) / 1024 / 1024:.1f} MB")
+    progress(0.30, "running model")
+
+    # Heartbeat — generateContent is a single blocking HTTP call that can
+    # easily sit for minutes on a long audio file. Without this, the
+    # progress bar freezes and the log goes silent, which looks broken.
+    # We run a daemon thread that ticks every 5s with elapsed time + a
+    # bar that creeps toward 0.85 (asymptotic; never claims completion).
+    _stop = threading.Event()
+    _t0 = time.monotonic()
+    def _heartbeat():
+        last_log = 0
+        while not _stop.wait(2.0):
+            elapsed = time.monotonic() - _t0
+            # Half-life ≈ 45s so the bar advances visibly early and
+            # slows down as time goes on instead of pinning at 0.85.
+            frac = 0.30 + 0.55 * (1 - 0.5 ** (elapsed / 45.0))
+            progress(frac, f"running model ({int(elapsed)}s)")
+            # Log line every ~15s — chatty enough to feel alive, quiet
+            # enough not to spam.
+            if elapsed - last_log >= 15:
+                last_log = elapsed
+                log(f"  still waiting on Gemini ({int(elapsed)}s)...")
+    hb = threading.Thread(target=_heartbeat, daemon=True)
+    hb.start()
     try:
         with urllib.request.urlopen(req, timeout=600) as resp:
+            _stop.set()
             progress(0.90, "parsing response")
             data = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
+        _stop.set()
         err = e.read().decode("utf-8", errors="replace")
         log(f"Gemini transcription HTTP {e.code}: {err[:400]}")
+        if uploaded_file:
+            _gemini_files_delete(api_key, uploaded_file.get("name"), log)
         return {"segments": [], "language": ""}
     except Exception as e:
+        _stop.set()
         log(f"Gemini transcription failed: {e}")
+        if uploaded_file:
+            _gemini_files_delete(api_key, uploaded_file.get("name"), log)
         return {"segments": [], "language": ""}
+    finally:
+        _stop.set()
+        log(f"Gemini call returned after {int(time.monotonic() - _t0)}s.")
+
+    if uploaded_file:
+        _gemini_files_delete(api_key, uploaded_file.get("name"), log)
 
     try:
         parts = data["candidates"][0]["content"]["parts"]

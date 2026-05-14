@@ -275,6 +275,13 @@ def get_db():
     except sqlite3.OperationalError:
         conn.execute("ALTER TABLE scenes ADD COLUMN favorite INTEGER DEFAULT 0")
         conn.commit()
+    # In-place transcript editing: the original-pristine text is preserved
+    # in ``original_text`` so the user can revert. NULL = never edited.
+    try:
+        conn.execute("SELECT original_text FROM transcripts LIMIT 0")
+    except sqlite3.OperationalError:
+        conn.execute("ALTER TABLE transcripts ADD COLUMN original_text TEXT")
+        conn.commit()
     if needs_backfill:
         # Speech: whoever has transcript rows.
         conn.execute(
@@ -579,6 +586,71 @@ def set_scene_excluded(scene_id, excluded):
         conn.close()
 
 
+def update_transcript_text(transcript_id, new_text):
+    """In-place edit of a transcript row's text. On the first edit we
+    snapshot the existing ``text`` into ``original_text`` so the user
+    can always revert. Subsequent edits leave ``original_text`` alone.
+
+    Returns ``True`` on success, ``False`` if the row doesn't exist."""
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT text, original_text FROM transcripts WHERE id=?",
+            (transcript_id,),
+        ).fetchone()
+        if not row:
+            return False
+        orig = row["original_text"]
+        if orig is None:
+            orig = row["text"]
+        conn.execute(
+            "UPDATE transcripts SET text=?, original_text=? WHERE id=?",
+            (new_text, orig, transcript_id),
+        )
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def revert_transcript_text(transcript_id):
+    """Restore ``text`` to the saved original (if any) and clear
+    ``original_text`` so the row is back to its pristine state.
+
+    Returns ``True`` if a revert happened, ``False`` if no original was
+    stored (i.e. the row was never edited)."""
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT original_text FROM transcripts WHERE id=?",
+            (transcript_id,),
+        ).fetchone()
+        if not row or row["original_text"] is None:
+            return False
+        conn.execute(
+            "UPDATE transcripts SET text=?, original_text=NULL WHERE id=?",
+            (row["original_text"], transcript_id),
+        )
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def get_transcript_by_id(transcript_id):
+    """Look up a single transcript row by id. Used by the per-row edit
+    endpoint to authorize + identify the video for cache busting."""
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT * FROM transcripts WHERE id=?",
+            (transcript_id,),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
 def set_scene_favorite(scene_id, favorite):
     """Toggle the heart-icon favorite flag on a scene. Returns the new
     boolean state (matches what the UI optimistically sets)."""
@@ -778,13 +850,19 @@ def get_transcripts_in_range(video_id, start_time, end_time):
     try:
         # Schema may not have provider/model yet on older DBs — pick safe
         # column lists and skip the new fields when they're missing.
-        cols = "language, is_translation, start_time, end_time, text"
+        cols = "id, language, is_translation, start_time, end_time, text"
         has_attr = True
         try:
             conn.execute("SELECT provider, model FROM transcripts LIMIT 0")
             cols += ", provider, model"
         except sqlite3.OperationalError:
             has_attr = False
+        has_orig = True
+        try:
+            conn.execute("SELECT original_text FROM transcripts LIMIT 0")
+            cols += ", original_text"
+        except sqlite3.OperationalError:
+            has_orig = False
         rows = conn.execute(
             f"""SELECT {cols}
                FROM transcripts
@@ -798,11 +876,20 @@ def get_transcripts_in_range(video_id, start_time, end_time):
         attr = {}  # (language, is_translation) -> (provider, model)
         for r in rows:
             key = (r["language"], bool(r["is_translation"]))
-            groups.setdefault(key, []).append({
+            seg = {
+                "id":    r["id"],
                 "start": r["start_time"],
                 "end":   r["end_time"],
                 "text":  r["text"],
-            })
+            }
+            if has_orig:
+                seg["original_text"] = r["original_text"]
+                seg["edited"] = (r["original_text"] is not None
+                                 and r["original_text"] != r["text"])
+            else:
+                seg["original_text"] = None
+                seg["edited"] = False
+            groups.setdefault(key, []).append(seg)
             if has_attr and key not in attr:
                 attr[key] = (r["provider"] or "", r["model"] or "")
         out = []

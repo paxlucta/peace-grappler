@@ -293,7 +293,21 @@ def analyze_full(video_path, duration):
     _check_cancel()
 
     emit_pct(0.25, f"tagging ({len(frames)} frames)")
-    emit_progress(f"Extracted {len(frames)} frames, sending to Claude (full analysis)...")
+    # Resolve the actual provider that will receive these frames (the
+    # task → provider mapping on /settings, with the per-run override
+    # applied if one was set). "Claude" is just the historic function
+    # name on call_claude(); the call routes through ai_cli.
+    try:
+        _prov, _mdl = ai_cli.resolve_provider_model(
+            "analysis",
+            provider=getattr(_ai_call_override, "provider", None),
+            model=getattr(_ai_call_override, "model", None),
+        )
+        _label = (ai_cli.get_config()["providers"].get(_prov) or {}).get("label") or _prov
+        _label += f" ({_mdl})" if _mdl else ""
+    except Exception:
+        _label = "AI"
+    emit_progress(f"Extracted {len(frames)} frames, sending to {_label} (full analysis)...")
 
     tag_list = ""
     for group_name, tags in TAGS.items():
@@ -407,6 +421,82 @@ def _sample_frame_at(video_path, timestamp):
     return None
 
 
+def transcribe_video(video_path, duration, overrides=None):
+    """Run only the transcription pass on *video_path* — no tagging.
+
+    This is the backend for the popover's "Run Transcription" button.
+    Produces a single native-language transcript and saves it to the
+    DB. Translation is intentionally NOT done here; surface that as a
+    separate operation when/if you add a Translate button.
+
+    Returns the segment list (also persisted) or [] on failure.
+    """
+    import transcription
+    cfg = app_config.get_config()
+    o = overrides or {}
+
+    tx_provider = (o.get("transcribe_provider")
+                   or cfg.get("transcribe_provider") or "whisper"
+                   ).strip().lower()
+    if tx_provider == "whisper":
+        tx_model = (o.get("transcribe_model")
+                    or o.get("whisper_model")
+                    or cfg.get("transcribe_model")
+                    or cfg.get("whisper_model")
+                    or "base")
+    else:
+        tx_model = (o.get("transcribe_model")
+                    or cfg.get("transcribe_model")
+                    or transcription.default_model_for(tx_provider))
+    language = (o.get("whisper_language") if "whisper_language" in o
+                else cfg.get("whisper_language")) or None
+    tx_hint = (o.get("transcribe_hint") if "transcribe_hint" in o
+               else cfg.get("transcribe_hint")) or ""
+
+    emit_pct(0.05, "transcribing audio")
+    emit_progress(
+        f"Transcription: provider={tx_provider}, model={tx_model or '(default)'}"
+        + (f", language={language}" if language else ", language=auto")
+        + (", hint=set" if tx_hint else "")
+    )
+
+    def _tx_progress(frac, label=""):
+        # Map the dispatcher's 0..1 progress onto 0.05..0.95 so the bar
+        # moves smoothly through the only step we run.
+        emit_pct(0.05 + 0.90 * max(0.0, min(1.0, frac)),
+                 label or "transcribing")
+
+    result = transcription.transcribe(
+        video_path, provider=tx_provider, model=tx_model,
+        language=language, translate=False,
+        on_log=emit_progress, on_progress=_tx_progress,
+        hint=tx_hint,
+    )
+    segments = result.get("segments", [])
+    detected_language = (result.get("language") or "").strip().lower()
+    if not segments:
+        emit_progress("No transcript segments produced.")
+        emit_pct(1.0, "done")
+        return []
+    emit_progress(
+        f"Got {len(segments)} segments "
+        f"(language: {detected_language or 'unknown'})."
+    )
+    try:
+        video_id = db.register_video(video_path)
+        db.save_transcripts(
+            video_id, segments,
+            language=(detected_language or (language or "")),
+            is_translation=False,
+            provider=tx_provider, model=tx_model,
+        )
+        emit_progress(f"Saved {len(segments)} transcript rows.")
+    except Exception as e:
+        emit_progress(f"(transcript persist warning: {e})")
+    emit_pct(1.0, "done")
+    return segments
+
+
 def analyze_speech(video_path, duration, overrides=None):
     """Speech-mode analysis: Whisper transcribes audio → each transcript
     segment becomes a scene → AI tags each scene from frame + spoken text.
@@ -437,6 +527,11 @@ def analyze_speech(video_path, duration, overrides=None):
                     or transcription.default_model_for(tx_provider))
     language = (o.get("whisper_language") if "whisper_language" in o
                 else cfg.get("whisper_language")) or None
+    # Free-text hint piped into Gemini's prompt + Whisper's initial_prompt.
+    # Per-run override beats the app-level setting.
+    tx_hint = (o.get("transcribe_hint")
+               if "transcribe_hint" in o
+               else cfg.get("transcribe_hint")) or ""
     # `whisper_translate` used to mean "transcribe in English instead of the
     # source language" — which threw away the native version. It now means
     # "also produce an English copy even when the source is already English."
@@ -461,6 +556,11 @@ def analyze_speech(video_path, duration, overrides=None):
         return _cb
 
     emit_pct(0.05, "transcribing audio")
+    emit_progress(
+        f"Transcription: provider={tx_provider}, model={tx_model or '(default)'}"
+        + (f", language={language}" if language else ", language=auto")
+        + (", hint=set" if tx_hint else "")
+    )
     # Pass 1 — always native (translate=False). This is the source of truth
     # for "what was actually said". We persist it as is_translation=False.
     result = transcription.transcribe(
@@ -468,6 +568,7 @@ def analyze_speech(video_path, duration, overrides=None):
         language=language, translate=False,
         on_log=emit_progress,
         on_progress=_tx_progress(0.05, 0.20, "native"),
+        hint=tx_hint,
     )
     emit_pct(0.20, "transcript ready")
     segments = result.get("segments", [])
@@ -517,6 +618,7 @@ def analyze_speech(video_path, duration, overrides=None):
                 language=language, translate=True,
                 on_log=emit_progress,
                 on_progress=_tx_progress(0.20, 0.30, "english"),
+                hint=tx_hint,
             )
             xlat_segs = xlat.get("segments", [])
             if xlat_segs:
@@ -797,8 +899,12 @@ def _analyze_one(video_id, force, overrides=None):
     _ai_call_override.provider = (overrides.get("ai_provider") or "").strip() or None
     _ai_call_override.model    = (overrides.get("ai_model")    or "").strip() or None
     if _ai_call_override.provider or _ai_call_override.model:
+        # Clarify scope — the popover override only steers the visual /
+        # frame-tagging task, not transcription. Transcription provider
+        # is a separate /settings option (or per-run override below).
         emit_progress(
-            f"AI override → provider={_ai_call_override.provider or '(default)'},"
+            f"Frame-tagging override → provider="
+            f"{_ai_call_override.provider or '(default)'},"
             f" model={_ai_call_override.model or '(default)'}"
         )
 
@@ -829,6 +935,18 @@ def _analyze_one(video_id, force, overrides=None):
                 or "visual")
         with _analysis_lock:
             _analysis_state["mode"] = mode
+
+        # Mode "transcribe" — produces a native-language transcript only.
+        # No frame extraction, no LLM tagging, no scene partitioning. We
+        # short-circuit the rest of the analyze pipeline so the popover's
+        # "Run Transcription" button is genuinely an isolated step.
+        if mode == "transcribe":
+            emit_progress(
+                f"Transcription of {video['filename']} ({duration:.1f}s)..."
+            )
+            transcribe_video(video_path, duration, overrides=overrides)
+            emit_progress(f"VIDEO:{video_id}:transcribed")
+            return True
 
         if force or not analyzed_tags:
             try:
@@ -1096,7 +1214,7 @@ def run_analysis(video_id):
 
     overrides = {}
     mode = (data.get("mode") or "").strip().lower()
-    if mode in ("visual", "speech"):
+    if mode in ("visual", "speech", "transcribe"):
         overrides["mode"] = mode
     if data.get("whisper_model"):
         overrides["whisper_model"] = data["whisper_model"].strip()
@@ -1104,6 +1222,12 @@ def run_analysis(video_id):
         overrides["whisper_language"] = (data.get("whisper_language") or "").strip()
     if "whisper_translate" in data:
         overrides["whisper_translate"] = bool(data["whisper_translate"])
+    if data.get("transcribe_provider"):
+        overrides["transcribe_provider"] = data["transcribe_provider"].strip().lower()
+    if data.get("transcribe_model"):
+        overrides["transcribe_model"] = data["transcribe_model"].strip()
+    if "transcribe_hint" in data:
+        overrides["transcribe_hint"] = (data.get("transcribe_hint") or "").strip()
     # Per-video LLM override picked in the ⚙ popover. Either may be set
     # alone (override just provider, or just model) — _analyze_one passes
     # both straight through to ai_cli.call_ai which knows what to do.
@@ -1765,7 +1889,7 @@ tbody tr[draggable="true"]:active{cursor:grabbing}
 .pg-heart.on{color:#ef5350}
 .pg-heart.on:hover{color:#e53935}
 .bb-row .pg-heart{margin:0 2px}
-table{width:calc(100% - 40px);border-collapse:collapse;margin:12px 20px 0}
+table{width:calc(100% - 40px);border-collapse:collapse;margin:0px 0px 0}
 th,td{padding:8px 12px;text-align:left;border-bottom:1px solid #222}
 th{color:#888;font-size:12px;font-weight:600;text-transform:uppercase}
 td{font-size:13px}
@@ -2002,6 +2126,47 @@ td{font-size:13px}
   position:absolute;right:8px;top:50%;transform:translateY(-50%);
   font-size:10px;color:#777;pointer-events:none;
 }
+
+/* Transcript edit toolbar buttons */
+.vtx-edit-controls{display:inline-flex;gap:4px;align-items:center;flex-wrap:wrap}
+.vtx-edit-controls .vtx-edit-btn{
+  background:#1a1a1a;border:1px solid #333;color:#ccc;border-radius:5px;
+  padding:5px 11px;font-size:11px;font-weight:600;cursor:pointer;
+  letter-spacing:.3px;
+}
+.vtx-edit-controls .vtx-edit-btn:hover{border-color:#1976d2;color:#fff}
+.vtx-edit-controls .vtx-edit-btn.active{
+  background:#1976d2;border-color:#1976d2;color:#fff;
+}
+.vtx-edit-controls .vtx-revert-all{
+  border-color:#3a1a1a;color:#ef9a9a;display:none;
+}
+.vtx-edit-controls .vtx-revert-all:hover{
+  background:#3a1a1a;color:#fff;border-color:#ef5350;
+}
+.vtx-edit-controls .vtx-revert-all.shown{display:inline-flex}
+
+/* Edited segments + diff view */
+.vtx-seg-text[contenteditable="true"]{
+  background:#10131a;border:1px dashed #2e3a52;border-radius:4px;
+  padding:2px 6px;outline:none;
+}
+.vtx-seg-text[contenteditable="true"]:focus{
+  border-color:#1976d2;border-style:solid;
+}
+.vtx-seg.is-edited > .vtx-seg-text::before{
+  content:"●";color:#ffb74d;margin-right:6px;font-size:9px;
+  vertical-align:middle;
+}
+.vtx-seg-orig{
+  display:block;font-size:11px;color:#888;text-decoration:line-through;
+  margin-top:4px;line-height:1.4;
+}
+.vtx-seg-revert{
+  margin-left:6px;background:transparent;border:none;color:#666;cursor:pointer;
+  font-size:10px;padding:0 4px;border-radius:3px;
+}
+.vtx-seg-revert:hover{color:#ef5350;background:#3a1a1a}
 .vtx-foot{
   padding:10px 18px;border-top:1px solid #1e1e2a;
   display:flex;align-items:center;gap:12px;background:#0d1217;
@@ -2304,6 +2469,20 @@ td{font-size:13px}
                placeholder="Search within transcript&hellip;"
                oninput="onVtxSearchInput()" autocomplete="off">
         <span class="vtx-search-count" id="vtx-search-count"></span>
+      </div>
+      <div class="vtx-edit-controls">
+        <button type="button" class="vtx-edit-btn" id="vtx-edit-btn"
+                onclick="vtxToggleEdit()">Edit</button>
+        <button type="button" class="vtx-edit-btn" id="vtx-save-btn"
+                onclick="vtxSaveEdits()" style="display:none">Save</button>
+        <button type="button" class="vtx-edit-btn" id="vtx-cancel-btn"
+                onclick="vtxCancelEdits()" style="display:none">Cancel</button>
+        <button type="button" class="vtx-edit-btn" id="vtx-diff-btn"
+                onclick="vtxToggleDiff()" title="Show edits vs original">Diff</button>
+        <button type="button" class="vtx-edit-btn vtx-revert-all"
+                id="vtx-revert-all-btn"
+                onclick="vtxRevertAll()"
+                title="Revert every edited segment back to its original">Revert all</button>
       </div>
     </div>
     <div id="vtx-body" class="vtx-body"></div>
@@ -3261,7 +3440,10 @@ function analyzeVideoMode(videoId, mode, opts) {
   analyzingMode = mode || null;
   renderList();
   document.getElementById('progress-lines').innerHTML = '';
-  var modeLabel = mode === 'speech' ? 'audio' : (mode === 'visual' ? 'visual' : 'profile-default');
+  var modeLabel = mode === 'speech' ? 'audio'
+                 : mode === 'visual' ? 'visual'
+                 : mode === 'transcribe' ? 'transcription'
+                 : 'profile-default';
   addLine('Starting ' + modeLabel + ' analysis...');
 
   var body = {force: true};
@@ -3271,6 +3453,9 @@ function analyzeVideoMode(videoId, mode, opts) {
     if (opts.whisper_model)    body.whisper_model    = opts.whisper_model;
     if ('whisper_language' in opts) body.whisper_language = opts.whisper_language;
     if ('whisper_translate' in opts) body.whisper_translate = !!opts.whisper_translate;
+    if (opts.transcribe_provider) body.transcribe_provider = opts.transcribe_provider;
+    if (opts.transcribe_model)    body.transcribe_model    = opts.transcribe_model;
+    if ('transcribe_hint' in opts) body.transcribe_hint = opts.transcribe_hint;
     if (opts.ai_provider) body.ai_provider = opts.ai_provider;
     if (opts.ai_model)    body.ai_model    = opts.ai_model;
   }
@@ -3344,6 +3529,45 @@ function _aoptsBuildModelSelect(elId, catalog) {
   return html;
 }
 
+// Audio-capable transcription models. Mirrors transcription.MODELS so
+// the per-video Audio popover only offers providers that can actually
+// process audio (Whisper local, OpenAI Whisper, Gemini).
+var AOPTS_TX_MODELS = {
+  whisper: [
+    {value:'tiny',     label:'tiny — 39 MB'},
+    {value:'base',     label:'base — 74 MB'},
+    {value:'small',    label:'small — 244 MB'},
+    {value:'medium',   label:'medium — 769 MB'},
+    {value:'large-v3', label:'large-v3 — 1.5 GB (multilingual)'},
+  ],
+  openai: [
+    {value:'whisper-1', label:'whisper-1 — OpenAI hosted Whisper'},
+  ],
+  gemini: [
+    {value:'gemini-2.5-flash-lite', label:'gemini-2.5-flash-lite — cheapest'},
+    {value:'gemini-2.5-flash',      label:'gemini-2.5-flash — default'},
+    {value:'gemini-2.0-flash',      label:'gemini-2.0-flash'},
+    {value:'gemini-2.5-pro',        label:'gemini-2.5-pro — best for bilingual'},
+  ],
+};
+var AOPTS_TX_DEFAULT = {whisper:'base', openai:'whisper-1', gemini:'gemini-2.5-flash'};
+
+function _aoptsAudioProviderChanged(preselect) {
+  var provSel = document.getElementById('aopts-tx-provider');
+  var mdlSel  = document.getElementById('aopts-tx-model');
+  if (!provSel || !mdlSel) return;
+  var prov = provSel.value || 'whisper';
+  var opts = AOPTS_TX_MODELS[prov] || [];
+  var html = '';
+  for (var i = 0; i < opts.length; i++) {
+    html += '<option value="' + opts[i].value + '">' + opts[i].label + '</option>';
+  }
+  mdlSel.innerHTML = html;
+  var want = (preselect && opts.some(function(o){return o.value === preselect}))
+    ? preselect : (AOPTS_TX_DEFAULT[prov] || '');
+  if (want) mdlSel.value = want;
+}
+
 async function openAnalyzeOpts(evt, videoId, _mode) {
   evt.stopPropagation();
   // Capture the trigger's geometry BEFORE any await — once the handler
@@ -3355,51 +3579,62 @@ async function openAnalyzeOpts(evt, videoId, _mode) {
   var catalog = await _aoptsLoadModels();
   var pop = document.getElementById('aopts');
 
-  // Combined Visual + Audio settings popover. Each section has its own
-  // Run button so the user can launch either pass with the per-video
-  // overrides shown above it.
+  // Two-mode popover: Tagging (scene partition + per-scene tags) and
+  // Transcription (native-language transcript only). Each section
+  // owns its own Run button + Force checkbox.
   var html = '<h4>Settings for this video</h4>'
-    + '<div class="aopts-help">Overrides the brand profile defaults for '
-    + 'this video only. Click <b>Run Visual</b> or <b>Run Audio</b> to '
-    + 'launch with these settings.</div>'
-    + '<label class="tog"><input type="checkbox" id="aopts-force" checked> '
-    + 'Force re-analyze (clear previous results)</label>';
+    + '<div class="aopts-help">Each section is its own step — Run '
+    + 'Tagging or Run Transcription independently. Force re-run clears '
+    + 'that step\'s prior result before starting.</div>';
 
-  // ── Visual section ──
+  // ── Section 1: Tagging / Scene Analysis ──
   html += '<div class="aopts-section">'
-    + '<div class="aopts-section-title">Visual</div>'
-    + '<label class="field">LLM (frame tagging)</label>'
-    + _aoptsBuildModelSelect('aopts-visual-llm', catalog)
-    + '<div class="aopts-help" style="margin-top:6px">'
-    + 'Picks which model tags frames for this video. Defaults to the '
-    + '<b>analysis</b> task provider on /settings.</div>'
+    + '<div class="aopts-section-title">Tagging / Scene Analysis</div>'
+    + '<label class="field">Source</label>'
+    + '<select id="aopts-tag-source">'
+    + '  <option value="visual">Visual frames — sample frames and tag time ranges</option>'
+    + '  <option value="speech">Audio (speech) — use transcript segments as scene boundaries</option>'
+    + '</select>'
+    + '<label class="field">Tagging LLM</label>'
+    + '<div id="aopts-visual-llm-wrap">'
+    +   _aoptsBuildModelSelect('aopts-visual-llm', catalog)
+    + '</div>'
+    + '<div class="aopts-help" style="margin-top:6px;margin-bottom:8px">'
+    + 'Defaults to the <b>analysis</b> task provider on /settings. '
+    + 'Audio source requires a saved transcript — if none exists yet, '
+    + 'one is generated on the fly using the Transcription settings below.</div>'
+    + '<label class="tog"><input type="checkbox" id="aopts-tag-force" checked> '
+    + 'Force re-tag (clear previous tags)</label>'
     + '<div class="aopts-section-action">'
-    + '<button class="go" onclick="runAnalyzeOpts(' + videoId + ',\'visual\')">✨ Run Visual</button>'
+    + '<button class="go" onclick="runAnalyzeOpts(' + videoId + ',\'tag\')">✨ Run Tagging</button>'
     + '</div>'
     + '</div>';
 
-  // ── Audio section ──
+  // ── Section 2: Transcription ──
   html += '<div class="aopts-section">'
-    + '<div class="aopts-section-title">Audio (Speech)</div>'
-    + '<label class="field">LLM (scene tagging)</label>'
-    + _aoptsBuildModelSelect('aopts-audio-llm', catalog)
-    + '<div class="aopts-help" style="margin-top:6px;margin-bottom:8px">'
-    + 'Whisper handles transcription; this LLM tags each transcript '
-    + 'segment with scene tags.</div>'
-    + '<label class="field">Whisper model</label>'
-    + '<select id="aopts-model">'
-    + '  <option value="tiny">tiny — 39 MB</option>'
-    + '  <option value="base">base — 74 MB</option>'
-    + '  <option value="small">small — 244 MB</option>'
-    + '  <option value="medium">medium — 769 MB</option>'
-    + '  <option value="large-v3">large-v3 — 1.5 GB (multilingual)</option>'
+    + '<div class="aopts-section-title">Transcription</div>'
+    + '<div class="aopts-help" style="margin-bottom:8px">'
+    + 'Produces a transcript in the spoken language. Translation is a '
+    + 'separate step.</div>'
+    + '<label class="field">Provider</label>'
+    + '<select id="aopts-tx-provider"'
+    + ' onchange="_aoptsAudioProviderChanged()">'
+    + '  <option value="whisper">Whisper — local (faster-whisper)</option>'
+    + '  <option value="openai">OpenAI — hosted Whisper</option>'
+    + '  <option value="gemini">Gemini — audio in</option>'
     + '</select>'
+    + '<label class="field">Model</label>'
+    + '<select id="aopts-tx-model"></select>'
     + '<label class="field">Language (ISO, blank = auto)</label>'
     + '<input type="text" id="aopts-lang" placeholder="en, ru, es, …">'
-    + '<label class="tog"><input type="checkbox" id="aopts-translate"> '
-    + 'Translate transcript to English</label>'
+    + '<label class="field">Hint (optional)</label>'
+    + '<textarea id="aopts-hint" rows="2"'
+    + ' placeholder="e.g. mixes Russian and English; keep each in its native script"'
+    + ' style="width:100%;resize:vertical;background:#0c0c14;border:1px solid #2e2e3e;color:#eee;border-radius:5px;padding:6px 8px;font-size:12px;font-family:inherit;outline:none;box-sizing:border-box"></textarea>'
+    + '<label class="tog"><input type="checkbox" id="aopts-tx-force" checked> '
+    + 'Force re-transcribe (replace existing transcript)</label>'
     + '<div class="aopts-section-action">'
-    + '<button class="go" onclick="runAnalyzeOpts(' + videoId + ',\'speech\')">✨ Run Audio</button>'
+    + '<button class="go" onclick="runAnalyzeOpts(' + videoId + ',\'transcribe\')">✨ Run Transcription</button>'
     + '</div>'
     + '</div>';
 
@@ -3408,13 +3643,18 @@ async function openAnalyzeOpts(evt, videoId, _mode) {
     + '</div>';
   pop.innerHTML = html;
 
-  // Pre-fill audio defaults from profile.
-  var m = document.getElementById('aopts-model');
-  if (m) m.value = prof.whisper_model || 'base';
+  // Pre-fill audio defaults from profile. Transcription provider +
+  // model use the app-level setting; fall back to local whisper/base.
+  var pProv = document.getElementById('aopts-tx-provider');
+  var pMdl  = document.getElementById('aopts-tx-model');
+  if (pProv) {
+    pProv.value = (prof.transcribe_provider || 'whisper');
+    _aoptsAudioProviderChanged(prof.transcribe_model || prof.whisper_model || '');
+  }
   var l = document.getElementById('aopts-lang');
   if (l) l.value = prof.whisper_language || '';
-  var t = document.getElementById('aopts-translate');
-  if (t) t.checked = !!prof.whisper_translate;
+  var hEl = document.getElementById('aopts-hint');
+  if (hEl) hEl.value = prof.transcribe_hint || '';
 
   // Anchor next to the clicked ⚙ button. Use the rect we captured before
   // the awaits so the position is correct on the first open too.
@@ -3435,27 +3675,61 @@ function closeAnalyzeOpts() {
   document.getElementById('aopts').classList.remove('open');
 }
 
-function runAnalyzeOpts(videoId, mode) {
-  var opts = {force: !!document.getElementById('aopts-force').checked};
-  // Per-mode LLM override. Stored as "provider::model" so the empty value
-  // ("Configured default") cleanly produces no override.
-  var llmEl = document.getElementById(
-    mode === 'speech' ? 'aopts-audio-llm' : 'aopts-visual-llm');
-  if (llmEl && llmEl.value) {
-    var sep = llmEl.value.indexOf('::');
-    if (sep > 0) {
-      opts.ai_provider = llmEl.value.slice(0, sep);
-      opts.ai_model    = llmEl.value.slice(sep + 2);
+function runAnalyzeOpts(videoId, action) {
+  // *action* is which section button was clicked: 'tag' or 'transcribe'.
+  // For 'tag' the source dropdown decides whether the actual analysis
+  // mode sent to the server is 'visual' or 'speech'.
+  var opts = {};
+  var mode;
+
+  if (action === 'tag') {
+    var src = document.getElementById('aopts-tag-source');
+    mode = (src && src.value === 'speech') ? 'speech' : 'visual';
+    var tagForce = document.getElementById('aopts-tag-force');
+    opts.force = !!(tagForce && tagForce.checked);
+    var llmEl = document.getElementById('aopts-visual-llm');
+    if (llmEl && llmEl.value) {
+      var sep = llmEl.value.indexOf('::');
+      if (sep > 0) {
+        opts.ai_provider = llmEl.value.slice(0, sep);
+        opts.ai_model    = llmEl.value.slice(sep + 2);
+      }
     }
-  }
-  if (mode === 'speech') {
-    var m = document.getElementById('aopts-model');
+    // When the source is Audio, the tagging path may auto-transcribe
+    // if no transcript exists yet. Pass the user's transcription
+    // settings so that fallback uses the same provider/model.
+    if (mode === 'speech') {
+      var pProv = document.getElementById('aopts-tx-provider');
+      var pMdl  = document.getElementById('aopts-tx-model');
+      var l = document.getElementById('aopts-lang');
+      var h = document.getElementById('aopts-hint');
+      if (pProv) opts.transcribe_provider = pProv.value;
+      if (pMdl)  opts.transcribe_model    = pMdl.value;
+      if (pProv && pProv.value === 'whisper' && pMdl) {
+        opts.whisper_model = pMdl.value;
+      }
+      if (l) opts.whisper_language = l.value;
+      if (h) opts.transcribe_hint  = h.value;
+    }
+  } else if (action === 'transcribe') {
+    mode = 'transcribe';
+    var txForce = document.getElementById('aopts-tx-force');
+    opts.force = !!(txForce && txForce.checked);
+    var pProv = document.getElementById('aopts-tx-provider');
+    var pMdl  = document.getElementById('aopts-tx-model');
     var l = document.getElementById('aopts-lang');
-    var t = document.getElementById('aopts-translate');
-    if (m) opts.whisper_model    = m.value;
+    var h = document.getElementById('aopts-hint');
+    if (pProv) opts.transcribe_provider = pProv.value;
+    if (pMdl)  opts.transcribe_model    = pMdl.value;
+    if (pProv && pProv.value === 'whisper' && pMdl) {
+      opts.whisper_model = pMdl.value;
+    }
     if (l) opts.whisper_language = l.value;
-    if (t) opts.whisper_translate = t.checked;
+    if (h) opts.transcribe_hint  = h.value;
+  } else {
+    return;
   }
+
   closeAnalyzeOpts();
   analyzeVideoMode(videoId, mode, opts);
 }
@@ -3484,6 +3758,8 @@ var _vtxState = { videoId: null, selectionStart: null, selectionEnd: null,
 // types in the search box without re-hitting the API.
 var _vtxData = null;
 var _vtxMode = 'both';     // default to side-by-side when both versions exist
+var _vtxEditMode = false;  // when true, every .vtx-seg-text is contenteditable
+var _vtxDiffMode = false;  // when true, edited rows render an extra strikethrough line
 var _vtxHasNative = false;
 var _vtxHasEnglish = false;
 
@@ -3559,8 +3835,14 @@ async function openVideoTranscript(videoId) {
     if (s) s.value = '';
     document.getElementById('vtx-search-count').textContent = '';
     document.getElementById('vtx-toolbar').style.display = '';
+    // Reset edit/diff state on every open so the user starts clean.
+    _vtxEditMode = false; _vtxDiffMode = false;
+    document.getElementById('vtx-edit-btn').style.display = '';
+    document.getElementById('vtx-save-btn').style.display = 'none';
+    document.getElementById('vtx-cancel-btn').style.display = 'none';
     syncVtxLangToggle();
     renderVtxContent();
+    _vtxRefreshEditButtons();
     document.getElementById('vtx-sel-info').textContent = 'Select text to preview or add to Builder.';
   } catch (e) {
     body.innerHTML = '<div style="color:#ef5350;padding:16px">Failed to load transcript.</div>';
@@ -3630,12 +3912,27 @@ function _vtxBuildGroupsHtml(groups, q) {
       var seg = g.segments[j];
       var r = _vtxHighlight(seg.text, q);
       totalHits += r.count;
-      html += '<div class="vtx-seg">'
+      var rid = (seg.id !== undefined) ? seg.id : '';
+      var edited = !!seg.edited;
+      var ceAttr = _vtxEditMode ? ' contenteditable="true" spellcheck="false"' : '';
+      var origLine = (_vtxDiffMode && edited && seg.original_text)
+        ? '<span class="vtx-seg-orig">' + _vtxEsc(seg.original_text) + '</span>'
+        : '';
+      var revertBtn = (edited && rid !== '')
+        ? '<button class="vtx-seg-revert" data-rid="' + rid + '"'
+          + ' onclick="vtxRevertOne(event,' + rid + ')" title="Revert this segment">↺</button>'
+        : '';
+      html += '<div class="vtx-seg' + (edited ? ' is-edited' : '')
+        + '" data-rid="' + rid + '">'
         + '<span class="vtx-seg-time">' + _vtxFmt(seg.start) + '</span>'
         + '<span class="vtx-seg-text" data-start="' + seg.start
-              + '" data-end="' + seg.end + '">'
-        + r.html
+              + '" data-end="' + seg.end + '"'
+              + (rid !== '' ? ' data-rid="' + rid + '"' : '')
+              + ceAttr + '>'
+        + (_vtxEditMode ? _vtxEsc(seg.text) : r.html)
         + '</span>'
+        + revertBtn
+        + origLine
         + '</div>';
     }
     html += '</div>';
@@ -3716,6 +4013,153 @@ function renderVtxContent() {
 
 function onVtxSearchInput() {
   renderVtxContent();
+}
+
+/* ── Edit / diff / revert ────────────────────────────────────────── */
+
+function _vtxApplyEditState(seg, newText, originalText) {
+  // Mutate the corresponding row in _vtxData so subsequent renders see
+  // the latest values (text + edited flag + original_text).
+  if (!_vtxData || !_vtxData.groups) return;
+  for (var gi = 0; gi < _vtxData.groups.length; gi++) {
+    var segs = _vtxData.groups[gi].segments || [];
+    for (var si = 0; si < segs.length; si++) {
+      if (segs[si].id === seg) {
+        segs[si].text = newText;
+        if (arguments.length >= 3) segs[si].original_text = originalText;
+        segs[si].edited = (segs[si].original_text != null
+                          && segs[si].original_text !== segs[si].text);
+        return;
+      }
+    }
+  }
+}
+
+function _vtxAnyEdited() {
+  if (!_vtxData || !_vtxData.groups) return false;
+  for (var gi = 0; gi < _vtxData.groups.length; gi++) {
+    var segs = _vtxData.groups[gi].segments || [];
+    for (var si = 0; si < segs.length; si++) {
+      if (segs[si].edited) return true;
+    }
+  }
+  return false;
+}
+
+function _vtxRefreshEditButtons() {
+  var anyEdited = _vtxAnyEdited();
+  var revertAll = document.getElementById('vtx-revert-all-btn');
+  if (revertAll) revertAll.classList.toggle('shown', anyEdited);
+  var diffBtn = document.getElementById('vtx-diff-btn');
+  if (diffBtn) {
+    diffBtn.classList.toggle('active', _vtxDiffMode);
+    diffBtn.disabled = !anyEdited && !_vtxDiffMode;
+  }
+}
+
+function vtxToggleEdit() {
+  _vtxEditMode = true;
+  document.getElementById('vtx-edit-btn').style.display = 'none';
+  document.getElementById('vtx-save-btn').style.display = '';
+  document.getElementById('vtx-cancel-btn').style.display = '';
+  renderVtxContent();
+}
+
+function vtxCancelEdits() {
+  _vtxEditMode = false;
+  document.getElementById('vtx-edit-btn').style.display = '';
+  document.getElementById('vtx-save-btn').style.display = 'none';
+  document.getElementById('vtx-cancel-btn').style.display = 'none';
+  renderVtxContent();
+}
+
+async function vtxSaveEdits() {
+  // Walk every editable span; if its current text differs from the
+  // value held in _vtxData, POST the update. Each row is committed
+  // independently so a partial failure doesn't lose the rest.
+  if (!_vtxData) return;
+  var saveBtn = document.getElementById('vtx-save-btn');
+  saveBtn.disabled = true;
+  var nodes = document.querySelectorAll('#vtx-body .vtx-seg-text[contenteditable="true"]');
+  var saved = 0, failed = 0, unchanged = 0;
+  // Build a map from rid → current data segment for quick lookup.
+  var byId = {};
+  (_vtxData.groups || []).forEach(function(g){
+    (g.segments || []).forEach(function(s){ if (s.id != null) byId[s.id] = s; });
+  });
+  for (var i = 0; i < nodes.length; i++) {
+    var el = nodes[i];
+    var rid = parseInt(el.getAttribute('data-rid'), 10);
+    if (!rid) continue;
+    var current = byId[rid];
+    if (!current) continue;
+    var newText = (el.innerText || '').trim();
+    if (newText === (current.text || '').trim()) { unchanged++; continue; }
+    if (!newText) {
+      // Don't allow empty saves — bounce back to the previous text.
+      el.innerText = current.text || '';
+      continue;
+    }
+    try {
+      var r = await fetch('/rate/api/transcript/' + rid, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({text: newText}),
+      });
+      var d = await r.json();
+      if (!r.ok || !d.ok) { failed++; continue; }
+      _vtxApplyEditState(rid, d.text, d.original_text);
+      saved++;
+    } catch (e) {
+      failed++;
+    }
+  }
+  saveBtn.disabled = false;
+  vtxCancelEdits();   // exits edit mode and re-renders with new flags
+  if (failed) {
+    alert(failed + ' segment' + (failed === 1 ? '' : 's')
+      + ' failed to save. Try Edit again — others were saved.');
+  }
+  _vtxRefreshEditButtons();
+}
+
+function vtxToggleDiff() {
+  _vtxDiffMode = !_vtxDiffMode;
+  renderVtxContent();
+  _vtxRefreshEditButtons();
+}
+
+async function vtxRevertOne(e, rid) {
+  if (e) e.stopPropagation();
+  if (!rid) return;
+  try {
+    var r = await fetch('/rate/api/transcript/' + rid + '/revert',
+                       {method:'POST'});
+    var d = await r.json();
+    if (!r.ok || !d.ok) { alert('Revert failed.'); return; }
+    _vtxApplyEditState(rid, d.text, d.original_text);
+    renderVtxContent();
+    _vtxRefreshEditButtons();
+  } catch (err) { alert('Revert failed: ' + err.message); }
+}
+
+async function vtxRevertAll() {
+  if (!confirm('Revert every edited segment to its original?')) return;
+  var ids = [];
+  (_vtxData && _vtxData.groups || []).forEach(function(g){
+    (g.segments || []).forEach(function(s){
+      if (s.edited && s.id != null) ids.push(s.id);
+    });
+  });
+  for (var i = 0; i < ids.length; i++) {
+    try {
+      var r = await fetch('/rate/api/transcript/' + ids[i] + '/revert',
+                         {method:'POST'});
+      var d = await r.json();
+      if (r.ok && d.ok) _vtxApplyEditState(ids[i], d.text, d.original_text);
+    } catch (e) {}
+  }
+  renderVtxContent();
+  _vtxRefreshEditButtons();
 }
 
 function closeVideoTranscript() {
