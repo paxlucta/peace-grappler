@@ -205,6 +205,11 @@ def api_clips():
             "thumb_count": _get_thumb_count(s),
             "wide": s["wide"],
             "has_transcript": s["id"] in tx_ids,
+            # Per-scene crop overrides (Builder gear → crop). These seed
+            # the crop on any timeline clip added from this scene card.
+            "crop_x_frac": s.get("crop_x_frac"),
+            "free_crops": _parse_scene_free_crops(s.get("free_crops")),
+            "video_duration": s.get("video_duration") or 0,
             # AI attribution so the Builder's clip-card can render the same
             # provider/model icon the Scenes page shows.
             "analyzer_provider":         s.get("analyzer_provider") or "",
@@ -505,6 +510,76 @@ def api_serve_video():
     if path and os.path.exists(path) and str(OUTPUT_DIR) in os.path.abspath(path):
         return send_file(os.path.abspath(path), mimetype="video/mp4")
     return "", 404
+
+
+def _parse_scene_free_crops(raw):
+    if not raw:
+        return None
+    try:
+        import json as _json
+        v = _json.loads(raw)
+        return v if isinstance(v, list) and v else None
+    except Exception:
+        return None
+
+
+@clip_builder_bp.route("/api/source-video/<int:scene_id>")
+def api_source_video(scene_id):
+    """Stream the underlying source video for a scene. Used by the scene
+    settings popup's trim view so the user can drag start/end handles
+    across the full file (not just the already-trimmed range)."""
+    scene = get_scene_by_id(scene_id)
+    if not scene:
+        return "", 404
+    path = scene["video_path"]
+    if not path or not os.path.exists(path):
+        return "", 404
+    return send_file(os.path.abspath(path), mimetype="video/mp4",
+                     conditional=True)
+
+
+@clip_builder_bp.route("/api/scene/<int:scene_id>/trim", methods=["POST"])
+def api_scene_trim(scene_id):
+    from db import update_scene_trim
+    data = request.json or {}
+    try:
+        start = float(data.get("start"))
+        end = float(data.get("end"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "invalid times"}), 400
+    if end <= start:
+        return jsonify({"error": "end must be > start"}), 400
+    scene = get_scene_by_id(scene_id)
+    if not scene:
+        return jsonify({"error": "scene not found"}), 404
+    vd = scene.get("video_duration") or 0
+    if vd:
+        start = max(0.0, start)
+        end = min(float(vd), end)
+    update_scene_trim(scene_id, start, end)
+    return jsonify({"ok": True, "start": start, "end": end,
+                    "duration": round(end - start, 2)})
+
+
+@clip_builder_bp.route("/api/scene/<int:scene_id>/crop", methods=["POST"])
+def api_scene_crop(scene_id):
+    import json as _json
+    from db import update_scene_crop
+    data = request.json or {}
+    cxf = data.get("crop_x_frac", None)
+    if cxf is not None:
+        try:
+            cxf = float(cxf)
+            cxf = max(0.0, min(1.0, cxf))
+        except (TypeError, ValueError):
+            cxf = None
+    fc = data.get("free_crops")
+    fc_json = _json.dumps(fc) if isinstance(fc, list) and fc else None
+    scene = get_scene_by_id(scene_id)
+    if not scene:
+        return jsonify({"error": "scene not found"}), 404
+    update_scene_crop(scene_id, cxf, fc_json)
+    return jsonify({"ok": True})
 
 
 @clip_builder_bp.route("/api/hide", methods=["POST"])
@@ -1489,6 +1564,16 @@ main.bb-cols{
   position:absolute;right:6px;top:50%;transform:translateY(-50%);
 }
 .clip-card .vote-row .vote-btn-end:hover{transform:translateY(-50%) scale(1.15)}
+/* Right-side cluster: transcript + gear stacked to the right edge. */
+.clip-card .vote-row .vote-right-cluster{
+  position:absolute;right:6px;top:50%;transform:translateY(-50%);
+  display:flex;gap:4px;align-items:center;
+}
+.clip-card .vote-row .vote-right-cluster .vote-btn:hover{transform:scale(1.15)}
+.clip-card .vote-btn.vgear{border-color:#555}
+.clip-card .vote-btn.vgear svg{fill:#888}
+.clip-card .vote-btn.vgear:hover{background:#555;border-color:#888}
+.clip-card .vote-btn.vgear:hover svg{fill:#fff}
 .clip-card .vote-btn{
   width:32px;height:32px;border-radius:50%;border:1.5px solid #444;
   background:#111;cursor:pointer;transition:all .12s;
@@ -1949,6 +2034,69 @@ footer{
 .crop-mode-tabs button:hover{color:#fff}
 .crop-mode-tabs button.active{color:#fff;border-bottom-color:#2196f3}
 
+/* -- Scene settings modal (gear button on clip cards) --------------------- */
+.ss-section{
+  background:#141414;border:1px solid #262626;border-radius:8px;
+  padding:12px 14px;margin-bottom:14px;
+}
+.ss-section-title{
+  font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;
+  color:#ffb74d;margin-bottom:10px;
+}
+.ss-row{display:flex;gap:8px;align-items:center}
+.ss-btn{
+  background:#1f1f1f;border:1px solid #3a3a3a;color:#ddd;border-radius:5px;
+  padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;
+}
+.ss-btn:hover{border-color:#ffb74d;color:#fff}
+.ss-trim-stage{
+  width:100%;height:180px;background:#000;border-radius:6px;overflow:hidden;
+  display:flex;align-items:center;justify-content:center;margin-bottom:12px;
+}
+.ss-trim-stage video{width:100%;height:100%;object-fit:contain;display:block}
+.ss-trim-bar{
+  position:relative;height:36px;background:#0a0a0a;border:1px solid #262626;
+  border-radius:6px;user-select:none;
+}
+.ss-trim-track{
+  position:absolute;left:0;right:0;top:50%;height:8px;transform:translateY(-50%);
+  background:#1f1f1f;border-radius:4px;
+}
+.ss-trim-fill{
+  position:absolute;top:50%;height:10px;transform:translateY(-50%);
+  background:linear-gradient(90deg,#ffb74d,#ff9800);border-radius:4px;
+  pointer-events:none;
+}
+.ss-trim-handle{
+  position:absolute;top:0;bottom:0;width:14px;
+  display:flex;align-items:center;justify-content:center;
+  cursor:ew-resize;z-index:2;
+}
+.ss-trim-handle .ss-trim-grip{
+  width:6px;height:24px;background:#fff;border-radius:2px;
+  box-shadow:0 0 0 1px #000, 0 2px 4px rgba(0,0,0,.6);
+}
+.ss-trim-handle:hover .ss-trim-grip{background:#ffb74d}
+.ss-trim-playhead{
+  position:absolute;top:-2px;bottom:-2px;width:2px;background:#e53935;
+  pointer-events:none;display:none;z-index:1;
+}
+.ss-trim-playhead.on{display:block}
+.ss-trim-foot{
+  display:flex;align-items:center;gap:10px;margin-top:10px;font-size:12px;
+}
+.ss-play-btn{
+  width:34px;height:34px;border-radius:50%;background:#e53935;border:none;
+  display:inline-flex;align-items:center;justify-content:center;cursor:pointer;
+  color:#fff;
+}
+.ss-play-btn:hover{background:#f44336}
+.ss-play-btn svg{width:14px;height:14px;fill:#fff;margin-left:2px}
+.ss-time{font-variant-numeric:tabular-nums;color:#ddd;font-weight:600}
+.ss-time-sep{color:#666}
+.ss-time-dur{color:#888;font-size:11px}
+
+
 .cf-toolbar{
   display:flex;align-items:center;gap:6px;
   padding:6px 8px;background:#111;border-radius:6px;margin-bottom:10px;
@@ -2004,7 +2152,13 @@ footer{
   position:absolute;top:-22px;left:-3px;
   font-size:10px;color:#fff;background:#222;padding:1px 6px;border-radius:3px;
   font-family:'SF Mono',Menlo,monospace;letter-spacing:.5px;
+  white-space:nowrap;
 }
+.cf-rect .cf-label .cf-aspect-badge{
+  display:inline-block;margin-left:4px;padding:0 4px;border-radius:2px;
+  background:#2196f3;color:#fff;font-weight:700;letter-spacing:.4px;
+}
+.cf-rect .cf-label .cf-aspect-badge.custom{background:#666}
 .cf-dst-wrap .cf-rect{background-size:cover;background-position:center;background-repeat:no-repeat}
 .cf-dst-wrap .cf-rect .cf-handle.h-nw,
 .cf-dst-wrap .cf-rect .cf-handle.h-ne,
@@ -2498,9 +2652,10 @@ footer{
 <div class="scene-editor" id="scene-editor"></div>
 
 <div class="overlay" id="crop-modal">
-  <div class="modal" id="crop-modal-inner" style="max-width:560px">
-    <h2 style="color:#2196f3">Crop Scene</h2>
-    <div class="crop-mode-tabs">
+  <div class="modal" id="crop-modal-inner" style="max-width:680px">
+    <h2 style="color:#2196f3" id="crop-modal-title">Crop Scene</h2>
+    <div id="crop-modal-subtitle" style="font-size:12px;color:#aaa;margin:-4px 0 10px 0;display:none"></div>
+    <div class="crop-mode-tabs" id="crop-mode-tabs">
       <button type="button" data-mode="strip" class="active" onclick="setCropMode('strip')">Standard</button>
       <button type="button" data-mode="free" onclick="setCropMode('free')">Free</button>
     </div>
@@ -2548,6 +2703,38 @@ footer{
             <div class="cf-rects" id="cf-dst-rects"></div>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Scene-mode trim section: shown only when the crop modal is opened
+         from a scene card's gear button. Combines crop editing (Free mode)
+         with start/end trim + play preview against the source video. -->
+    <div id="ss-trim-block" class="ss-section" style="display:none;margin-top:14px">
+      <div class="ss-section-title">Scene Duration</div>
+      <div class="ss-trim-stage">
+        <video id="ss-trim-video" playsinline muted preload="metadata"></video>
+      </div>
+      <div class="ss-trim-bar" id="ss-trim-bar">
+        <div class="ss-trim-track"></div>
+        <div class="ss-trim-fill" id="ss-trim-fill"></div>
+        <div class="ss-trim-handle ss-trim-handle-start" id="ss-trim-handle-start" data-h="start">
+          <div class="ss-trim-grip"></div>
+        </div>
+        <div class="ss-trim-handle ss-trim-handle-end" id="ss-trim-handle-end" data-h="end">
+          <div class="ss-trim-grip"></div>
+        </div>
+        <div class="ss-trim-playhead" id="ss-trim-playhead"></div>
+      </div>
+      <div class="ss-trim-foot">
+        <button class="ss-play-btn" id="ss-play-btn" onclick="ssTogglePlay()" title="Preview selected range">
+          <svg id="ss-play-icon" viewBox="0 0 24 24"><polygon points="8,5 19,12 8,19"/></svg>
+        </button>
+        <span class="ss-time" id="ss-time-start">0.0s</span>
+        <span class="ss-time-sep">→</span>
+        <span class="ss-time" id="ss-time-end">0.0s</span>
+        <span class="ss-time-dur" id="ss-time-dur">(0.0s)</span>
+        <div style="flex:1"></div>
+        <button class="ss-btn" onclick="ssResetTrim()" title="Restore original scene boundaries">Reset</button>
       </div>
     </div>
 
@@ -3938,6 +4125,30 @@ function openCropModal(target) {
     }
     info = (vi.clip.filename || 'Scene')
       + ' — drag the 9:16 frame to pick the cropped region.';
+  } else if (target.sceneId !== undefined) {
+    // Scene-card mode: seed from the per-scene crop saved on the row in
+    // allClips. Persisted via POST /api/scene/<id>/crop on Save.
+    var sc = allClips.find(function(x){return x.id === target.sceneId});
+    if (!sc) return;
+    existing = (typeof sc.crop_x_frac === 'number') ? sc.crop_x_frac : null;
+    _cropFrac = (existing !== null) ? existing : 0.5;
+    if (Array.isArray(sc.free_crops) && sc.free_crops.length) {
+      _cfRects = sc.free_crops.map(function(r, i){
+        return {
+          id: ++_cfNextId,
+          sx: r.src && r.src.x_frac || 0, sy: r.src && r.src.y_frac || 0,
+          sw: r.src && r.src.w_frac || 0.3, sh: r.src && r.src.h_frac || 0.3,
+          dx: r.dst && r.dst.x_frac || 0,  dy: r.dst && r.dst.y_frac || 0,
+          dw: r.dst && r.dst.w_frac || 0.3, dh: r.dst && r.dst.h_frac || 0.3,
+          z:  (typeof r.z === 'number') ? r.z : i,
+          color: r.color || CF_COLORS[i % CF_COLORS.length],
+        };
+      });
+    }
+    thumbUrl = '/api/thumbnail/' + target.sceneId;
+    _cfThumbUrl = thumbUrl;
+    info = (sc.filename || 'Scene')
+      + ' — saved on this scene; seeds new timeline clips.';
   } else if (target.trackIdx !== undefined) {
     var s = trackSettings[target.trackIdx];
     existing = (typeof s.default_crop_x_frac === 'number') ? s.default_crop_x_frac : null;
@@ -3974,11 +4185,33 @@ function openCropModal(target) {
   _cropWireDrag();
   // Layout once even if image is cached.
   setTimeout(_cropLayout, 0);
-  // Initialize free-mode pane (image + any existing rects). Default
-  // mode is Standard; switch to Free if this clip already has free crops.
   _cfWire();
   _cfLoadImage(thumbUrl);
-  setCropMode((_cfRects.length && target.clipIdx !== undefined) ? 'free' : 'strip');
+  // Scene mode: combined crop + duration popup. Free crop only — no
+  // Standard tab, no single-strip pane. Show trim block at the bottom.
+  var isScene = (target.sceneId !== undefined);
+  var tabs = document.getElementById('crop-mode-tabs');
+  var subtitle = document.getElementById('crop-modal-subtitle');
+  var title = document.getElementById('crop-modal-title');
+  var trimBlock = document.getElementById('ss-trim-block');
+  if (isScene) {
+    if (tabs) tabs.style.display = 'none';
+    if (title) title.textContent = 'Scene Settings';
+    if (subtitle) {
+      var sc2 = allClips.find(function(x){return x.id === target.sceneId});
+      var nm = sc2 ? (sc2.filename || 'Scene') : 'Scene';
+      subtitle.textContent = nm;
+      subtitle.style.display = 'block';
+    }
+    if (trimBlock) trimBlock.style.display = '';
+    setCropMode('free');
+  } else {
+    if (tabs) tabs.style.display = '';
+    if (title) title.textContent = 'Crop Scene';
+    if (subtitle) { subtitle.style.display = 'none'; subtitle.textContent = ''; }
+    if (trimBlock) trimBlock.style.display = 'none';
+    setCropMode((_cfRects.length && target.clipIdx !== undefined) ? 'free' : 'strip');
+  }
 }
 
 function _cropLayout() {
@@ -4062,8 +4295,42 @@ function _cropWireDrag() {
   });
 }
 
-function saveCrop() {
+function _ssPersistSceneCrop(sceneId, payload) {
+  return fetch('/api/scene/' + sceneId + '/crop', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(payload),
+  }).catch(function(){});
+}
+
+async function saveCrop() {
   if (!_cropTarget) { closeCropModal(); return; }
+  // Scene-card mode: persist crop (Free only) AND trim to DB on the
+  // scene row. The combined gear popup folds both into one Save.
+  if (_cropTarget.sceneId !== undefined) {
+    var sid = _cropTarget.sceneId;
+    var sc = allClips.find(function(x){return x.id === sid});
+    if (!sc) { closeCropModal(); return; }
+    if (_cfRects.length) {
+      var freeCrops = _cfRects.map(function(r){
+        return {
+          src: {x_frac:r.sx, y_frac:r.sy, w_frac:r.sw, h_frac:r.sh},
+          dst: {x_frac:r.dx, y_frac:r.dy, w_frac:r.dw, h_frac:r.dh},
+          z: r.z, color: r.color,
+        };
+      });
+      sc.free_crops = freeCrops;
+      sc.crop_x_frac = null;
+      _ssPersistSceneCrop(sid, {free_crops: freeCrops, crop_x_frac: null});
+    } else {
+      // No rectangles = clear any per-scene crop override.
+      sc.free_crops = null;
+      sc.crop_x_frac = null;
+      _ssPersistSceneCrop(sid, {free_crops: null, crop_x_frac: null});
+    }
+    await _ssPersistTrim();
+    closeCropModal();
+    return;
+  }
   if (_cropMode === 'free' && _cropTarget.clipIdx !== undefined) {
     // Free-mode: write the multi-rectangle composite to this clip.
     var vi = videoItems[_cropTarget.clipIdx];
@@ -4102,6 +4369,14 @@ function saveCrop() {
 
 function clearCrop() {
   if (!_cropTarget) { closeCropModal(); return; }
+  if (_cropTarget.sceneId !== undefined) {
+    // In scene mode, "Remove Crop" wipes rectangles but keeps the popup
+    // open so the user can still tweak trim before saving.
+    _cfRects = [];
+    _cfSelected = null;
+    _cfRender();
+    return;
+  }
   if (_cropTarget.clipIdx !== undefined) {
     var vi = videoItems[_cropTarget.clipIdx];
     if (vi) { vi.crop_x_frac = null; delete vi.free_crops; }
@@ -4115,9 +4390,21 @@ function clearCrop() {
 }
 
 function closeCropModal() {
+  var wasSceneTarget = _cropTarget && _cropTarget.sceneId !== undefined;
   _cropTarget = null;
   _cropDrag = null;
   _cfDrag = null;
+  // Hide scene-mode trim section and tear down its <video> so it stops
+  // streaming when the modal closes.
+  var trimBlock = document.getElementById('ss-trim-block');
+  if (trimBlock) trimBlock.style.display = 'none';
+  var tabs = document.getElementById('crop-mode-tabs');
+  if (tabs) tabs.style.display = '';
+  var subtitle = document.getElementById('crop-modal-subtitle');
+  if (subtitle) { subtitle.style.display = 'none'; subtitle.textContent = ''; }
+  var title = document.getElementById('crop-modal-title');
+  if (title) title.textContent = 'Crop Scene';
+  if (wasSceneTarget && typeof _ssTeardown === 'function') _ssTeardown();
   document.getElementById('crop-modal').classList.remove('active');
 }
 
@@ -4181,25 +4468,40 @@ function _cfLayout() {
   // for the resize listener so future tweaks have a home.
 }
 
+// Instagram's portrait feed post aspect ratio (4:5, e.g. 1080×1350). New
+// rectangles default to this — the most common upload target — and label
+// themselves "4:5" until the user resizes them.
+var CF_DEFAULT_ASPECT_W = 4;
+var CF_DEFAULT_ASPECT_H = 5;
+var CF_DEFAULT_LABEL = '4:5';
+
 function cfAddRect() {
   var idx = _cfRects.length;
   var color = CF_COLORS[idx % CF_COLORS.length];
-  // Default: 40% wide, centered. Source aspect drives dst height.
-  var sw = 0.4, sh = 0.4, sx = 0.3, sy = 0.3;
-  // Lock the destination rectangle to the source rectangle's PIXEL
-  // aspect ratio inside the 9:16 output canvas.
-  //   srcRectAspect = (srcW*sw) / (srcH*sh) = _cfSrcAspect * (sw/sh)
-  //   dstRectAspect = (W*dw)   / (H*dh)     = (dw/dh) * (9/16)
-  //   match → dh = dw * (sh/sw) * (9/16) / _cfSrcAspect
-  var dw = 0.5;
-  var dh = dw * (sh / sw) * (9 / 16) / _cfSrcAspect;
-  if (!isFinite(dh) || dh <= 0) dh = 0.5;
-  dh = Math.min(0.9, dh);
+  // Lock the source rect to a 4:5 pixel aspect ratio.
+  //   pixel aspect = srcAsp * (sw/sh) = 4/5
+  //   → sw/sh = (4/5) / srcAsp
+  var srcAsp = _cfSrcAspect || (16/9);
+  var targetAsp = CF_DEFAULT_ASPECT_W / CF_DEFAULT_ASPECT_H;
+  var sh = 0.7;
+  var sw = sh * targetAsp / srcAsp;
+  if (!isFinite(sw) || sw <= 0) sw = 0.5;
+  if (sw > 0.95) { sw = 0.95; sh = sw * srcAsp / targetAsp; }
+  if (sh > 0.95) { sh = 0.95; sw = sh * targetAsp / srcAsp; }
+  var sx = (1 - sw) / 2;
+  var sy = (1 - sh) / 2;
+  // Dst keeps the same pixel aspect via the existing 9:16 canvas lock.
+  var dh = 0.9;
+  var dw = dh * (sw / sh) * srcAsp / (9 / 16);
+  if (!isFinite(dw) || dw <= 0) dw = 0.5;
+  if (dw > 0.95) { dw = 0.95; dh = dw * (sh / sw) * (9 / 16) / srcAsp; }
+  if (dh > 0.95) { dh = 0.95; dw = dh * (sw / sh) * srcAsp / (9 / 16); }
   var r = {
     id: ++_cfNextId,
     sx: sx, sy: sy, sw: sw, sh: sh,
     dx: (1 - dw) / 2, dy: (1 - dh) / 2, dw: dw, dh: dh,
     z: _cfRects.length, color: color,
+    label: CF_DEFAULT_LABEL,
   };
   _cfRects.push(r);
   _cfSelected = r.id;
@@ -4251,8 +4553,11 @@ function _cfRender() {
       + 'left:' + (r.sx*100) + '%;top:' + (r.sy*100) + '%;'
       + 'width:' + (r.sw*100) + '%;height:' + (r.sh*100) + '%;';
     sEl.dataset.rid = r.id; sEl.dataset.pane = 'src';
+    var badge = r.label
+      ? ' <span class="cf-aspect-badge' + (r.label === 'Custom' ? ' custom' : '') + '">' + r.label + '</span>'
+      : '';
     sEl.innerHTML =
-      '<span class="cf-label">' + (idx+1) + '  z=' + r.z + '</span>' +
+      '<span class="cf-label">' + (idx+1) + '  z=' + r.z + badge + '</span>' +
       '<div class="cf-handle h-nw" data-h="nw"></div>' +
       '<div class="cf-handle h-ne" data-h="ne"></div>' +
       '<div class="cf-handle h-sw" data-h="sw"></div>' +
@@ -4272,7 +4577,7 @@ function _cfRender() {
       + 'width:' + (r.dw*100) + '%;height:' + (r.dh*100) + '%;' + bg;
     dEl.dataset.rid = r.id; dEl.dataset.pane = 'dst';
     dEl.innerHTML =
-      '<span class="cf-label">' + (idx+1) + '</span>' +
+      '<span class="cf-label">' + (idx+1) + badge + '</span>' +
       '<div class="cf-handle h-se" data-h="se"></div>';
     dstCt.appendChild(dEl);
   }
@@ -4347,6 +4652,8 @@ function _cfOnMouseMove(e) {
       rc.sx = Math.max(0, Math.min(1 - I.sw, I.sx + dxFrac));
       rc.sy = Math.max(0, Math.min(1 - I.sh, I.sy + dyFrac));
     } else {
+      // Resizing breaks the preset aspect — relabel as Custom.
+      if (rc.label && rc.label !== 'Custom') rc.label = 'Custom';
       // Resize handles — free aspect on the source side.
       if (_cfDrag.handle.indexOf('e') >= 0) rc.sw = Math.max(0.02, Math.min(1 - I.sx, I.sw + dxFrac));
       if (_cfDrag.handle.indexOf('s') >= 0) rc.sh = Math.max(0.02, Math.min(1 - I.sy, I.sh + dyFrac));
@@ -4368,6 +4675,8 @@ function _cfOnMouseMove(e) {
       rc.dy = Math.max(0, Math.min(1 - I.dh, I.dy + dyFrac));
     } else if (_cfDrag.handle === 'se') {
       // Uniform scale by SE corner — drive from dw, then re-lock dh.
+      // Dst-side resize keeps the same source-pixel aspect (just scales
+      // the output footprint), so the preset label stays accurate.
       var newDw = Math.max(0.05, Math.min(1 - I.dx, I.dw + dxFrac));
       rc.dw = newDw;
       _cfRecomputeDstAspect(rc);
@@ -4480,7 +4789,9 @@ function addVideoItem(clip, startTime, trackIdx) {
   var trackEnd = 0;
   trackItems.forEach(function(v) { trackEnd = Math.max(trackEnd, v.startTime + v.duration); });
   var st = startTime !== undefined ? startTime : trackEnd;
-  videoItems.push({
+  var seedCrop = (typeof clip.crop_x_frac === 'number') ? clip.crop_x_frac : null;
+  var seedFree = (Array.isArray(clip.free_crops) && clip.free_crops.length) ? clip.free_crops : null;
+  var newItem = {
     clip: {id: clip.id, video_file: clip.video_file, start: clip.start, end: clip.end, filename: clip.filename, wide: clip.wide},
     duration: dur,
     startTime: st,
@@ -4489,8 +4800,10 @@ function addVideoItem(clip, startTime, trackIdx) {
     trans_out: null,
     volume: 5,
     stackOrder: 0,
-    crop_x_frac: null,
-  });
+    crop_x_frac: seedCrop,
+  };
+  if (seedFree) newItem.free_crops = seedFree;
+  videoItems.push(newItem);
   if (tlSequential[t]) {
     packTimeline(t);
   } else {
@@ -4668,7 +4981,7 @@ function cardHTML(c) {
         }) + '</span>'
     : '';
   return '<div class="' + cls + '" data-id="' + c.id + '" data-tc="' + (c.thumb_count||1) + '" oncontextmenu="showCtx(event,' + c.id + ')">'
-    + '<img class="thumb" src="/api/thumbnail/' + c.id + '" loading="lazy"/>'
+    + '<img class="thumb" src="/api/thumbnail/' + c.id + (c._v ? ('?v=' + c._v) : '') + '" loading="lazy"/>'
     + '<div class="play-overlay" onclick="event.stopPropagation();playScene(this,' + c.id + ')"><div class="play-circle"><svg viewBox="0 0 24 24"><polygon points="8,5 19,12 8,19"/></svg></div></div>'
     + '<span class="wide-badge" title="Widescreen source">'
     +   '<svg viewBox="0 0 16 9"><rect x="0.75" y="0.75" width="14.5" height="7.5" rx="1.5"/></svg>'
@@ -4682,14 +4995,19 @@ function cardHTML(c) {
     +   '<button class="vote-btn vdown' + (c.status === 'down' ? ' active' : '') + '" onclick="event.stopPropagation();voteClip(' + c.id + ',\'down\')" title="Hide scene">'
     +     '<svg viewBox="0 0 24 24"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>'
     +   '</button>'
-    +   '<button class="vote-btn vup' + (c.status === 'up' ? ' active' : '') + '" onclick="event.stopPropagation();voteClip(' + c.id + ',\'up\')" title="Keep scene">'
-    +     '<svg viewBox="0 0 24 24"><path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg>'
-    +   '</button>'
-    +   (c.has_transcript ? '<button class="vote-btn vtxt vote-btn-end" onclick="event.stopPropagation();openSceneTranscript(' + c.id + ')" title="Show transcript"><svg viewBox="0 0 24 24"><path d="M4 4h16v2H4V4zm0 4h16v2H4V8zm0 4h10v2H4v-2zm0 4h16v2H4v-2zm0 4h10v2H4v-2z"/></svg></button>' : '')
+    +   '<div class="vote-right-cluster">'
+    +     (c.has_transcript ? '<button class="vote-btn vtxt" onclick="event.stopPropagation();openSceneTranscript(' + c.id + ')" title="Show transcript"><svg viewBox="0 0 24 24"><path d="M4 4h16v2H4V4zm0 4h16v2H4V8zm0 4h10v2H4v-2zm0 4h16v2H4v-2zm0 4h10v2H4v-2z"/></svg></button>' : '')
+    +     '<button class="vote-btn vgear" onclick="event.stopPropagation();openSceneSettings(' + c.id + ')" title="Scene settings"><svg viewBox="0 0 24 24"><path d="M19.43 12.98c.04-.32.07-.65.07-.98s-.03-.66-.07-.98l2.11-1.65a.5.5 0 0 0 .12-.64l-2-3.46a.5.5 0 0 0-.61-.22l-2.49 1a7.03 7.03 0 0 0-1.69-.98l-.38-2.65A.488.488 0 0 0 14 2h-4a.488.488 0 0 0-.49.42l-.38 2.65c-.61.25-1.17.58-1.69.98l-2.49-1a.5.5 0 0 0-.61.22l-2 3.46a.5.5 0 0 0 .12.64L4.57 11.02c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65a.5.5 0 0 0-.12.64l2 3.46c.14.24.42.34.66.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.05.24.25.42.49.42h4c.24 0 .44-.18.49-.42l.38-2.65c.61-.25 1.17-.58 1.69-.98l2.49 1c.24.1.52 0 .66-.22l2-3.46a.5.5 0 0 0-.12-.64l-2.11-1.65zM12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5z"/></svg></button>'
+    +   '</div>'
     + '</div></div>';
 }
 
 async function voteClip(sceneId, action) {
+  // Down = hide. Confirm before hiding so an accidental click on a small
+  // thumb-down button can't silently drop the scene out of the grid.
+  if (action === 'down') {
+    if (!window.confirm('Hide this scene from the grid?')) return;
+  }
   // Use the same backend as /rate so up/down state stays in sync
   // across pages (it records a grade row and toggles `excluded`).
   try {
@@ -4703,6 +5021,227 @@ async function voteClip(sceneId, action) {
     if (action === 'down') { c.excluded = true; c.status = 'down'; }
     else                   { c.excluded = false; c.status = 'up'; }
   }
+  renderGrid();
+}
+
+// -- Scene settings popup (gear button on clip cards) ----------------------
+// Per-scene crop + trim editor. Crop reuses the existing crop modal in
+// scene-mode (persisted to scenes.crop_x_frac / scenes.free_crops). Trim
+// drives an HTML5 <video> against the source file with two draggable
+// handles, a fill bar, and a play-preview button — persisted to
+// scenes.start_time / scenes.end_time.
+var _ssSceneId = null;
+var _ssOrigStart = 0;
+var _ssOrigEnd = 0;
+var _ssVidDur = 0;
+var _ssStart = 0;
+var _ssEnd = 0;
+var _ssPlaying = false;
+var _ssDrag = null;
+var _ssRaf = null;
+
+function openSceneSettings(sceneId) {
+  // Scene settings = the existing crop modal in Free-only mode, with a
+  // trim section appended at the bottom. The crop modal's save/cancel
+  // buttons drive both crop and trim persistence (see saveCrop /
+  // closeCropModal).
+  var c = allClips.find(function(x){return x.id === sceneId});
+  if (!c) return;
+  _ssSceneId = sceneId;
+  _ssOrigStart = +c.start || 0;
+  _ssOrigEnd = +c.end || (_ssOrigStart + (+c.duration || 0));
+  _ssVidDur = +c.video_duration || 0;
+  if (!_ssVidDur || _ssVidDur < _ssOrigEnd) {
+    _ssVidDur = Math.max(_ssOrigEnd, 1);
+  }
+  _ssStart = _ssOrigStart;
+  _ssEnd = _ssOrigEnd;
+  openCropModal({sceneId: sceneId});
+
+  var vid = document.getElementById('ss-trim-video');
+  vid.onloadedmetadata = function() {
+    if (vid.duration && isFinite(vid.duration)) {
+      _ssVidDur = vid.duration;
+      ssRenderTrim();
+    }
+    try { vid.currentTime = _ssStart; } catch (e) {}
+  };
+  vid.ontimeupdate = function() {
+    if (_ssPlaying) {
+      if (vid.currentTime >= _ssEnd - 0.02) {
+        vid.pause();
+        _ssPlaying = false;
+        ssUpdatePlayIcon();
+      }
+      ssUpdatePlayhead();
+    }
+  };
+  vid.onended = function() { _ssPlaying = false; ssUpdatePlayIcon(); };
+  vid.src = '/api/source-video/' + sceneId;
+
+  ssRenderTrim();
+  ssWireTrim();
+}
+
+function _ssTeardown() {
+  var vid = document.getElementById('ss-trim-video');
+  if (vid) { try { vid.pause(); vid.removeAttribute('src'); vid.load(); } catch (e) {} }
+  _ssSceneId = null;
+  _ssPlaying = false;
+  if (_ssRaf) { cancelAnimationFrame(_ssRaf); _ssRaf = null; }
+}
+
+function ssResetTrim() {
+  _ssStart = _ssOrigStart;
+  _ssEnd = _ssOrigEnd;
+  ssRenderTrim();
+  var vid = document.getElementById('ss-trim-video');
+  try { vid.currentTime = _ssStart; } catch (e) {}
+}
+
+function ssRenderTrim() {
+  var bar = document.getElementById('ss-trim-bar');
+  if (!bar) return;
+  var w = bar.clientWidth;
+  if (!w) { setTimeout(ssRenderTrim, 30); return; }
+  var d = _ssVidDur || 1;
+  var sx = (_ssStart / d) * w;
+  var ex = (_ssEnd / d) * w;
+  var fill = document.getElementById('ss-trim-fill');
+  var hs = document.getElementById('ss-trim-handle-start');
+  var he = document.getElementById('ss-trim-handle-end');
+  fill.style.left = sx + 'px';
+  fill.style.width = Math.max(0, ex - sx) + 'px';
+  hs.style.left = (sx - 7) + 'px';
+  he.style.left = (ex - 7) + 'px';
+  document.getElementById('ss-time-start').textContent = _ssStart.toFixed(1) + 's';
+  document.getElementById('ss-time-end').textContent = _ssEnd.toFixed(1) + 's';
+  document.getElementById('ss-time-dur').textContent =
+    '(' + Math.max(0, _ssEnd - _ssStart).toFixed(1) + 's)';
+  ssUpdatePlayhead();
+}
+
+function ssUpdatePlayhead() {
+  var bar = document.getElementById('ss-trim-bar');
+  if (!bar) return;
+  var ph = document.getElementById('ss-trim-playhead');
+  var vid = document.getElementById('ss-trim-video');
+  if (!_ssPlaying) { ph.classList.remove('on'); return; }
+  ph.classList.add('on');
+  var w = bar.clientWidth;
+  var d = _ssVidDur || 1;
+  var x = (vid.currentTime / d) * w;
+  ph.style.left = x + 'px';
+}
+
+function ssWireTrim() {
+  var bar = document.getElementById('ss-trim-bar');
+  if (bar._wired) return;
+  bar._wired = true;
+  ['start', 'end'].forEach(function(which) {
+    var h = document.getElementById('ss-trim-handle-' + which);
+    h.addEventListener('mousedown', function(e) { _ssBegin(e, which); });
+    h.addEventListener('touchstart', function(e) { _ssBegin(e, which); }, {passive:false});
+  });
+  // Click on track to seek the preview video.
+  bar.addEventListener('click', function(e) {
+    if (e.target.closest('.ss-trim-handle')) return;
+    var rect = bar.getBoundingClientRect();
+    var x = e.clientX - rect.left;
+    var d = _ssVidDur || 1;
+    var t = Math.max(0, Math.min(d, (x / rect.width) * d));
+    var vid = document.getElementById('ss-trim-video');
+    try { vid.currentTime = t; } catch (err) {}
+  });
+}
+
+function _ssBegin(e, which) {
+  e.preventDefault();
+  var bar = document.getElementById('ss-trim-bar');
+  var rect = bar.getBoundingClientRect();
+  _ssDrag = {which: which, rect: rect};
+  function onMove(ev) {
+    ev.preventDefault();
+    var cx = ev.touches ? ev.touches[0].clientX : ev.clientX;
+    var x = Math.max(0, Math.min(_ssDrag.rect.width, cx - _ssDrag.rect.left));
+    var d = _ssVidDur || 1;
+    var t = (x / _ssDrag.rect.width) * d;
+    var minGap = 0.2;
+    if (_ssDrag.which === 'start') {
+      _ssStart = Math.max(0, Math.min(_ssEnd - minGap, t));
+    } else {
+      _ssEnd = Math.min(d, Math.max(_ssStart + minGap, t));
+    }
+    ssRenderTrim();
+    // Live-seek the preview to the dragged handle.
+    var vid = document.getElementById('ss-trim-video');
+    try { vid.currentTime = (_ssDrag.which === 'start') ? _ssStart : _ssEnd; } catch (err) {}
+  }
+  function onUp() {
+    _ssDrag = null;
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    document.removeEventListener('touchmove', onMove);
+    document.removeEventListener('touchend', onUp);
+  }
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+  document.addEventListener('touchmove', onMove, {passive:false});
+  document.addEventListener('touchend', onUp);
+}
+
+function ssTogglePlay() {
+  var vid = document.getElementById('ss-trim-video');
+  if (_ssPlaying) {
+    vid.pause();
+    _ssPlaying = false;
+  } else {
+    try { vid.currentTime = _ssStart; } catch (e) {}
+    vid.muted = false;
+    var p = vid.play();
+    _ssPlaying = true;
+    if (p && p.catch) p.catch(function(){ /* autoplay may need user gesture */ });
+    function tick() {
+      if (!_ssPlaying) return;
+      ssUpdatePlayhead();
+      _ssRaf = requestAnimationFrame(tick);
+    }
+    tick();
+  }
+  ssUpdatePlayIcon();
+}
+
+function ssUpdatePlayIcon() {
+  var ic = document.getElementById('ss-play-icon');
+  if (!ic) return;
+  if (_ssPlaying) {
+    ic.innerHTML = '<rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/>';
+  } else {
+    ic.innerHTML = '<polygon points="8,5 19,12 8,19"/>';
+  }
+}
+
+async function _ssPersistTrim() {
+  if (_ssSceneId == null) return;
+  var changed = (Math.abs(_ssStart - _ssOrigStart) > 0.01)
+             || (Math.abs(_ssEnd - _ssOrigEnd) > 0.01);
+  if (!changed) return;
+  try {
+    var r = await fetch('/api/scene/' + _ssSceneId + '/trim', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({start: _ssStart, end: _ssEnd}),
+    });
+    var j = await r.json();
+    if (j && j.ok) {
+      var c = allClips.find(function(x){return x.id === _ssSceneId});
+      if (c) {
+        c.start = j.start;
+        c.end = j.end;
+        c.duration = j.duration;
+        c._v = Date.now();
+      }
+    }
+  } catch (e) {}
   renderGrid();
 }
 

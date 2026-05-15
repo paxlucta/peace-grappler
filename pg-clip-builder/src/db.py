@@ -275,6 +275,19 @@ def get_db():
     except sqlite3.OperationalError:
         conn.execute("ALTER TABLE scenes ADD COLUMN favorite INTEGER DEFAULT 0")
         conn.commit()
+    # Per-scene crop overrides: set via the Builder scene-settings popup.
+    # crop_x_frac (0..1) seeds new timeline clips' standard crop; free_crops
+    # is a JSON array of {src,dst,z,color} rectangles for free-mode crop.
+    try:
+        conn.execute("SELECT crop_x_frac FROM scenes LIMIT 0")
+    except sqlite3.OperationalError:
+        conn.execute("ALTER TABLE scenes ADD COLUMN crop_x_frac REAL")
+        conn.commit()
+    try:
+        conn.execute("SELECT free_crops FROM scenes LIMIT 0")
+    except sqlite3.OperationalError:
+        conn.execute("ALTER TABLE scenes ADD COLUMN free_crops TEXT")
+        conn.commit()
     # In-place transcript editing: the original-pristine text is preserved
     # in ``original_text`` so the user can revert. NULL = never edited.
     try:
@@ -429,6 +442,7 @@ def get_all_scenes(include_ignored=False, include_excluded=False):
         rows = conn.execute(f"""
             SELECT s.id, s.video_id, s.start_time, s.end_time,
                    s.excluded, s.ignored, s.favorite,
+                   s.crop_x_frac, s.free_crops,
                    v.path, v.filename, v.wide, v.duration as video_duration,
                    v.analyzer_provider, v.analyzer_model,
                    v.visual_analyzer_provider, v.visual_analyzer_model,
@@ -453,6 +467,8 @@ def get_all_scenes(include_ignored=False, include_excluded=False):
                 "excluded": bool(row["excluded"]),
                 "ignored": bool(row["ignored"]),
                 "favorite": bool(row["favorite"]) if "favorite" in row.keys() else False,
+                "crop_x_frac": row["crop_x_frac"] if "crop_x_frac" in row.keys() else None,
+                "free_crops": row["free_crops"] if "free_crops" in row.keys() else None,
                 "video_path": row["path"],
                 "video_filename": row["filename"],
                 "wide": bool(row["wide"]),
@@ -577,6 +593,32 @@ def set_scene_ignored(scene_id, ignored):
         conn.execute(
             "UPDATE scenes SET ignored=? WHERE id=?",
             (1 if ignored else 0, scene_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def update_scene_trim(scene_id, start_time, end_time):
+    """Update a scene's start_time/end_time (Builder gear → trim)."""
+    conn = get_db()
+    try:
+        conn.execute(
+            "UPDATE scenes SET start_time=?, end_time=? WHERE id=?",
+            (float(start_time), float(end_time), scene_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def update_scene_crop(scene_id, crop_x_frac, free_crops_json):
+    """Persist scene crop overrides set via the Builder gear → crop popup."""
+    conn = get_db()
+    try:
+        conn.execute(
+            "UPDATE scenes SET crop_x_frac=?, free_crops=? WHERE id=?",
+            (crop_x_frac, free_crops_json, scene_id),
         )
         conn.commit()
     finally:
@@ -1317,7 +1359,8 @@ def get_scene_by_id(scene_id):
         row = conn.execute("""
             SELECT s.id, s.video_id, s.start_time, s.end_time,
                    s.excluded, s.ignored, s.favorite,
-                   v.path, v.filename, v.wide
+                   s.crop_x_frac, s.free_crops,
+                   v.path, v.filename, v.wide, v.duration as video_duration
             FROM scenes s
             JOIN videos v ON v.id = s.video_id
             WHERE s.id = ?
@@ -1336,9 +1379,12 @@ def get_scene_by_id(scene_id):
             "excluded": bool(row["excluded"]),
             "ignored": bool(row["ignored"]),
             "favorite": bool(row["favorite"]) if "favorite" in row.keys() else False,
+            "crop_x_frac": row["crop_x_frac"] if "crop_x_frac" in row.keys() else None,
+            "free_crops": row["free_crops"] if "free_crops" in row.keys() else None,
             "video_path": row["path"],
             "video_filename": row["filename"],
             "wide": bool(row["wide"]),
+            "video_duration": row["video_duration"] if "video_duration" in row.keys() else 0,
             "tags": [t["tag"] for t in tags],
         }
     finally:
