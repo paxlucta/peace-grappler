@@ -992,13 +992,19 @@ def get_video_transcripts(video_id):
     analyze-page transcript modal."""
     conn = get_db()
     try:
-        cols = "language, is_translation, start_time, end_time, text"
+        cols = "id, language, is_translation, start_time, end_time, text"
         has_attr = True
         try:
             conn.execute("SELECT provider, model FROM transcripts LIMIT 0")
             cols += ", provider, model"
         except sqlite3.OperationalError:
             has_attr = False
+        has_orig = True
+        try:
+            conn.execute("SELECT original_text FROM transcripts LIMIT 0")
+            cols += ", original_text"
+        except sqlite3.OperationalError:
+            has_orig = False
         rows = conn.execute(
             f"""SELECT {cols}
                FROM transcripts
@@ -1010,11 +1016,20 @@ def get_video_transcripts(video_id):
         attr = {}
         for r in rows:
             key = (r["language"], bool(r["is_translation"]))
-            groups.setdefault(key, []).append({
+            seg = {
+                "id":    r["id"],
                 "start": r["start_time"],
                 "end":   r["end_time"],
                 "text":  r["text"],
-            })
+            }
+            if has_orig:
+                seg["original_text"] = r["original_text"]
+                seg["edited"] = (r["original_text"] is not None
+                                 and r["original_text"] != r["text"])
+            else:
+                seg["original_text"] = None
+                seg["edited"] = False
+            groups.setdefault(key, []).append(seg)
             if has_attr and key not in attr:
                 attr[key] = (r["provider"] or "", r["model"] or "")
         out = []
