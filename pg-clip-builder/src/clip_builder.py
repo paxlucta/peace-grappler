@@ -164,28 +164,57 @@ def api_tags():
 
 @clip_builder_bp.route("/api/clips")
 def api_clips():
+    """Return scenes available in the Builder grid. We surface enough
+    metadata (favorite, excluded, status, has_transcript) for the card
+    to match the /rate scene-card visual + functional contract."""
+    from db import get_scene_grades, get_scene_ids_with_transcripts
     tag = request.args.get("tag", "")
-    scenes = get_all_scenes(include_ignored=True, include_excluded=False)
+    scenes = get_all_scenes(include_ignored=True, include_excluded=True)
     if tag == "hidden":
-        clips = [s for s in scenes if s["ignored"]]
+        clips = [s for s in scenes if s["ignored"] or s["excluded"]]
     elif tag:
-        clips = [s for s in scenes if tag in s["tags"] and not s["ignored"]]
+        clips = [s for s in scenes
+                 if tag in s["tags"] and not s["ignored"] and not s["excluded"]]
     else:
-        clips = [s for s in scenes if not s["ignored"]]
+        clips = [s for s in scenes if not s["ignored"] and not s["excluded"]]
     clips = sorted(clips, key=lambda s: s["end_time"] - s["start_time"])
-    return jsonify([{
-        "id": s["id"],
-        "video_file": s["video_path"],
-        "filename": s["video_filename"],
-        "start": s["start_time"],
-        "end": s["end_time"],
-        "duration": round(s["end_time"] - s["start_time"], 1),
-        "tags": s["tags"],
-        "ignored": s["ignored"],
-        "favorite": s.get("favorite", False),
-        "thumb_count": _get_thumb_count(s),
-        "wide": s["wide"],
-    } for s in clips])
+    grades = get_scene_grades()
+    tx_ids = get_scene_ids_with_transcripts()
+    out = []
+    for s in clips:
+        g = grades.get(s["id"])
+        avg = (g["total_score"] / g["times_graded"]) if g else None
+        if s.get("excluded"):
+            status = "down"
+        elif avg is not None and avg >= 3:
+            status = "up"
+        else:
+            status = "unrated"
+        out.append({
+            "id": s["id"],
+            "video_file": s["video_path"],
+            "filename": s["video_filename"],
+            "start": s["start_time"],
+            "end": s["end_time"],
+            "duration": round(s["end_time"] - s["start_time"], 1),
+            "tags": s["tags"],
+            "ignored": s["ignored"],
+            "excluded": s.get("excluded", False),
+            "status": status,
+            "favorite": s.get("favorite", False),
+            "thumb_count": _get_thumb_count(s),
+            "wide": s["wide"],
+            "has_transcript": s["id"] in tx_ids,
+            # AI attribution so the Builder's clip-card can render the same
+            # provider/model icon the Scenes page shows.
+            "analyzer_provider":         s.get("analyzer_provider") or "",
+            "analyzer_model":            s.get("analyzer_model") or "",
+            "visual_analyzer_provider":  s.get("visual_analyzer_provider") or "",
+            "visual_analyzer_model":     s.get("visual_analyzer_model") or "",
+            "speech_analyzer_provider":  s.get("speech_analyzer_provider") or "",
+            "speech_analyzer_model":     s.get("speech_analyzer_model") or "",
+        })
+    return jsonify(out)
 
 
 @clip_builder_bp.route("/api/thumbnail/<int:scene_id>")
@@ -1433,13 +1462,64 @@ main.bb-cols{
 .pg-heart.on{color:#ef5350}
 .pg-heart.on:hover{color:#e53935}
 .bb-row .pg-heart{margin:0 2px}
-.clip-card .pg-heart{
-  position:absolute;top:6px;right:6px;z-index:3;
-  background:rgba(0,0,0,.55);border-radius:50%;
-  width:26px;height:26px;
+/* Heart now lives in the vote-row (same layout as /rate scene cards):
+   anchored to the left edge of the row, mirror of the transcript
+   button on the right; centered thumbs-down/up sit between them. */
+.clip-card .vote-row .pg-heart{
+  position:absolute;left:6px;top:50%;transform:translateY(-50%);
+  width:32px;height:32px;border-radius:50%;border:1.5px solid #444;
+  background:transparent;color:#666;
+  display:flex;align-items:center;justify-content:center;
+  transition:all .12s;cursor:pointer;
 }
-.clip-card .pg-heart svg{width:14px;height:14px}
-.clip-card .pg-heart.on{background:rgba(229,57,53,.85);color:#fff}
+.clip-card .vote-row .pg-heart:hover{
+  transform:translateY(-50%) scale(1.15);color:#ef9a9a;border-color:#ef9a9a;
+}
+.clip-card .vote-row .pg-heart.on{
+  background:#ef5350;border-color:#ef5350;color:#fff;
+}
+.clip-card .vote-row .pg-heart svg{width:16px;height:16px;fill:currentColor}
+
+/* Vote row + thumbs buttons — identical to /rate's .scene-card .vote-row */
+.clip-card .vote-row{
+  display:flex;justify-content:center;gap:8px;padding:6px;
+  border-top:1px solid #222;align-items:center;position:relative;
+}
+.clip-card .vote-row .vote-btn-end{
+  position:absolute;right:6px;top:50%;transform:translateY(-50%);
+}
+.clip-card .vote-row .vote-btn-end:hover{transform:translateY(-50%) scale(1.15)}
+.clip-card .vote-btn{
+  width:32px;height:32px;border-radius:50%;border:1.5px solid #444;
+  background:#111;cursor:pointer;transition:all .12s;
+  display:flex;align-items:center;justify-content:center;padding:0;
+}
+.clip-card .vote-btn:hover{transform:scale(1.15)}
+.clip-card .vote-btn svg{width:16px;height:16px}
+.clip-card .vote-btn.vdown{border-color:#555}
+.clip-card .vote-btn.vdown svg{fill:#666}
+.clip-card .vote-btn.vdown:hover{background:#ef5350;border-color:#ef5350}
+.clip-card .vote-btn.vdown:hover svg{fill:#fff}
+.clip-card .vote-btn.vdown.active{background:#ef5350;border-color:#ef5350}
+.clip-card .vote-btn.vdown.active svg{fill:#fff}
+.clip-card .vote-btn.vup{border-color:#555}
+.clip-card .vote-btn.vup svg{fill:#666}
+.clip-card .vote-btn.vup:hover{background:#4caf50;border-color:#4caf50}
+.clip-card .vote-btn.vup:hover svg{fill:#fff}
+.clip-card .vote-btn.vup.active{background:#4caf50;border-color:#4caf50}
+.clip-card .vote-btn.vup.active svg{fill:#fff}
+.clip-card .vote-btn.vtxt{border-color:#555}
+.clip-card .vote-btn.vtxt svg{fill:#888}
+.clip-card .vote-btn.vtxt:hover{background:#1976d2;border-color:#1976d2}
+.clip-card .vote-btn.vtxt:hover svg{fill:#fff}
+
+/* Excluded badge (HIDDEN) — top-left red pill, identical to /rate. */
+.clip-card .excluded-badge{
+  position:absolute;top:6px;left:6px;z-index:2;
+  background:rgba(229,57,53,.85);color:#fff;font-size:9px;font-weight:700;
+  padding:1px 5px;border-radius:3px;
+}
+.clip-card.excluded{opacity:.35}
 .clip-card{
   background:#1a1a1a;border-radius:8px;overflow:hidden;
   cursor:grab;transition:transform .15s,opacity .2s;position:relative;
@@ -1457,13 +1537,24 @@ main.bb-cols{
 .clip-card .thumb{
   width:100%;aspect-ratio:9/16;object-fit:cover;display:block;background:#111;
 }
+/* Duration pill — matches the Scenes-page .dur-badge for visual
+   consistency across both scene surfaces in the app. */
 .clip-card .dur{
-  position:absolute;top:6px;right:6px;
-  background:rgba(0,0,0,.75);color:#fff;font-size:11px;font-weight:600;
-  padding:2px 6px;border-radius:4px;
+  position:absolute;top:6px;right:6px;z-index:2;
+  background:rgba(0,0,0,.75);color:#fff;font-size:10px;font-weight:600;
+  padding:2px 5px;border-radius:3px;
+}
+/* AI provider icon — bottom-right of the THUMBNAIL (not the card) in
+   a 26px dark circle. Same dimensions + position as /rate, accounting
+   for the new vote-row below the thumbnail (~46px tall). */
+.clip-card .scene-ai-badge{
+  position:absolute;bottom:52px;right:6px;z-index:2;
+  width:26px;height:26px;
+  display:flex;align-items:center;justify-content:center;
+  background:rgba(0,0,0,.7);padding:0;border-radius:50%;
 }
 .clip-card .play-overlay{
-  position:absolute;top:0;left:0;right:0;bottom:36px;
+  position:absolute;top:0;left:0;right:0;bottom:46px;
   display:flex;align-items:center;justify-content:center;
   background:rgba(0,0,0,.35);opacity:0;transition:opacity .2s;
   cursor:pointer;z-index:2;
@@ -2000,20 +2091,25 @@ footer{
   padding:1px 5px;border-radius:3px;display:none;
 }
 .clip-card.ignored .ignore-badge{display:block}
+/* Widescreen indicator at top-left, matching /rate. A small 16:9
+   outlined rectangle in a dark pill. */
 .wide-badge{
-  position:absolute;top:6px;left:6px;
-  width:20px;height:14px;border:1.5px solid rgba(255,255,255,.7);border-radius:2px;
-  display:none;
+  position:absolute;top:6px;left:6px;z-index:1;
+  width:24px;height:18px;border-radius:4px;
+  background:rgba(0,0,0,.7);
+  display:none;align-items:center;justify-content:center;
+  pointer-events:none;
 }
-.wide-badge::after{
-  content:'';position:absolute;top:2px;left:4px;
-  width:10px;height:6px;background:rgba(255,255,255,.7);border-radius:1px;
+.wide-badge svg{
+  width:14px;height:8px;
+  fill:none;stroke:rgba(255,255,255,.9);stroke-width:1.5;
 }
-.clip-card.wide .wide-badge{display:block}
+.clip-card.wide .wide-badge{display:flex}
 .clip-card.ignored .wide-badge{display:none}
-.tl-item[data-wide] .wide-badge{display:block}
-.tl-item .wide-badge{top:2px;left:2px;width:14px;height:10px}
-.tl-item .wide-badge::after{top:1.5px;left:2.5px;width:7px;height:4px}
+/* Smaller variant for the much tinier timeline-item chips. */
+.tl-item[data-wide] .wide-badge{display:flex}
+.tl-item .wide-badge{top:2px;left:2px;width:16px;height:11px;border-radius:2px}
+.tl-item .wide-badge svg{width:10px;height:6px}
 
 .controls{display:flex;align-items:center;gap:12px;margin-top:6px}
 .incl-label{
@@ -4539,7 +4635,7 @@ function cardHTML(c) {
   var clipIds = getTlClipIds();
   var cls = 'clip-card';
   if (clipIds.indexOf(c.id) >= 0) cls += ' in-tl';
-  if (c.ignored) cls += ' ignored';
+  if (c.ignored || c.excluded) cls += ' excluded';
   if (c.wide) cls += ' wide';
   var tags = c.tags.length > 3
     ? c.tags.slice(0,3).join(', ') + '\u2026'
@@ -4553,24 +4649,72 @@ function cardHTML(c) {
     dots += '</div>';
   }
   var heartCls = c.favorite ? ' on' : '';
+  // AI provider attribution — prefer visual analyzer (most common for
+  // /builder scenes), fall back to speech, then to the legacy single-
+  // provider column. Same precedence the Scenes page uses.
+  var sceneProv = c.visual_analyzer_provider
+               || c.speech_analyzer_provider
+               || c.analyzer_provider || '';
+  var sceneModel = c.visual_analyzer_model
+                || c.speech_analyzer_model
+                || c.analyzer_model || '';
+  var aiBadge = (window.pgAiBadge && sceneProv)
+    ? '<span class="scene-ai-badge">'
+      + window.pgAiBadge(sceneProv, {
+          size: 12,
+          model: sceneModel,
+          title: 'Tagged by ' + sceneProv
+                + (sceneModel ? ' · ' + sceneModel : ''),
+        }) + '</span>'
+    : '';
   return '<div class="' + cls + '" data-id="' + c.id + '" data-tc="' + (c.thumb_count||1) + '" oncontextmenu="showCtx(event,' + c.id + ')">'
     + '<img class="thumb" src="/api/thumbnail/' + c.id + '" loading="lazy"/>'
     + '<div class="play-overlay" onclick="event.stopPropagation();playScene(this,' + c.id + ')"><div class="play-circle"><svg viewBox="0 0 24 24"><polygon points="8,5 19,12 8,19"/></svg></div></div>'
-    + '<button class="pg-heart' + heartCls + '" onclick="event.stopPropagation();bbToggleClipFavorite(' + c.id + ')" title="Toggle favorite">' + PG_HEART_SVG + '</button>'
+    + '<span class="wide-badge" title="Widescreen source">'
+    +   '<svg viewBox="0 0 16 9"><rect x="0.75" y="0.75" width="14.5" height="7.5" rx="1.5"/></svg>'
+    + '</span>'
     + '<span class="dur">' + c.duration + 's</span>'
-    + '<button class="hide-btn" title="' + (c.ignored ? 'Unhide' : 'Hide') + '" onclick="event.stopPropagation();toggleIgnore(' + c.id + ',' + !c.ignored + ')">' + (c.ignored ? '&#9711;' : '&#10005;') + '</button>'
-    + '<span class="ignore-badge">HIDDEN</span>'
-    + '<span class="wide-badge"></span>'
+    + aiBadge
+    + ((c.ignored || c.excluded) ? '<span class="excluded-badge">HIDDEN</span>' : '')
     + dots
-    + '<div class="info">'
-    + '<div class="fn" title="' + c.filename + '">' + c.filename.substring(0,25) + '</div>'
-    + '<div class="tg" title="' + c.tags.join(', ') + '">' + tags + '</div>'
+    + '<div class="vote-row">'
+    +   '<button class="pg-heart' + heartCls + '" onclick="event.stopPropagation();bbToggleClipFavorite(' + c.id + ')" title="Toggle favorite">' + PG_HEART_SVG + '</button>'
+    +   '<button class="vote-btn vdown' + (c.status === 'down' ? ' active' : '') + '" onclick="event.stopPropagation();voteClip(' + c.id + ',\'down\')" title="Hide scene">'
+    +     '<svg viewBox="0 0 24 24"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>'
+    +   '</button>'
+    +   '<button class="vote-btn vup' + (c.status === 'up' ? ' active' : '') + '" onclick="event.stopPropagation();voteClip(' + c.id + ',\'up\')" title="Keep scene">'
+    +     '<svg viewBox="0 0 24 24"><path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg>'
+    +   '</button>'
+    +   (c.has_transcript ? '<button class="vote-btn vtxt vote-btn-end" onclick="event.stopPropagation();openSceneTranscript(' + c.id + ')" title="Show transcript"><svg viewBox="0 0 24 24"><path d="M4 4h16v2H4V4zm0 4h16v2H4V8zm0 4h10v2H4v-2zm0 4h16v2H4v-2zm0 4h10v2H4v-2z"/></svg></button>' : '')
     + '</div></div>';
+}
+
+async function voteClip(sceneId, action) {
+  // Use the same backend as /rate so up/down state stays in sync
+  // across pages (it records a grade row and toggles `excluded`).
+  try {
+    await fetch('/rate/api/grade', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({scene_id: sceneId, action: action}),
+    });
+  } catch (e) {}
+  var c = allClips.find(function(x){ return x.id === sceneId; });
+  if (c) {
+    if (action === 'down') { c.excluded = true; c.status = 'down'; }
+    else                   { c.excluded = false; c.status = 'up'; }
+  }
+  renderGrid();
+}
+
+// Single source of truth for the rich transcript UI lives on /rate;
+// jump there with a query param that auto-opens the modal.
+function openSceneTranscript(sceneId) {
+  window.location.href = '/rate?focus_transcript=' + sceneId;
 }
 
 function renderGrid() {
   // Column-based filter chain: Folder → File → Tag → transcript search.
-  var clips = allClips.filter(function(c){return !c.ignored});
+  var clips = allClips.filter(function(c){return !c.ignored && !c.excluded});
   if (bbFolderFiles) {
     clips = clips.filter(function(c){return bbFolderFiles.has(c.filename)});
   }
@@ -5184,21 +5328,18 @@ function showCtx(e, id) {
   hideCtx();
   var clip = allClips.find(function(c){return c.id===id});
   if (!clip) return;
+  // Hide/Unhide moved into the in-card vote-row (thumbs-down = hide,
+  // thumbs-up = keep). Right-click only retains the Segment editor for
+  // clips long enough to split.
+  if (!(clip.duration > 10)) return;
   var m = document.createElement('div');
   m.className = 'ctx-menu';
   m.style.left = e.clientX + 'px';
   m.style.top = e.clientY + 'px';
-  var label = clip.ignored ? 'Unhide' : 'Hide';
-  var d = document.createElement('div');
-  d.textContent = label;
-  d.onclick = function(){ hideCtx(); toggleIgnore(id, !clip.ignored); };
-  m.appendChild(d);
-  if (clip.duration > 10) {
-    var s = document.createElement('div');
-    s.textContent = 'Segment';
-    s.onclick = function(){ hideCtx(); showSegmentModal(clip); };
-    m.appendChild(s);
-  }
+  var s = document.createElement('div');
+  s.textContent = 'Segment';
+  s.onclick = function(){ hideCtx(); showSegmentModal(clip); };
+  m.appendChild(s);
   document.body.appendChild(m);
   ctxEl = m;
   var r = m.getBoundingClientRect();

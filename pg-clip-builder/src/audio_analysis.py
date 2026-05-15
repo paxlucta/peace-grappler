@@ -172,6 +172,9 @@ def transcribe(video_path, model="base", language=None, translate=False,
                 # User-supplied hint biases the decoder's vocabulary —
                 # useful for proper nouns, code-switching cues, etc.
                 initial_prompt=(initial_prompt or None),
+                # Ask for per-word timestamps so the transcript modal
+                # can offer sub-segment scene cuts on word boundaries.
+                word_timestamps=True,
             )
             total_dur = float(getattr(info, "duration", 0) or 0)
             segments = []
@@ -180,10 +183,26 @@ def transcribe(video_path, model="base", language=None, translate=False,
             for seg in segments_iter:
                 txt = (seg.text or "").strip()
                 if txt:
+                    # faster-whisper attaches a `.words` list on every
+                    # segment when word_timestamps=True. Each Word has
+                    # word/start/end/probability fields. We preserve
+                    # the leading space the model includes so the
+                    # concatenated word strings reconstruct seg.text.
+                    seg_words = None
+                    try:
+                        if getattr(seg, "words", None):
+                            seg_words = [{
+                                "word":  w.word,
+                                "start": round(float(w.start), 3),
+                                "end":   round(float(w.end), 3),
+                            } for w in seg.words]
+                    except Exception:
+                        seg_words = None
                     segments.append({
                         "start": round(float(seg.start), 2),
                         "end":   round(float(seg.end), 2),
                         "text":  txt,
+                        "words": seg_words,
                     })
                 # Heartbeat: emit progress at most ~3x/sec so we don't spam
                 # the SSE stream with hundreds of events on long videos.

@@ -466,11 +466,15 @@ def transcribe_video(video_path, duration, overrides=None):
         emit_pct(0.05 + 0.90 * max(0.0, min(1.0, frac)),
                  label or "transcribing")
 
+    # Force re-transcribe bypasses the on-disk cache. The popover's
+    # "Force re-transcribe" checkbox sets ``force`` on the run; we also
+    # treat the legacy ``force`` flag as transcription-cache invalidation.
+    tx_force = bool(o.get("force", False))
     result = transcription.transcribe(
         video_path, provider=tx_provider, model=tx_model,
         language=language, translate=False,
         on_log=emit_progress, on_progress=_tx_progress,
-        hint=tx_hint,
+        hint=tx_hint, force=tx_force,
     )
     segments = result.get("segments", [])
     detected_language = (result.get("language") or "").strip().lower()
@@ -563,12 +567,15 @@ def analyze_speech(video_path, duration, overrides=None):
     )
     # Pass 1 — always native (translate=False). This is the source of truth
     # for "what was actually said". We persist it as is_translation=False.
+    # Force flag also busts the transcription-pipeline cache, so a
+    # popover Force re-run picks up new features (e.g. word timestamps).
+    tx_force = bool(o.get("force", False))
     result = transcription.transcribe(
         video_path, provider=tx_provider, model=tx_model,
         language=language, translate=False,
         on_log=emit_progress,
         on_progress=_tx_progress(0.05, 0.20, "native"),
-        hint=tx_hint,
+        hint=tx_hint, force=tx_force,
     )
     emit_pct(0.20, "transcript ready")
     segments = result.get("segments", [])
@@ -618,7 +625,7 @@ def analyze_speech(video_path, duration, overrides=None):
                 language=language, translate=True,
                 on_log=emit_progress,
                 on_progress=_tx_progress(0.20, 0.30, "english"),
-                hint=tx_hint,
+                hint=tx_hint, force=tx_force,
             )
             xlat_segs = xlat.get("segments", [])
             if xlat_segs:
@@ -1602,17 +1609,35 @@ def api_clip_preview():
     from video import THUMB_DIR
     from flask import send_file
     THUMB_DIR.mkdir(parents=True, exist_ok=True)
+    # 3-decimal precision in the cache key so word-precise selections
+    # don't accidentally share a cached file with a row-level one.
     key = hashlib.md5(
-        f"prev:{src_path}@{start:.2f}@{end:.2f}".encode()
+        f"prev:{src_path}@{start:.3f}@{end:.3f}".encode()
     ).hexdigest()
     out = THUMB_DIR / f"prev_{key}.mp4"
     if not out.exists():
+        # Hybrid seek for frame-accurate cuts: -ss BEFORE -i jumps to the
+        # nearest keyframe (fast), then -ss AFTER -i advances the remaining
+        # bit by decoding+discarding for exact-millisecond alignment.
+        # Without the second -ss the cut snaps to a keyframe and can start
+        # a fraction of a second before the spoken word.
+        LEAD = 1.5      # seconds of "rough" input seek headroom
+        if start > LEAD:
+            input_ss = f"{start - LEAD:.3f}"
+            output_ss = f"{LEAD:.3f}"
+        else:
+            input_ss = "0"
+            output_ss = f"{start:.3f}"
         try:
             subprocess.run(
-                ["ffmpeg", "-ss", f"{start:.2f}", "-i", str(src_path),
-                 "-t", f"{seg:.2f}",
+                ["ffmpeg",
+                 "-ss", input_ss,         # 1st seek: fast, keyframe-aligned
+                 "-i", str(src_path),
+                 "-ss", output_ss,        # 2nd seek: precise, decode-skip
+                 "-t", f"{seg:.3f}",
                  "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
                  "-c:a", "aac", "-b:a", "96k",
+                 "-avoid_negative_ts", "make_zero",
                  "-movflags", "+faststart",
                  "-y", str(out)],
                 capture_output=True, timeout=60,
@@ -2145,6 +2170,12 @@ td{font-size:13px}
   background:#3a1a1a;color:#fff;border-color:#ef5350;
 }
 .vtx-edit-controls .vtx-revert-all.shown{display:inline-flex}
+.vtx-edit-controls .vtx-purge-dupes{
+  border-color:#3a2a14;color:#ffd28a;
+}
+.vtx-edit-controls .vtx-purge-dupes:hover{
+  background:#3a2a14;color:#fff;border-color:#ffb74d;
+}
 
 /* Edited segments + diff view */
 .vtx-seg-text[contenteditable="true"]{
@@ -2462,7 +2493,7 @@ td{font-size:13px}
       <div class="vtx-lang-toggle" id="vtx-lang-toggle">
         <button type="button" data-mode="native"  onclick="setVtxMode('native')">Native</button>
         <button type="button" data-mode="english" onclick="setVtxMode('english')">English</button>
-        <button type="button" data-mode="both"    onclick="setVtxMode('both')">Both</button>
+        <button type="button" data-mode="both"    onclick="setVtxMode('both')" style="display:none">Both</button>
       </div>
       <div class="vtx-search-wrap">
         <input type="search" class="vtx-search" id="vtx-search"
@@ -2483,6 +2514,11 @@ td{font-size:13px}
                 id="vtx-revert-all-btn"
                 onclick="vtxRevertAll()"
                 title="Revert every edited segment back to its original">Revert all</button>
+        <button type="button" class="vtx-edit-btn vtx-purge-dupes"
+                id="vtx-purge-btn"
+                onclick="vtxPurgeDuplicates()"
+                title="Delete stale duplicate transcript groups, keeping only the freshest run per slot"
+                style="display:none">Purge duplicates</button>
       </div>
     </div>
     <div id="vtx-body" class="vtx-body"></div>
@@ -3757,7 +3793,7 @@ var _vtxState = { videoId: null, selectionStart: null, selectionEnd: null,
 // fetched payload so we can re-render when the user flips the toggle or
 // types in the search box without re-hitting the API.
 var _vtxData = null;
-var _vtxMode = 'both';     // default to side-by-side when both versions exist
+var _vtxMode = 'english'; // 'native' | 'english' | 'both' — default English when present
 var _vtxEditMode = false;  // when true, every .vtx-seg-text is contenteditable
 var _vtxDiffMode = false;  // when true, edited rows render an extra strikethrough line
 var _vtxHasNative = false;
@@ -3828,9 +3864,9 @@ async function openVideoTranscript(videoId) {
                        return !g.is_translation
                               && (g.language || '').toLowerCase() === 'en';
                      });
-    _vtxMode = (_vtxHasNative && _vtxHasEnglish) ? 'both'
-             : (_vtxHasNative ? 'native'
-             : (_vtxHasEnglish ? 'english' : 'native'));
+    // Default to English when available (regardless of whether Native
+    // also exists), else fall back to Native.
+    _vtxMode = _vtxHasEnglish ? 'english' : 'native';
     var s = document.getElementById('vtx-search');
     if (s) s.value = '';
     document.getElementById('vtx-search-count').textContent = '';
@@ -4055,6 +4091,37 @@ function _vtxRefreshEditButtons() {
     diffBtn.classList.toggle('active', _vtxDiffMode);
     diffBtn.disabled = !anyEdited && !_vtxDiffMode;
   }
+  // Detect duplicate transcript groups: more than one group per
+  // is_translation flag means at least one is stale. Surface the
+  // Purge button so the user can clean them up in one click.
+  var purgeBtn = document.getElementById('vtx-purge-btn');
+  if (purgeBtn && _vtxData && _vtxData.groups) {
+    var nNative = 0, nXlat = 0;
+    _vtxData.groups.forEach(function(g){
+      if (g.is_translation) nXlat++; else nNative++;
+    });
+    var hasDupes = (nNative > 1) || (nXlat > 1);
+    purgeBtn.style.display = hasDupes ? '' : 'none';
+  }
+}
+
+async function vtxPurgeDuplicates() {
+  if (!_vtxState.videoId) return;
+  if (!confirm('Delete stale duplicate transcript groups for this video?\n\n'
+             + 'Keeps only the freshest run per native/English slot.')) return;
+  var r;
+  try {
+    r = await fetch('/rate/api/transcript/purge-duplicates', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({video_id: _vtxState.videoId}),
+    });
+    var d = await r.json();
+    if (!r.ok || !d.ok) { alert('Purge failed: ' + (d.error || r.status)); return; }
+    // Reload the transcript so the modal re-renders without the dupes.
+    openVideoTranscript(_vtxState.videoId);
+  } catch (e) {
+    alert('Purge failed: ' + e.message);
+  }
 }
 
 function vtxToggleEdit() {
@@ -4210,8 +4277,8 @@ document.addEventListener('selectionchange', function() {
     info.textContent = 'Select text inside a transcript line.';
     return;
   }
-  // Walk all .vtx-seg-text nodes and collect those between startSeg and endSeg
-  // (inclusive) by document order — handles backwards selections too.
+  // Walk all .vtx-seg-text nodes to find the index range of the
+  // selection. Selection may run forward or backward; normalize.
   var allSegs = body.querySelectorAll('.vtx-seg-text');
   var startIdx = -1, endIdx = -1;
   for (var i = 0; i < allSegs.length; i++) {
@@ -4219,9 +4286,36 @@ document.addEventListener('selectionchange', function() {
     if (allSegs[i] === endSeg) endIdx = i;
   }
   if (startIdx < 0 || endIdx < 0) return;
-  if (startIdx > endIdx) { var t = startIdx; startIdx = endIdx; endIdx = t; }
-  var minStart = Infinity, maxEnd = -Infinity;
+  // Detect a backward selection (anchor after focus) so the start/end
+  // containers + offsets get swapped consistently.
+  var rangeStartC = range.startContainer, rangeStartO = range.startOffset;
+  var rangeEndC   = range.endContainer,   rangeEndO   = range.endOffset;
+  if (startIdx > endIdx) {
+    var t = startIdx; startIdx = endIdx; endIdx = t;
+    rangeStartC = range.endContainer; rangeStartO = range.endOffset;
+    rangeEndC   = range.startContainer; rangeEndO = range.startOffset;
+  }
+  var startRow = allSegs[startIdx];
+  var endRow   = allSegs[endIdx];
+
+  // Character offset of the selection start within the FIRST row, and
+  // of the selection end within the LAST row. These are what we map
+  // to word boundaries.
+  var startCharOffset = _vtxCharOffsetIn(startRow, rangeStartC, rangeStartO);
+  var endCharOffset   = _vtxCharOffsetIn(endRow,   rangeEndC,   rangeEndO);
+
+  // Compute the precise scene-cut times. _vtxWordTimeAt returns the
+  // word boundary nearest a char offset; falls back to the row's own
+  // start/end time when words aren't stored for that row.
+  var minStart = _vtxWordTimeAt(startRow, startCharOffset, 'start');
+  if (minStart == null) minStart = parseFloat(startRow.getAttribute('data-start'));
+  var maxEnd   = _vtxWordTimeAt(endRow,   endCharOffset,   'end');
+  if (maxEnd == null) maxEnd = parseFloat(endRow.getAttribute('data-end'));
+
+  // Any middle rows are fully inside the selection — their own
+  // start/end can extend minStart/maxEnd if word-mapping was off.
   for (var k = startIdx; k <= endIdx; k++) {
+    if (k === startIdx || k === endIdx) continue;
     var s = parseFloat(allSegs[k].getAttribute('data-start'));
     var e = parseFloat(allSegs[k].getAttribute('data-end'));
     if (!isNaN(s) && s < minStart) minStart = s;
@@ -4236,15 +4330,240 @@ document.addEventListener('selectionchange', function() {
   _vtxState.selectionText  = sel.toString();
   if (prevBtn) prevBtn.disabled = false;
   if (addBtn)  addBtn.disabled  = false;
+  // Flag whether the cut is sub-row (word-snapped) so the user knows
+  // they got the precise version vs the full-row fallback.
+  var rowStart = parseFloat(startRow.getAttribute('data-start'));
+  var rowEnd   = parseFloat(endRow.getAttribute('data-end'));
+  var precise = (Math.abs(minStart - rowStart) > 0.01)
+             || (Math.abs(maxEnd   - rowEnd)   > 0.01);
   info.innerHTML = 'Selection: <b>' + _vtxFmt(minStart) + '</b> – <b>'
-    + _vtxFmt(maxEnd) + '</b> (' + (maxEnd - minStart).toFixed(1) + 's)';
+    + _vtxFmt(maxEnd) + '</b> (' + (maxEnd - minStart).toFixed(1) + 's)'
+    + (precise ? ' <span style="color:#9ec0e8">· word-snapped</span>' : '');
+});
+
+// Character offset of (container, offset) within rowEl's text. We walk
+// the rowEl via a Range that ends at the caret and ask the browser
+// for the cumulative text length — survives <mark> highlights, etc.
+function _vtxCharOffsetIn(rowEl, container, offset) {
+  if (!rowEl || !container) return 0;
+  // If the container is outside rowEl, clamp to the row's endpoint.
+  if (!rowEl.contains(container) && container !== rowEl) {
+    // Comparing positions: if rowEl is before container in the document,
+    // the selection ended past this row → use full row text length.
+    var pos = rowEl.compareDocumentPosition(container);
+    if (pos & Node.DOCUMENT_POSITION_FOLLOWING) return rowEl.textContent.length;
+    return 0;
+  }
+  try {
+    var r = document.createRange();
+    r.selectNodeContents(rowEl);
+    r.setEnd(container, offset);
+    return r.toString().length;
+  } catch (e) {
+    return 0;
+  }
+}
+
+// Find which word in the row's stored words array contains the given
+// char offset, then return its start (or end) time. Returns null when
+// the row has no word array.
+function _vtxWordTimeAt(rowEl, charOffset, which) {
+  if (!rowEl || !_vtxData) return null;
+  var rid = parseInt(rowEl.getAttribute('data-rid'), 10);
+  if (!rid) return null;
+  var seg = null;
+  for (var gi = 0; gi < _vtxData.groups.length && !seg; gi++) {
+    var segs = _vtxData.groups[gi].segments || [];
+    for (var si = 0; si < segs.length; si++) {
+      if (segs[si].id === rid) { seg = segs[si]; break; }
+    }
+  }
+  if (!seg || !Array.isArray(seg.words) || !seg.words.length) return null;
+  // Walk the words and accumulate character positions. The word
+  // strings preserve their leading whitespace where applicable so
+  // concatenating them reconstructs the segment text.
+  var cursor = 0;
+  for (var wi = 0; wi < seg.words.length; wi++) {
+    var w = seg.words[wi];
+    var wlen = (w.word || '').length;
+    var wStart = cursor;
+    var wEnd   = cursor + wlen;
+    if (which === 'start') {
+      // First word whose end-position is past the cursor.
+      if (charOffset <= wEnd) {
+        // If the cursor sits inside the leading whitespace of this
+        // word, prefer the PREVIOUS word's end so we don't start the
+        // cut a few ms before the spoken word.
+        var leading = (w.word || '').match(/^\s+/);
+        var spaceLen = leading ? leading[0].length : 0;
+        if (wi > 0 && charOffset <= wStart + spaceLen) {
+          return seg.words[wi - 1].end;
+        }
+        return w.start;
+      }
+    } else {
+      // End: last word whose start is before charOffset.
+      if (charOffset <= wEnd) {
+        return w.end;
+      }
+    }
+    cursor = wEnd;
+  }
+  // Past the last word — return the last word's end (for 'end') or
+  // start (for 'start' near tail of text).
+  var last = seg.words[seg.words.length - 1];
+  return (which === 'end') ? last.end : last.start;
+}
+
+// ── Selection snapping ────────────────────────────────────────────────
+//
+// On mouseup inside the transcript modal we expand the visible
+// selection to the nearest whole-word boundaries (when the segment has
+// word data) or to the entire segment (when it doesn't). The existing
+// selectionchange handler then recomputes the times from the snapped
+// range, so the Preview/Add buttons receive the same word-precise
+// values the user sees highlighted.
+
+function _vtxFindSegInData(rowEl) {
+  if (!rowEl || !_vtxData) return null;
+  var rid = parseInt(rowEl.getAttribute('data-rid'), 10);
+  if (!rid) return null;
+  for (var gi = 0; gi < _vtxData.groups.length; gi++) {
+    var segs = _vtxData.groups[gi].segments || [];
+    for (var si = 0; si < segs.length; si++) {
+      if (segs[si].id === rid) return segs[si];
+    }
+  }
+  return null;
+}
+
+// Char offset (within seg's reconstructed text) of the snapped word
+// boundary. `which` = 'start' returns the word's start position; 'end'
+// returns the word's end position.
+function _vtxSnapWordBoundary(seg, charOffset, which) {
+  if (!seg || !Array.isArray(seg.words) || !seg.words.length) return null;
+  var cursor = 0;
+  for (var wi = 0; wi < seg.words.length; wi++) {
+    var wlen = (seg.words[wi].word || '').length;
+    var wStart = cursor;
+    var wEnd   = cursor + wlen;
+    if (charOffset <= wEnd) {
+      return (which === 'start') ? wStart : wEnd;
+    }
+    cursor = wEnd;
+  }
+  return cursor;  // past the last word
+}
+
+// Walk a row's text nodes to find which one contains the given char
+// offset, then return that node + offset within it. Survives the
+// <mark> spans the search highlighter injects.
+function _vtxCharOffsetToNode(rowEl, charOffset) {
+  if (!rowEl) return {node: null, offset: 0};
+  var walker = document.createTreeWalker(rowEl, NodeFilter.SHOW_TEXT, null);
+  var cursor = 0;
+  var node, last = null;
+  while ((node = walker.nextNode())) {
+    var len = node.textContent.length;
+    if (charOffset <= cursor + len) {
+      return {node: node, offset: Math.max(0, charOffset - cursor)};
+    }
+    cursor += len;
+    last = node;
+  }
+  // Past the last text node → end of the last one we saw.
+  if (last) return {node: last, offset: last.textContent.length};
+  return {node: rowEl, offset: 0};
+}
+
+var _vtxApplyingSnap = false;
+document.addEventListener('mouseup', function() {
+  // Only inside the transcript modal — don't interfere with selections
+  // elsewhere on the page.
+  if (_vtxApplyingSnap) return;
+  var modal = document.getElementById('vtx-overlay');
+  if (!modal || !modal.classList.contains('active')) return;
+  var body  = document.getElementById('vtx-body');
+  if (!body) return;
+  var sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.toString().length === 0) return;
+  var range = sel.getRangeAt(0);
+  // Skip when the selection isn't inside the transcript body.
+  if (!body.contains(range.commonAncestorContainer)
+      && body !== range.commonAncestorContainer) return;
+  var startSeg = _vtxFindSegText(range.startContainer);
+  var endSeg   = _vtxFindSegText(range.endContainer);
+  if (!startSeg || !endSeg) return;
+
+  // Normalize direction (backwards drags swap container roles).
+  var allSegs = body.querySelectorAll('.vtx-seg-text');
+  var startIdx = -1, endIdx = -1;
+  for (var i = 0; i < allSegs.length; i++) {
+    if (allSegs[i] === startSeg) startIdx = i;
+    if (allSegs[i] === endSeg)   endIdx   = i;
+  }
+  if (startIdx < 0 || endIdx < 0) return;
+  var rs = range.startContainer, ro = range.startOffset;
+  var re = range.endContainer,   reo = range.endOffset;
+  if (startIdx > endIdx) {
+    var t = startIdx; startIdx = endIdx; endIdx = t;
+    rs = range.endContainer; ro = range.endOffset;
+    re = range.startContainer; reo = range.startOffset;
+  }
+  var startRow = allSegs[startIdx];
+  var endRow   = allSegs[endIdx];
+
+  var startCharOffset = _vtxCharOffsetIn(startRow, rs, ro);
+  var endCharOffset   = _vtxCharOffsetIn(endRow,   re, reo);
+
+  // Per-row snap rule:
+  //   • Has word data → snap to the nearest word boundary (start →
+  //     start of word, end → end of word). Mid-word selections expand
+  //     out to whole words.
+  //   • No word data → expand to cover the entire row.
+  var startData = _vtxFindSegInData(startRow);
+  var endData   = _vtxFindSegInData(endRow);
+  var snapStart = (startData && startData.words && startData.words.length)
+    ? _vtxSnapWordBoundary(startData, startCharOffset, 'start')
+    : 0;
+  var snapEnd = (endData && endData.words && endData.words.length)
+    ? _vtxSnapWordBoundary(endData,   endCharOffset,   'end')
+    : endRow.textContent.length;
+
+  // If the snapped range is identical to what's already selected, don't
+  // re-issue setRange — saves an unnecessary selectionchange echo.
+  var curStartOff = _vtxCharOffsetIn(startRow, range.startContainer, range.startOffset);
+  var curEndOff   = _vtxCharOffsetIn(endRow,   range.endContainer,   range.endOffset);
+  if (curStartOff === snapStart && curEndOff === snapEnd
+      && startSeg === allSegs[startIdx] && endSeg === allSegs[endIdx]) {
+    return;
+  }
+
+  var s = _vtxCharOffsetToNode(startRow, snapStart);
+  var e = _vtxCharOffsetToNode(endRow,   snapEnd);
+  if (!s.node || !e.node) return;
+  try {
+    var nr = document.createRange();
+    nr.setStart(s.node, s.offset);
+    nr.setEnd(e.node,   e.offset);
+    _vtxApplyingSnap = true;
+    sel.removeAllRanges();
+    sel.addRange(nr);
+  } catch (err) {
+    // Range API can throw if offsets land on stale nodes after a
+    // re-render — swallow and let the user re-select.
+  } finally {
+    // Clear the guard on the next tick so the selectionchange this
+    // setRange triggers can recompute times without re-snapping.
+    setTimeout(function(){ _vtxApplyingSnap = false; }, 0);
+  }
 });
 
 function previewSelection() {
   if (_vtxState.selectionStart == null || _vtxState.selectionEnd == null) return;
   var s = _vtxState.selectionStart, e = _vtxState.selectionEnd;
   var url = '/analyze/api/clip-preview?video_id=' + _vtxState.videoId
-          + '&start=' + s.toFixed(2) + '&end=' + e.toFixed(2);
+          + '&start=' + s.toFixed(3) + '&end=' + e.toFixed(3);
   var v = document.getElementById('vtx-prev-video');
   v.src = url; v.load();
   document.getElementById('vtx-prev-range').textContent =

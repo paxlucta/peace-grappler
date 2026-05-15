@@ -124,6 +124,25 @@ def api_favorite():
     return jsonify({"ok": True, "scene_id": scene_id, "favorite": new_state})
 
 
+@rating_bp.route("/rate/api/transcript/purge-duplicates", methods=["POST"])
+def api_transcript_purge_duplicates():
+    """Drop duplicate transcript groups for a video. Body: ``{video_id}``.
+
+    Picks the freshest group per ``is_translation`` slot (judged by the
+    largest row id) and deletes the rest. Used by the "Purge duplicates"
+    button in the transcript modal to clean up legacy rows where the
+    same translation pass got saved with mismatched ``language`` values
+    in different runs."""
+    from db import purge_duplicate_transcripts
+    data = request.json or {}
+    try:
+        video_id = int(data.get("video_id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "video_id required"}), 400
+    res = purge_duplicate_transcripts(video_id)
+    return jsonify({"ok": True, **res})
+
+
 @rating_bp.route("/rate/api/transcript/<int:transcript_id>", methods=["POST"])
 def api_transcript_edit(transcript_id):
     """In-place edit of a transcript row's text. Body: ``{text}``.
@@ -349,13 +368,23 @@ nav a.active{color:#e53935;border-color:#e53935}
 .pg-heart.on{color:#ef5350}
 .pg-heart.on:hover{color:#e53935}
 .bb-row .pg-heart{margin:0 2px}
-.scene-card .pg-heart{
-  position:absolute;top:6px;right:6px;z-index:3;
-  background:rgba(0,0,0,.55);border-radius:50%;
-  width:26px;height:26px;
+/* Heart anchors to the LEFT edge of the vote-row (mirror of the
+   transcript button on the right) so the thumbs-down / thumbs-up pair
+   stays centered between them. */
+.scene-card .vote-row .pg-heart{
+  position:absolute;left:6px;top:50%;transform:translateY(-50%);
+  width:32px;height:32px;border-radius:50%;border:1.5px solid #444;
+  background:transparent;color:#666;
+  display:flex;align-items:center;justify-content:center;
+  transition:all .12s;cursor:pointer;
 }
-.scene-card .pg-heart svg{width:14px;height:14px}
-.scene-card .pg-heart.on{background:rgba(229,57,53,.85);color:#fff}
+.scene-card .vote-row .pg-heart:hover{
+  transform:translateY(-50%) scale(1.15);color:#ef9a9a;border-color:#ef9a9a;
+}
+.scene-card .vote-row .pg-heart.on{
+  background:#ef5350;border-color:#ef5350;color:#fff;
+}
+.scene-card .vote-row .pg-heart svg{width:16px;height:16px;fill:currentColor}
 
 /* -- Tag filters -- */
 .tag-bar{
@@ -450,26 +479,43 @@ nav a.active{color:#e53935;border-color:#e53935}
   display:flex;align-items:center;justify-content:center;
 }
 .play-circle svg{width:18px;height:18px;fill:#fff;margin-left:2px}
+/* AI provider icon — bottom-right of the thumbnail, hugged just above
+   the vote-row so it's clearly inside the thumbnail area. Fixed 24px
+   circle that centers whatever icon the pgAiBadge helper renders. The
+   helper sizes its inner SVG via inline styles, so we don't override
+   it here — we just give it a roomy centered container. */
 .scene-card .scene-ai-badge{
-  position:absolute;bottom:62px;right:6px;
-  display:inline-flex;align-items:center;
-  background:rgba(0,0,0,.7);padding:3px;border-radius:4px;
+  position:absolute;bottom:52px;right:6px;z-index:2;
+  width:26px;height:26px;
+  display:flex;align-items:center;justify-content:center;
+  background:rgba(0,0,0,.7);padding:0;border-radius:50%;
 }
 .scene-card .dur-badge{
   position:absolute;top:6px;right:6px;
   background:rgba(0,0,0,.75);color:#fff;font-size:10px;font-weight:600;
   padding:2px 5px;border-radius:3px;
 }
-.scene-card .unrated-badge{
-  position:absolute;top:6px;left:6px;
-  background:rgba(255,152,0,.85);color:#fff;font-size:9px;font-weight:700;
-  padding:1px 5px;border-radius:3px;
-}
 .scene-card .excluded-badge{
   position:absolute;top:6px;left:6px;
   background:rgba(229,57,53,.85);color:#fff;font-size:9px;font-weight:700;
   padding:1px 5px;border-radius:3px;
 }
+/* Wide-source indicator at top-left. A small 16:9 rectangle outline
+   inside a dark pill, so it reads as "this source was widescreen."
+   Hidden when the scene is excluded so the HIDDEN tag wins that corner. */
+.scene-card .wide-badge{
+  position:absolute;top:6px;left:6px;z-index:1;
+  width:24px;height:18px;border-radius:4px;
+  background:rgba(0,0,0,.7);
+  display:none;align-items:center;justify-content:center;
+  pointer-events:none;
+}
+.scene-card .wide-badge svg{
+  width:14px;height:8px;
+  fill:none;stroke:rgba(255,255,255,.9);stroke-width:1.5;
+}
+.scene-card.wide .wide-badge{display:flex}
+.scene-card.excluded .wide-badge{display:none}
 .scene-card .info{padding:4px 8px 2px}
 .scene-card .fn{
   font-size:9px;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
@@ -671,7 +717,7 @@ nav a.active{color:#e53935;border-color:#e53935}
         <div class="tx-lang-toggle" id="tx-lang-toggle">
           <button type="button" data-mode="native"  onclick="setTxMode('native')">Native</button>
           <button type="button" data-mode="english" onclick="setTxMode('english')">English</button>
-          <button type="button" data-mode="both"    onclick="setTxMode('both')">Both</button>
+          <button type="button" data-mode="both"    onclick="setTxMode('both')" style="display:none">Both</button>
         </div>
         <div class="tx-search-wrap">
           <input type="search" class="tx-search" id="tx-search"
@@ -756,6 +802,20 @@ async function init() {
   // Re-fire transcript search if it was active on this page last visit.
   var sq = (document.getElementById('search-input') || {}).value || '';
   if (sq.trim()) onSearchInput(sq);
+  // Auto-open the transcript modal when the URL carries
+  // ?focus_transcript=<scene_id> — used by /builder's transcript
+  // button so the rich modal stays single-sourced here.
+  try {
+    var params = new URLSearchParams(window.location.search);
+    var ft = parseInt(params.get('focus_transcript'), 10);
+    if (!isNaN(ft) && ft > 0) {
+      openTranscript(ft);
+      params.delete('focus_transcript');
+      var qs = params.toString();
+      var clean = window.location.pathname + (qs ? '?' + qs : '');
+      window.history.replaceState({}, '', clean);
+    }
+  } catch (e) {}
 }
 
 async function bbInit() {
@@ -1161,17 +1221,16 @@ function renderGrid() {
   var html = '';
   for (var i = 0; i < filtered.length; i++) {
     var s = filtered[i];
-    var tags = s.tags.length > 3
-      ? s.tags.slice(0,3).join(', ') + '\u2026'
-      : s.tags.join(', ');
-    var cls = 'scene-card' + (s.excluded ? ' excluded' : '');
+    var cls = 'scene-card'
+      + (s.excluded ? ' excluded' : '')
+      + (s.wide ? ' wide' : '');
 
-    var badge = '';
-    if (s.excluded) {
-      badge = '<span class="excluded-badge">HIDDEN</span>';
-    } else if (s.status === 'unrated') {
-      badge = '<span class="unrated-badge">UNRATED</span>';
-    }
+    // No more "UNRATED" badge — unrated state is conveyed by neither
+    // vote button being active. HIDDEN stays because the down-vote
+    // result is hide-from-results, which is non-obvious otherwise.
+    var badge = s.excluded
+      ? '<span class="excluded-badge">HIDDEN</span>'
+      : '';
 
     // Brand badge + model in tooltip. We prefer the visual-mode pair
     // when present (most scenes came from visual analysis), falling
@@ -1185,7 +1244,9 @@ function renderGrid() {
     var aiBadge = (window.pgAiBadge && sceneProv)
       ? '<span class="scene-ai-badge">'
         + window.pgAiBadge(sceneProv, {
-            size: 13,
+            // 12 × PG_AI_BADGE_SCALE(2) = 24px glyph, which fits snug
+            // inside the 26px dark circle around it.
+            size: 12,
             model: sceneModel,
             title: 'Tagged by ' + sceneProv
                   + (sceneModel ? ' · ' + sceneModel : ''),
@@ -1196,15 +1257,14 @@ function renderGrid() {
       + '<img class="thumb" src="/api/thumbnail/' + s.id + '" loading="lazy" onclick="playScene(' + s.id + ')"/>'
       + '<div class="play-overlay" onclick="playScene(' + s.id + ')"><div class="play-circle">'
       + '<svg viewBox="0 0 24 24"><polygon points="8,5 19,12 8,19"/></svg></div></div>'
-      + '<button class="pg-heart' + heartCls + '" onclick="event.stopPropagation();bbToggleSceneFavorite(' + s.id + ')" title="Toggle favorite">' + PG_HEART_SVG + '</button>'
+      + '<span class="wide-badge" title="Widescreen source">'
+      +   '<svg viewBox="0 0 16 9"><rect x="0.75" y="0.75" width="14.5" height="7.5" rx="1.5"/></svg>'
+      + '</span>'
       + '<span class="dur-badge">' + s.duration + 's</span>'
       + aiBadge
       + badge
-      + '<div class="info">'
-      + '<div class="fn">' + s.filename + ' [' + s.start.toFixed(1) + '-' + s.end.toFixed(1) + ']</div>'
-      + '<div class="tg">' + tags + '</div>'
-      + '</div>'
       + '<div class="vote-row">'
+      + '<button class="pg-heart' + heartCls + '" onclick="bbToggleSceneFavorite(' + s.id + ')" title="Toggle favorite">' + PG_HEART_SVG + '</button>'
       + '<button class="vote-btn vdown' + (s.status === 'down' ? ' active' : '') + '" onclick="vote(' + s.id + ',\'down\')" title="Hide scene">'
       + '<svg viewBox="0 0 24 24"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>'
       + '</button>'
@@ -1305,7 +1365,7 @@ function clearSearch() {
 
 // -- Transcript modal state --
 var _txData = null;            // last loaded {groups, ...}
-var _txMode = 'both';           // 'native' | 'english' | 'both' — default both when both exist
+var _txMode = 'english';        // 'native' | 'english' | 'both' — default English when present
 var _txHasNative = false;
 var _txHasEnglish = false;
 
@@ -1344,11 +1404,9 @@ async function openTranscript(sceneId) {
                        return !g.is_translation
                               && (g.language || '').toLowerCase() === 'en';
                      });
-    // Default: native wins. If only English exists, show English.
-    // Default: Both when we have both versions, otherwise whichever exists.
-    _txMode = (_txHasNative && _txHasEnglish) ? 'both'
-            : (_txHasNative ? 'native'
-            : (_txHasEnglish ? 'english' : 'native'));
+    // Default: English when available (whether or not a Native version
+    // exists), else fall back to Native.
+    _txMode = _txHasEnglish ? 'english' : 'native';
     syncLangToggle();
     toolbar.style.display = '';
     renderTxContent();

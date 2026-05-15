@@ -141,7 +141,7 @@ def _extract_audio_m4a(video_path, dest_m4a, bitrate="64k"):
 
 def transcribe(video_path, provider="whisper", model=None,
                language=None, translate=False, on_log=None,
-               on_progress=None, hint=""):
+               on_progress=None, hint="", force=False):
     """Transcribe *video_path*. Returns ``{"segments": [...], "language": "..."}``.
 
     *provider*: one of ``PROVIDERS``. Unknown falls back to ``whisper``.
@@ -156,6 +156,9 @@ def transcribe(video_path, provider="whisper", model=None,
         for code-switching audio (e.g. ``"Mixes Russian and English;
         keep each in its native script."``). Goes into Gemini's prompt
         verbatim and into Whisper's ``initial_prompt``.
+    *force*: when True, skip the on-disk transcript cache and re-run
+        the provider from scratch. Use this when you want fresh data —
+        e.g. older caches that predate word-level timestamps.
     """
     log = on_log or (lambda m: None)
     progress = on_progress or (lambda frac, label="": None)
@@ -180,13 +183,21 @@ def transcribe(video_path, provider="whisper", model=None,
     content_hash = _hash_audio(video_path)
     cache_file = _cache_path(content_hash, provider, model, language,
                              translate, hint)
-    if cache_file.exists():
+    if force and cache_file.exists():
+        log("Force re-transcribe: ignoring cached transcript.")
+    elif cache_file.exists():
         try:
             cached = json.loads(cache_file.read_text())
-            log(f"Using cached transcript "
-                f"({len(cached.get('segments', []))} segments).")
+            segs = cached.get("segments", [])
+            # If the caller wants word-level timing and the cache predates
+            # that feature, skip the cache so the re-run actually returns
+            # word arrays.
+            has_words = any(isinstance(s, dict) and s.get("words")
+                            for s in segs)
+            log(f"Using cached transcript ({len(segs)} segments, "
+                f"words={'yes' if has_words else 'no'}).")
             return {
-                "segments": cached.get("segments", []),
+                "segments": segs,
                 "language": (cached.get("detected_language")
                              or cached.get("language") or ""),
             }
@@ -278,6 +289,8 @@ def _openai(video_path, model, language, translate, log, progress, hint=""):
             # `translations` endpoint always outputs English and does not
             # accept this field.
             add_field("timestamp_granularities[]", "segment")
+            # Word-level timestamps for sub-row cut selection.
+            add_field("timestamp_granularities[]", "word")
             if language:
                 add_field("language", language)
         # OpenAI Whisper accepts a `prompt` field that biases vocabulary
@@ -311,15 +324,41 @@ def _openai(video_path, model, language, translate, log, progress, hint=""):
             log(f"OpenAI transcription failed: {e}")
             return {"segments": [], "language": ""}
 
+    # OpenAI returns words at the top level (not per-segment) when both
+    # granularities are requested. We bucket them by time so the saved
+    # segments carry their own word arrays — identical shape to local
+    # Whisper output downstream.
+    top_words = data.get("words") or []
+    def _words_for(seg_start, seg_end):
+        out = []
+        for w in top_words:
+            try:
+                ws = float(w.get("start", 0))
+                we = float(w.get("end", 0))
+            except Exception:
+                continue
+            # Allow a small slop on both sides so a word that straddles
+            # the segment boundary still lands somewhere.
+            if ws >= seg_start - 0.05 and we <= seg_end + 0.05:
+                out.append({
+                    "word":  w.get("word", ""),
+                    "start": round(ws, 3),
+                    "end":   round(we, 3),
+                })
+        return out or None
+
     segments = []
     for s in (data.get("segments") or []):
         txt = (s.get("text") or "").strip()
         if not txt:
             continue
+        ss = float(s.get("start", 0))
+        se = float(s.get("end", 0))
         segments.append({
-            "start": round(float(s.get("start", 0)), 2),
-            "end":   round(float(s.get("end", 0)), 2),
+            "start": round(ss, 2),
+            "end":   round(se, 2),
             "text":  txt,
+            "words": _words_for(ss, se),
         })
     # Translations endpoint may not return segments; fall back to whole-file.
     if not segments and (data.get("text") or "").strip():
@@ -327,6 +366,7 @@ def _openai(video_path, model, language, translate, log, progress, hint=""):
             "start": 0.0,
             "end":   float(data.get("duration") or 0.0),
             "text":  data["text"].strip(),
+            "words": None,
         })
     detected = (data.get("language") or "").strip().lower()
     log(f"OpenAI returned {len(segments)} segments "
@@ -341,7 +381,11 @@ _GEMINI_PROMPT_TEMPLATE = (
     "Transcribe the speech in this audio. Output a single JSON array, no "
     "code fences and no commentary. Each element must have keys: "
     "`start` (number, seconds from the beginning of the audio), "
-    "`end` (number, seconds), and `text` (string). "
+    "`end` (number, seconds), `text` (string), and `words` (array of "
+    "{`word`, `start`, `end`} objects — one per spoken word with its own "
+    "timestamps inside the segment). "
+    "Include the leading space in each `word` value when applicable so "
+    "concatenating every word reconstructs the segment's `text`. "
     "Break the transcript into natural speech segments roughly 2–10 seconds "
     "long; do not output one giant segment. "
     "If the audio mixes languages (code-switching), keep each phrase in "
@@ -584,10 +628,33 @@ def _gemini(video_path, model, language, translate, log, progress, hint=""):
             end   = float(s.get("end", start))
         except Exception:
             continue
+        # Word-level timestamps when the model provided them. Defensive
+        # against typos — we only keep entries with real numeric times.
+        words = None
+        raw_words = s.get("words")
+        if isinstance(raw_words, list) and raw_words:
+            words = []
+            for w in raw_words:
+                if not isinstance(w, dict):
+                    continue
+                wtxt = w.get("word")
+                if wtxt is None:
+                    continue
+                try:
+                    ws = float(w.get("start", 0))
+                    we = float(w.get("end", ws))
+                except Exception:
+                    continue
+                words.append({"word": str(wtxt),
+                              "start": round(ws, 3),
+                              "end":   round(we, 3)})
+            if not words:
+                words = None
         segments.append({
             "start": round(start, 2),
             "end":   round(end, 2),
             "text":  txt,
+            "words": words,
         })
     log(f"Gemini returned {len(segments)} segments.")
     progress(1.0, "transcription complete")

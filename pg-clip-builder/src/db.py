@@ -282,6 +282,16 @@ def get_db():
     except sqlite3.OperationalError:
         conn.execute("ALTER TABLE transcripts ADD COLUMN original_text TEXT")
         conn.commit()
+    # Word-level timestamps for sub-row selection (cut scenes at a word
+    # boundary). Stored as a JSON array per segment:
+    #   [{"word": " hello", "start": 1.23, "end": 1.45}, ...]
+    # NULL means the row was transcribed without word_timestamps and
+    # selection falls back to row-level snapping.
+    try:
+        conn.execute("SELECT words FROM transcripts LIMIT 0")
+    except sqlite3.OperationalError:
+        conn.execute("ALTER TABLE transcripts ADD COLUMN words TEXT")
+        conn.commit()
     if needs_backfill:
         # Speech: whoever has transcript rows.
         conn.execute(
@@ -637,6 +647,54 @@ def revert_transcript_text(transcript_id):
         conn.close()
 
 
+def purge_duplicate_transcripts(video_id):
+    """Drop stale transcript groups for *video_id*, keeping only the
+    freshest group per ``is_translation`` slot.
+
+    A "group" here is identified by ``(language, is_translation)``. When
+    the same logical pass was saved more than once with different
+    ``language`` metadata (e.g. one run wrote ``language=""`` for an
+    English translation and a later run wrote ``language="en"``), the
+    modal renders both side-by-side. This helper picks the group whose
+    *max(id)* is highest (= inserted most recently) and deletes the rest.
+
+    Returns ``{"is_translation":N_deleted}`` counts so the caller can
+    tell the user what happened.
+    """
+    conn = get_db()
+    out = {0: 0, 1: 0}
+    try:
+        for flag in (0, 1):
+            rows = conn.execute(
+                """SELECT language, MAX(id) AS max_id, COUNT(*) AS n
+                   FROM transcripts
+                   WHERE video_id=? AND is_translation=?
+                   GROUP BY language""",
+                (video_id, flag),
+            ).fetchall()
+            if len(rows) <= 1:
+                continue
+            # Sort by max_id desc; keep the first, drop the rest.
+            rows_sorted = sorted(rows, key=lambda r: r["max_id"], reverse=True)
+            keep_lang = rows_sorted[0]["language"]
+            drop_langs = [r["language"] for r in rows_sorted[1:]]
+            if not drop_langs:
+                continue
+            placeholders = ",".join("?" for _ in drop_langs)
+            res = conn.execute(
+                f"""DELETE FROM transcripts
+                    WHERE video_id=? AND is_translation=?
+                      AND language IN ({placeholders})""",
+                (video_id, flag, *drop_langs),
+            )
+            out[flag] = res.rowcount or 0
+            _ = keep_lang  # kept for readability; lang we preserved
+        conn.commit()
+    finally:
+        conn.close()
+    return {"native_deleted": out[0], "english_deleted": out[1]}
+
+
 def get_transcript_by_id(transcript_id):
     """Look up a single transcript row by id. Used by the per-row edit
     endpoint to authorize + identify the video for cache busting."""
@@ -812,27 +870,53 @@ def save_transcripts(video_id, segments, language="", is_translation=False,
     """
     if not segments:
         return
+    import json as _json
     conn = get_db()
+    # Detect whether the words column exists so we can populate it on
+    # newer schemas without breaking old DBs.
+    has_words = True
+    try:
+        conn.execute("SELECT words FROM transcripts LIMIT 0")
+    except sqlite3.OperationalError:
+        has_words = False
     try:
         conn.execute(
             "DELETE FROM transcripts WHERE video_id=? AND language=? AND is_translation=?",
             (video_id, language or "", 1 if is_translation else 0),
         )
-        rows = [
-            (video_id, language or "", 1 if is_translation else 0,
-             float(s.get("start", 0)), float(s.get("end", 0)),
-             (s.get("text") or "").strip(),
-             provider or None, model or None)
-            for s in segments
-            if (s.get("text") or "").strip()
-        ]
-        conn.executemany(
-            """INSERT INTO transcripts
-               (video_id, language, is_translation, start_time, end_time, text,
-                provider, model)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            rows,
-        )
+        if has_words:
+            rows = [
+                (video_id, language or "", 1 if is_translation else 0,
+                 float(s.get("start", 0)), float(s.get("end", 0)),
+                 (s.get("text") or "").strip(),
+                 provider or None, model or None,
+                 _json.dumps(s["words"]) if s.get("words") else None)
+                for s in segments
+                if (s.get("text") or "").strip()
+            ]
+            conn.executemany(
+                """INSERT INTO transcripts
+                   (video_id, language, is_translation, start_time, end_time, text,
+                    provider, model, words)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                rows,
+            )
+        else:
+            rows = [
+                (video_id, language or "", 1 if is_translation else 0,
+                 float(s.get("start", 0)), float(s.get("end", 0)),
+                 (s.get("text") or "").strip(),
+                 provider or None, model or None)
+                for s in segments
+                if (s.get("text") or "").strip()
+            ]
+            conn.executemany(
+                """INSERT INTO transcripts
+                   (video_id, language, is_translation, start_time, end_time, text,
+                    provider, model)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                rows,
+            )
         conn.commit()
     finally:
         conn.close()
@@ -863,6 +947,12 @@ def get_transcripts_in_range(video_id, start_time, end_time):
             cols += ", original_text"
         except sqlite3.OperationalError:
             has_orig = False
+        has_words = True
+        try:
+            conn.execute("SELECT words FROM transcripts LIMIT 0")
+            cols += ", words"
+        except sqlite3.OperationalError:
+            has_words = False
         rows = conn.execute(
             f"""SELECT {cols}
                FROM transcripts
@@ -889,6 +979,14 @@ def get_transcripts_in_range(video_id, start_time, end_time):
             else:
                 seg["original_text"] = None
                 seg["edited"] = False
+            if has_words and r["words"]:
+                try:
+                    import json as _json
+                    seg["words"] = _json.loads(r["words"])
+                except Exception:
+                    seg["words"] = None
+            else:
+                seg["words"] = None
             groups.setdefault(key, []).append(seg)
             if has_attr and key not in attr:
                 attr[key] = (r["provider"] or "", r["model"] or "")
@@ -1005,6 +1103,12 @@ def get_video_transcripts(video_id):
             cols += ", original_text"
         except sqlite3.OperationalError:
             has_orig = False
+        has_words = True
+        try:
+            conn.execute("SELECT words FROM transcripts LIMIT 0")
+            cols += ", words"
+        except sqlite3.OperationalError:
+            has_words = False
         rows = conn.execute(
             f"""SELECT {cols}
                FROM transcripts
@@ -1029,6 +1133,14 @@ def get_video_transcripts(video_id):
             else:
                 seg["original_text"] = None
                 seg["edited"] = False
+            if has_words and r["words"]:
+                try:
+                    import json as _json
+                    seg["words"] = _json.loads(r["words"])
+                except Exception:
+                    seg["words"] = None
+            else:
+                seg["words"] = None
             groups.setdefault(key, []).append(seg)
             if has_attr and key not in attr:
                 attr[key] = (r["provider"] or "", r["model"] or "")
