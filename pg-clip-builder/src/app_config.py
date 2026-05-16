@@ -266,6 +266,17 @@ def delete_profile(name):
         db.delete_profile_db(name)
     except Exception:
         pass
+    # And the per-profile folders/memberships store so the Folders column
+    # doesn't inherit the deleted profile's layout on its next creation.
+    try:
+        import folders as _folders_mod
+        fp = _folders_mod._FOLDERS_DIR / (
+            _folders_mod._safe_profile_name(name) + ".json"
+        )
+        if fp.exists():
+            fp.unlink()
+    except Exception:
+        pass
     if get_active_profile_name() == name:
         remaining = list_profiles()
         if remaining:

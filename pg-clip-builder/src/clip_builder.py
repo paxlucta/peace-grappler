@@ -1542,40 +1542,35 @@ main.bb-cols{
 .pg-heart.on{color:#ef5350}
 .pg-heart.on:hover{color:#e53935}
 .bb-row .pg-heart{margin:0 2px}
-/* Heart now lives in the vote-row (same layout as /rate scene cards):
-   anchored to the left edge of the row, mirror of the transcript
-   button on the right; centered thumbs-down/up sit between them. */
+/* Heart sits inside the left cluster of the vote-row (paired with the
+   thumbs-down). Box matches .vote-btn exactly so all four toolbar
+   buttons read at the same visual weight. */
 .clip-card .vote-row .pg-heart{
-  position:absolute;left:6px;top:50%;transform:translateY(-50%);
   width:32px;height:32px;border-radius:50%;border:1.5px solid #444;
-  background:transparent;color:#666;
+  background:#111;color:#666;
   display:flex;align-items:center;justify-content:center;
-  transition:all .12s;cursor:pointer;
+  transition:all .12s;cursor:pointer;padding:0;
 }
 .clip-card .vote-row .pg-heart:hover{
-  transform:translateY(-50%) scale(1.15);color:#ef9a9a;border-color:#ef9a9a;
+  transform:scale(1.15);color:#ef9a9a;border-color:#ef9a9a;
 }
 .clip-card .vote-row .pg-heart.on{
   background:#ef5350;border-color:#ef5350;color:#fff;
 }
 .clip-card .vote-row .pg-heart svg{width:16px;height:16px;fill:currentColor}
 
-/* Vote row + thumbs buttons — identical to /rate's .scene-card .vote-row.
-   Right padding reserves space for the absolutely-positioned right
-   cluster so the centered thumbs-down button doesn't crowd it. */
+/* Vote row: two flush clusters — heart+down on the left, transcript+gear
+   on the right. Cleaner than the old centered-button + absolute siblings
+   layout and gives both pairs guaranteed breathing room. */
 .clip-card .vote-row{
-  display:flex;justify-content:center;gap:8px;padding:6px 80px 6px 6px;
-  border-top:1px solid #222;align-items:center;position:relative;
+  display:flex;justify-content:space-between;gap:8px;padding:6px;
+  border-top:1px solid #222;align-items:center;
 }
-.clip-card .vote-row .vote-btn-end{
-  position:absolute;right:6px;top:50%;transform:translateY(-50%);
-}
-.clip-card .vote-row .vote-btn-end:hover{transform:translateY(-50%) scale(1.15)}
-/* Right-side cluster: transcript + gear stacked to the right edge. */
+.clip-card .vote-row .vote-left-cluster,
 .clip-card .vote-row .vote-right-cluster{
-  position:absolute;right:6px;top:50%;transform:translateY(-50%);
-  display:flex;gap:4px;align-items:center;
+  display:flex;gap:6px;align-items:center;
 }
+.clip-card .vote-row .vote-left-cluster .vote-btn:hover,
 .clip-card .vote-row .vote-right-cluster .vote-btn:hover{transform:scale(1.15)}
 .clip-card .vote-btn.vgear{border-color:#555}
 .clip-card .vote-btn.vgear svg{fill:#888}
@@ -4569,34 +4564,38 @@ function _cfLayout() {
   // for the resize listener so future tweaks have a home.
 }
 
-// Instagram's portrait feed post aspect ratio (4:5, e.g. 1080×1350). New
-// rectangles default to this — the most common upload target — and label
-// themselves "4:5" until the user resizes them.
-var CF_DEFAULT_ASPECT_W = 4;
-var CF_DEFAULT_ASPECT_H = 5;
-var CF_DEFAULT_LABEL = '4:5';
+// 9:16 vertical — the YouTube Shorts / Instagram Reels canvas. New
+// rectangles default to this and label themselves "9:16" until resized,
+// which also fills the 9:16 output canvas edge-to-edge by default.
+var CF_DEFAULT_ASPECT_W = 9;
+var CF_DEFAULT_ASPECT_H = 16;
+var CF_DEFAULT_LABEL = '9:16';
 
 function cfAddRect() {
   var idx = _cfRects.length;
   var color = CF_COLORS[idx % CF_COLORS.length];
-  // Lock the source rect to a 4:5 pixel aspect ratio.
-  //   pixel aspect = srcAsp * (sw/sh) = 4/5
-  //   → sw/sh = (4/5) / srcAsp
+  // Lock the source rect to a 9:16 pixel aspect ratio.
+  //   pixel aspect = srcAsp * (sw/sh) = 9/16
+  //   → sw/sh = (9/16) / srcAsp
   var srcAsp = _cfSrcAspect || (16/9);
   var targetAsp = CF_DEFAULT_ASPECT_W / CF_DEFAULT_ASPECT_H;
-  var sh = 0.7;
-  var sw = sh * targetAsp / srcAsp;
+  // Drive from the dimension that fits inside [0,1]: on a landscape
+  // source the rect is a tall narrow strip (sh fills, sw derives); on a
+  // portrait source the rect is a short wide strip (sw fills, sh derives).
+  var sw, sh;
+  if (srcAsp >= targetAsp) {
+    sh = 0.95;
+    sw = sh * targetAsp / srcAsp;
+  } else {
+    sw = 0.95;
+    sh = sw * srcAsp / targetAsp;
+  }
   if (!isFinite(sw) || sw <= 0) sw = 0.5;
-  if (sw > 0.95) { sw = 0.95; sh = sw * srcAsp / targetAsp; }
-  if (sh > 0.95) { sh = 0.95; sw = sh * targetAsp / srcAsp; }
+  if (!isFinite(sh) || sh <= 0) sh = 0.5;
   var sx = (1 - sw) / 2;
   var sy = (1 - sh) / 2;
-  // Dst keeps the same pixel aspect via the existing 9:16 canvas lock.
-  var dh = 0.9;
-  var dw = dh * (sw / sh) * srcAsp / (9 / 16);
-  if (!isFinite(dw) || dw <= 0) dw = 0.5;
-  if (dw > 0.95) { dw = 0.95; dh = dw * (sh / sw) * (9 / 16) / srcAsp; }
-  if (dh > 0.95) { dh = 0.95; dw = dh * (sw / sh) * srcAsp / (9 / 16); }
+  // Dst at 9:16 fills the 9:16 output canvas exactly (dw = dh = ~1).
+  var dh = 0.98, dw = 0.98;
   var r = {
     id: ++_cfNextId,
     sx: sx, sy: sy, sw: sw, sh: sh,
@@ -5095,10 +5094,12 @@ function cardHTML(c) {
     + ((c.ignored || c.excluded) ? '<span class="excluded-badge">HIDDEN</span>' : '')
     + dots
     + '<div class="vote-row">'
-    +   '<button class="pg-heart' + heartCls + '" onclick="event.stopPropagation();bbToggleClipFavorite(' + c.id + ')" title="Toggle favorite">' + PG_HEART_SVG + '</button>'
-    +   '<button class="vote-btn vdown' + (c.status === 'down' ? ' active' : '') + '" onclick="event.stopPropagation();voteClip(' + c.id + ',\'down\')" title="Hide scene">'
-    +     '<svg viewBox="0 0 24 24"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>'
-    +   '</button>'
+    +   '<div class="vote-left-cluster">'
+    +     '<button class="pg-heart' + heartCls + '" onclick="event.stopPropagation();bbToggleClipFavorite(' + c.id + ')" title="Toggle favorite">' + PG_HEART_SVG + '</button>'
+    +     '<button class="vote-btn vdown' + (c.status === 'down' ? ' active' : '') + '" onclick="event.stopPropagation();voteClip(' + c.id + ',\'down\')" title="Hide scene">'
+    +       '<svg viewBox="0 0 24 24"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>'
+    +     '</button>'
+    +   '</div>'
     +   '<div class="vote-right-cluster">'
     +     (c.has_transcript ? '<button class="vote-btn vtxt" onclick="event.stopPropagation();openSceneTranscript(' + c.id + ')" title="Show transcript"><svg viewBox="0 0 24 24"><path d="M4 4h16v2H4V4zm0 4h16v2H4V8zm0 4h10v2H4v-2zm0 4h16v2H4v-2zm0 4h10v2H4v-2z"/></svg></button>' : '')
     +     '<button class="vote-btn vgear" onclick="event.stopPropagation();openSceneSettings(' + c.id + ')" title="Scene settings"><svg viewBox="0 0 24 24"><path d="M19.43 12.98c.04-.32.07-.65.07-.98s-.03-.66-.07-.98l2.11-1.65a.5.5 0 0 0 .12-.64l-2-3.46a.5.5 0 0 0-.61-.22l-2.49 1a7.03 7.03 0 0 0-1.69-.98l-.38-2.65A.488.488 0 0 0 14 2h-4a.488.488 0 0 0-.49.42l-.38 2.65c-.61.25-1.17.58-1.69.98l-2.49-1a.5.5 0 0 0-.61.22l-2 3.46a.5.5 0 0 0 .12.64L4.57 11.02c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65a.5.5 0 0 0-.12.64l2 3.46c.14.24.42.34.66.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.05.24.25.42.49.42h4c.24 0 .44-.18.49-.42l.38-2.65c.61-.25 1.17-.58 1.69-.98l2.49 1c.24.1.52 0 .66-.22l2-3.46a.5.5 0 0 0-.12-.64l-2.11-1.65zM12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5z"/></svg></button>'

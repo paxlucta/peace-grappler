@@ -49,7 +49,39 @@ import app_config
 folders_bp = Blueprint("folders", __name__)
 _lock = threading.Lock()
 
-_STORE_PATH = app_config.DATA_DIR / "folders.json"
+# Per-profile folder store. Each brand profile gets its own JSON file at
+# ``data/profiles_folders/<safe_name>.json`` so switching brands gives a
+# clean folder column (matches how DBs are isolated per profile).
+_FOLDERS_DIR = app_config.DATA_DIR / "profiles_folders"
+_LEGACY_STORE_PATH = app_config.DATA_DIR / "folders.json"
+
+import re as _re
+_FILENAME_SAFE = _re.compile(r"[^A-Za-z0-9_\-. ]")
+
+def _safe_profile_name(name):
+    return _FILENAME_SAFE.sub("_", (name or "").strip()) or "default"
+
+def _store_path():
+    """Resolve the folders.json file for the currently-active brand
+    profile. Falls back to the legacy single-file path if app_config
+    can't be read."""
+    try:
+        name = app_config.get_active_profile_name()
+        return _FOLDERS_DIR / (_safe_profile_name(name) + ".json")
+    except Exception:
+        return _LEGACY_STORE_PATH
+
+def _migrate_legacy_store(target):
+    """One-time: if the active profile has no folders file yet but the
+    legacy single-file store exists, copy it over so the user's existing
+    folder layout lands in their current profile instead of vanishing."""
+    if target.exists() or not _LEGACY_STORE_PATH.exists():
+        return
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(_LEGACY_STORE_PATH.read_bytes())
+    except Exception:
+        pass
 
 SCOPES = ("source", "library")
 DEFAULT_SCOPE = "source"
@@ -98,10 +130,12 @@ def _empty_scope():
 def _read_all():
     """Load the whole multi-scope store. Migrates legacy single-scope
     files (``{folders: ..., memberships: ...}``) into ``scopes.source``."""
-    if not _STORE_PATH.exists():
+    path = _store_path()
+    _migrate_legacy_store(path)
+    if not path.exists():
         return {"scopes": {s: _empty_scope() for s in SCOPES}}
     try:
-        raw = json.loads(_STORE_PATH.read_text(encoding="utf-8"))
+        raw = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return {"scopes": {s: _empty_scope() for s in SCOPES}}
     if isinstance(raw, dict) and "scopes" in raw and isinstance(raw["scopes"], dict):
@@ -133,8 +167,9 @@ def _read(scope):
 def _write_scope(scope, data):
     all_data = _read_all()
     all_data["scopes"][scope] = data
-    _STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _STORE_PATH.write_text(
+    path = _store_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
         json.dumps(all_data, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )

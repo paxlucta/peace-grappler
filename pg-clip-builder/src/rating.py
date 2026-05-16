@@ -377,14 +377,13 @@ nav a.active{color:#e53935;border-color:#e53935}
    transcript button on the right) so the thumbs-down / thumbs-up pair
    stays centered between them. */
 .scene-card .vote-row .pg-heart{
-  position:absolute;left:6px;top:50%;transform:translateY(-50%);
   width:32px;height:32px;border-radius:50%;border:1.5px solid #444;
-  background:transparent;color:#666;
+  background:#111;color:#666;
   display:flex;align-items:center;justify-content:center;
-  transition:all .12s;cursor:pointer;
+  transition:all .12s;cursor:pointer;padding:0;
 }
 .scene-card .vote-row .pg-heart:hover{
-  transform:translateY(-50%) scale(1.15);color:#ef9a9a;border-color:#ef9a9a;
+  transform:scale(1.15);color:#ef9a9a;border-color:#ef9a9a;
 }
 .scene-card .vote-row .pg-heart.on{
   background:#ef5350;border-color:#ef5350;color:#fff;
@@ -531,22 +530,17 @@ nav a.active{color:#e53935;border-color:#e53935}
 }
 
 /* -- Thumbs row on each card -- */
+/* Two flush clusters — heart+down on the left, transcript+gear on the
+   right. Mirrors /builder's .clip-card .vote-row layout exactly. */
 .scene-card .vote-row{
-  display:flex;justify-content:center;gap:8px;padding:6px 80px 6px 6px;
-  border-top:1px solid #222;align-items:center;position:relative;
+  display:flex;justify-content:space-between;gap:8px;padding:6px;
+  border-top:1px solid #222;align-items:center;
 }
-/* Transcript button anchors to the far right without shifting the
-   centered up/down vote pair. */
-.scene-card .vote-row .vote-btn-end{
-  position:absolute;right:6px;top:50%;transform:translateY(-50%);
-}
-.scene-card .vote-row .vote-btn-end:hover{transform:translateY(-50%) scale(1.15)}
-/* Right-side cluster: transcript + gear stacked to the right edge —
-   mirrors the /builder clip-card toolbar exactly. */
+.scene-card .vote-row .vote-left-cluster,
 .scene-card .vote-row .vote-right-cluster{
-  position:absolute;right:6px;top:50%;transform:translateY(-50%);
-  display:flex;gap:4px;align-items:center;
+  display:flex;gap:6px;align-items:center;
 }
+.scene-card .vote-row .vote-left-cluster .vote-btn:hover,
 .scene-card .vote-row .vote-right-cluster .vote-btn:hover{transform:scale(1.15)}
 .vote-btn.vgear{border-color:#555}
 .vote-btn.vgear svg{fill:#888}
@@ -1316,10 +1310,12 @@ function renderGrid() {
       + aiBadge
       + badge
       + '<div class="vote-row">'
-      + '<button class="pg-heart' + heartCls + '" onclick="bbToggleSceneFavorite(' + s.id + ')" title="Toggle favorite">' + PG_HEART_SVG + '</button>'
-      + '<button class="vote-btn vdown' + (s.status === 'down' ? ' active' : '') + '" onclick="vote(' + s.id + ',\'down\')" title="Hide scene">'
-      + '<svg viewBox="0 0 24 24"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>'
-      + '</button>'
+      + '<div class="vote-left-cluster">'
+      +   '<button class="pg-heart' + heartCls + '" onclick="bbToggleSceneFavorite(' + s.id + ')" title="Toggle favorite">' + PG_HEART_SVG + '</button>'
+      +   '<button class="vote-btn vdown' + (s.status === 'down' ? ' active' : '') + '" onclick="vote(' + s.id + ',\'down\')" title="Hide scene">'
+      +     '<svg viewBox="0 0 24 24"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>'
+      +   '</button>'
+      + '</div>'
       + '<div class="vote-right-cluster">'
       +   (s.has_transcript
             ? '<button class="vote-btn vtxt" onclick="openTranscript(' + s.id + ')" title="Show transcript">'
