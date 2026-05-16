@@ -1,9 +1,9 @@
 {
-  "profile_name": "How Janey Learned Russian _former COLLEGE RUSSIAN_",
+  "profile_name": "How Janey Learned Russian",
   "brand_name": "How Janey Learned Russian (former COLLEGE RUSSIAN)",
   "content_domain": "russian language education",
-  "source_folder": "videos/collegerussian",
-  "output_folder": "output/collegerussian",
+  "source_folder": "~/Documents/HowJaneyLearnedRussian/Input",
+  "output_folder": "~/Documents/HowJaneyLearnedRussian/Output",
   "tag_schema": {
     "activity": [
       "whiteboard-writing",

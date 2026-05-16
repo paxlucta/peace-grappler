@@ -1248,6 +1248,61 @@ def delete_scene(scene_id):
         conn.close()
 
 
+def rename_video(video_id, new_filename):
+    """Rename a video both on disk and in the DB. Returns
+    ``{"old_filename","new_filename","old_path","new_path"}`` on success
+    or raises a ValueError describing the failure.
+
+    The new filename keeps the original extension (the user supplies the
+    base name only). Membership/grade/transcript rows are unaffected since
+    they all key off video_id, not the path string.
+    """
+    import os as _os
+    from pathlib import Path as _Path
+    base = (new_filename or "").strip()
+    if not base:
+        raise ValueError("Filename is required")
+    # Strip any directory bits so we can never write outside the source
+    # folder. Also strip an extension if the user typed one — we always
+    # keep the original.
+    base = _Path(base).name
+    if _Path(base).suffix:
+        base = _Path(base).stem
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT id, filename, path FROM videos WHERE id=?", (video_id,)
+        ).fetchone()
+        if not row:
+            raise ValueError("Video not found")
+        old_path = _Path(row["path"])
+        old_filename = row["filename"]
+        ext = old_path.suffix
+        new_name = base + ext
+        if new_name == old_filename:
+            return {
+                "old_filename": old_filename, "new_filename": new_name,
+                "old_path": str(old_path), "new_path": str(old_path),
+            }
+        new_path = old_path.with_name(new_name)
+        if new_path.exists():
+            raise ValueError("A file with that name already exists")
+        if not old_path.exists():
+            raise ValueError("Source file is missing on disk")
+        _os.rename(str(old_path), str(new_path))
+        conn.execute(
+            "UPDATE videos SET filename=?, path=? WHERE id=?",
+            (new_name, str(new_path), video_id),
+        )
+        conn.commit()
+        return {
+            "old_filename": old_filename, "new_filename": new_name,
+            "old_path": str(old_path), "new_path": str(new_path),
+        }
+    finally:
+        conn.close()
+
+
 def delete_video(video_id, remove_file=True):
     """Hard-delete a source video + every scene/moment/transcript/analyzed-tag
     row that referenced it. Used by the trash button on /analyze.

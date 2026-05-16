@@ -1035,6 +1035,13 @@ def main():
     if "--wait-bind" in sys.argv:
         print(f"[restart] Waiting for port {port} to free up…")
         _wait_for_port_free(port, timeout=15.0)
+        # Scrub reloader env vars that the parent leaked into our process.
+        # If WERKZEUG_RUN_MAIN is set, Flask thinks it's the reloader's
+        # child and tries to inherit the parent's listening socket via
+        # WERKZEUG_SERVER_FD — that fd is stale here, so socket.fromfd()
+        # crashes with "Bad file descriptor" before app.run() even binds.
+        for _k in ("WERKZEUG_RUN_MAIN", "WERKZEUG_SERVER_FD"):
+            os.environ.pop(_k, None)
 
     # Initialize DB
     get_db()

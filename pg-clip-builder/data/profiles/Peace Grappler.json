@@ -1,10 +1,9 @@
 {
-  "profile_name": "PeaceGrappler",
+  "profile_name": "Peace Grappler",
   "brand_name": "PeaceGrappler",
-  "social_handle": "@peacegrappler",
   "content_domain": "MMA / combat sports",
-  "source_folder": "videos/peacegrappler",
-  "output_folder": "output/peacegrappler",
+  "source_folder": "~/Documents/PeaceGrappler/Input",
+  "output_folder": "~/Documents/PeaceGrappler/Output",
   "tag_schema": {
     "activity": [
       "grappling",
@@ -68,20 +67,6 @@
       "posing",
       "photo"
     ],
-    "setting": [
-      "octagon",
-      "cage",
-      "ring",
-      "gym",
-      "outdoor",
-      "beach",
-      "street",
-      "hotel",
-      "arena",
-      "backstage",
-      "locker-room",
-      "studio"
-    ],
     "camera": [
       "close-up",
       "medium-shot",
@@ -100,6 +85,47 @@
     ],
     "quality": [
       "low-quality"
+    ],
+    "setting": [
+      "octagon",
+      "cage",
+      "ring",
+      "gym",
+      "outdoor",
+      "beach",
+      "street",
+      "hotel",
+      "arena",
+      "backstage",
+      "locker-room",
+      "studio"
     ]
+  },
+  "intro_video": "",
+  "outro_video": "",
+  "brand_color": "#7c3aed",
+  "socials": {
+    "instagram": {
+      "handle": "@peacegrappler",
+      "url": "",
+      "cookies": ""
+    },
+    "tiktok": {
+      "handle": "",
+      "url": "",
+      "cookies": ""
+    },
+    "youtube": {
+      "handle": "",
+      "url": "",
+      "cookies": ""
+    }
+  },
+  "captions": {
+    "font": "sans",
+    "color": "#ffffff",
+    "bg_on": false,
+    "bg_color": "#000000",
+    "position": "bottom"
   }
 }

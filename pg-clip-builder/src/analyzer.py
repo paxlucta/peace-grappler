@@ -13,7 +13,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, Response, jsonify, request, send_file
 
 import db
 from db import (
@@ -1746,6 +1746,39 @@ def api_delete_scene(scene_id):
     return jsonify({"ok": True, "scene_id": scene_id})
 
 
+@analyzer_bp.route("/analyze/api/video/<int:video_id>/rename", methods=["POST"])
+def api_rename_video(video_id):
+    """Rename the underlying source file (and DB row) for a video."""
+    body = request.get_json(force=True) or {}
+    new_name = (body.get("filename") or "").strip()
+    if not new_name:
+        return jsonify({"ok": False, "error": "Filename is required"}), 400
+    # Block rename while an analysis is running so we don't yank the file
+    # out from under ffmpeg/whisper.
+    with _analysis_lock:
+        if _analysis_state["running"] and _analysis_state["video_id"] == video_id:
+            return jsonify({
+                "ok": False,
+                "error": "Video is being analyzed. Cancel first."
+            }), 409
+    try:
+        res = db.rename_video(video_id, new_name)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    return jsonify({"ok": True, **res})
+
+
+@analyzer_bp.route("/analyze/api/video/<int:video_id>/stream")
+def api_video_stream(video_id):
+    """Stream the source video file for the in-page playback modal."""
+    import mimetypes
+    v = get_video_by_id(video_id)
+    if not v or not v.get("path") or not os.path.exists(v["path"]):
+        return "", 404
+    mime, _ = mimetypes.guess_type(v["path"])
+    return send_file(v["path"], mimetype=mime or "video/mp4", conditional=True)
+
+
 @analyzer_bp.route("/analyze/api/video/<int:video_id>", methods=["DELETE"])
 def api_delete_video(video_id):
     """Remove a source video from this brand profile. Drops the file on
@@ -1861,16 +1894,18 @@ thead th{
 tbody td{padding:8px 14px}
 tbody tr:first-child td{padding-top:12px}
 
-/* Drop zone — sticky to the bottom of .page-main so it stays in view
-   while the user scrolls the file list. Drag a file over it to import. */
+/* Drop zone — pinned to the bottom of .page-main (the scrollable main
+   column), not the viewport. margin-top:auto pushes it past every other
+   sibling in the flex column so it always sits at the very bottom of
+   the main area, with no float / sticky offset above the page edge. */
 .bb-drop{
-  position:sticky;bottom:0;left:0;right:0;
-  margin:12px 0 0;padding:18px 16px;
-  background:#0d1217;border:1.5px dashed #2e3a52;border-top:1.5px dashed #2e3a52;
+  position:static;
+  margin:18px 0 29px;padding:18px 29px;
+  background:#0d1217;border:1.5px dashed #2e3a52;
   border-radius:0;
   color:#7888a0;font-size:13px;text-align:center;
   transition:border-color .12s,background .12s,color .12s;
-  z-index:5;
+  margin-top:auto;flex-shrink:0;
 }
 .bb-drop.drag-over{
   border-color:#1976d2;background:#10223a;color:#fff;border-style:solid;
@@ -1941,7 +1976,7 @@ tbody tr[draggable="true"]:active{cursor:grabbing}
 .pg-heart.on{color:#ef5350}
 .pg-heart.on:hover{color:#e53935}
 .bb-row .pg-heart{margin:0 2px}
-table{width:calc(100% - 40px);border-collapse:collapse;margin:0px 0px 0}
+table{width:100%;border-collapse:collapse;margin:0}
 th,td{padding:8px 12px;text-align:left;border-bottom:1px solid #222}
 th{color:#888;font-size:12px;font-weight:600;text-transform:uppercase}
 td{font-size:13px}
@@ -2102,6 +2137,41 @@ td{font-size:13px}
 .row-actions .ra-del:hover:not(:disabled){
   color:#fff;background:#c62828;border-color:#c62828;
 }
+.row-actions .ra-play{color:#4caf50}
+.row-actions .ra-play:hover:not(:disabled){
+  background:#0f2c12;border-color:#4caf50;color:#a5d6a7;
+}
+.row-actions .ra-edit{color:#bbb}
+.row-actions .ra-edit:hover:not(:disabled){
+  background:#1f2630;border-color:#1976d2;color:#90caf9;
+}
+
+/* Source-video play modal (Input Videos row → play button) */
+.vp-overlay{
+  display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9200;
+  align-items:center;justify-content:center;padding:24px;
+}
+.vp-overlay.open{display:flex}
+.vp-modal{
+  background:#0c0c10;border:1px solid #2a2a2a;border-radius:10px;
+  width:min(960px,96vw);max-height:92vh;display:flex;flex-direction:column;
+  box-shadow:0 16px 48px rgba(0,0,0,.7);
+}
+.vp-head{
+  display:flex;align-items:center;gap:10px;padding:12px 16px;
+  border-bottom:1px solid #1f1f1f;
+}
+.vp-head h3{
+  flex:1;margin:0;color:#eee;font-size:14px;font-weight:600;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.vp-close{
+  background:none;border:none;color:#888;font-size:22px;line-height:1;
+  cursor:pointer;padding:0 4px;
+}
+.vp-close:hover{color:#fff}
+.vp-body{padding:0;background:#000;display:flex;align-items:center;justify-content:center}
+.vp-body video{width:100%;max-height:80vh;display:block;background:#000}
 
 /* -- Video transcript modal (Analyze page) -- */
 .vtx-overlay{
@@ -2633,6 +2703,21 @@ td{font-size:13px}
   </span>
 </div>
 
+<!-- Source-video play modal — opened by the play button in each row's
+     Actions column so the user can preview a file without leaving the
+     Input Videos page. -->
+<div class="vp-overlay" id="vp-overlay" onclick="closeVideoPlayer(event)">
+  <div class="vp-modal" onclick="event.stopPropagation()">
+    <div class="vp-head">
+      <h3 id="vp-title">Video</h3>
+      <button class="vp-close" onclick="closeVideoPlayer()" title="Close">×</button>
+    </div>
+    <div class="vp-body">
+      <video id="vp-video" controls playsinline></video>
+    </div>
+  </div>
+</div>
+
 </main>
 </div>
 
@@ -2700,10 +2785,42 @@ function _refreshSelectAll(){
 function _updateBulkDeleteBtn(){
   var btn  = document.getElementById('bulk-delete-btn');
   var cnt  = document.getElementById('bulk-delete-count');
-  if (!btn) return;
   var n = _selectedVideoIds.size;
-  btn.style.display = n > 0 ? '' : 'none';
-  if (cnt) cnt.textContent = n;
+  if (btn) {
+    btn.style.display = n > 0 ? '' : 'none';
+    if (cnt) cnt.textContent = n;
+  }
+  // Subnav-row Delete All button (lives in the Files/Scenes tab strip
+  // when the page is rendered; lazily injected so it survives chrome
+  // re-renders). Visibility mirrors the legacy bulk-delete button.
+  var sub = document.getElementById('subnav-bulk-delete-btn');
+  var subCnt = document.getElementById('subnav-bulk-delete-count');
+  if (!sub) sub = _ensureSubnavDeleteBtn();
+  if (sub) {
+    sub.style.display = n > 0 ? '' : 'none';
+    var c = document.getElementById('subnav-bulk-delete-count');
+    if (c) c.textContent = n;
+  }
+}
+
+function _ensureSubnavDeleteBtn() {
+  var subnav = document.querySelector('.pg-subnav');
+  if (!subnav) return null;
+  var btn = document.createElement('button');
+  btn.id = 'subnav-bulk-delete-btn';
+  btn.type = 'button';
+  btn.style.cssText =
+    'display:none;margin-left:auto;align-self:center;background:#c62828;'
+    + 'border:1px solid #c62828;color:#fff;padding:6px 12px;'
+    + 'border-radius:6px;cursor:pointer;font-weight:600;font-size:12px;'
+    + 'letter-spacing:.3px;margin-bottom:8px;';
+  btn.innerHTML = 'Delete All (<span id="subnav-bulk-delete-count">0</span>)';
+  btn.addEventListener('click', function(e) {
+    e.preventDefault();
+    deleteSelectedVideos();
+  });
+  subnav.appendChild(btn);
+  return btn;
 }
 
 async function deleteSelectedVideos(){
@@ -2752,6 +2869,59 @@ async function deleteSelectedVideos(){
     + (fails.length ? ' — ' + fails.length + ' failed: ' + fails.join('; ') : ''),
     fails.length ? 'error' : 'done');
   scanVideos();
+}
+
+function openVideoPlayer(videoId, filename) {
+  var overlay = document.getElementById('vp-overlay');
+  var vid = document.getElementById('vp-video');
+  var ttl = document.getElementById('vp-title');
+  if (ttl) ttl.textContent = (typeof friendlyFileName === 'function')
+    ? friendlyFileName(filename) : filename;
+  // Set the source AFTER the modal is visible so the video element has
+  // dimensions for the autoplay attempt.
+  vid.src = '/analyze/api/video/' + videoId + '/stream';
+  overlay.classList.add('open');
+  try { vid.play(); } catch (e) {}
+}
+
+function closeVideoPlayer(e) {
+  if (e && e.target && e.target.id !== 'vp-overlay'
+      && !(e.currentTarget && e.currentTarget.classList
+           && e.currentTarget.classList.contains('vp-close'))) {
+    // Click bubbled from a child — ignore (only backdrop click should close).
+  }
+  var overlay = document.getElementById('vp-overlay');
+  var vid = document.getElementById('vp-video');
+  try { vid.pause(); } catch (err) {}
+  vid.removeAttribute('src');
+  try { vid.load(); } catch (err) {}
+  overlay.classList.remove('open');
+}
+
+async function renameVideo(videoId, filename) {
+  // Pre-fill the prompt with the friendly (extension-stripped) base name
+  // — that's what we'll store back on disk. The extension is preserved
+  // server-side so the user doesn't have to retype .mp4 / .mov / etc.
+  var current = filename.replace(/\.[^.\/]+$/, '');
+  var next = window.prompt('Rename this file (the extension is kept):', current);
+  if (next == null) return;
+  next = String(next).trim();
+  if (!next || next === current) return;
+  try {
+    var r = await fetch('/analyze/api/video/' + videoId + '/rename', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({filename: next}),
+    });
+    var d = await r.json();
+    if (!r.ok || d.ok === false) {
+      alert('Rename failed: ' + (d.error || 'unknown'));
+      return;
+    }
+    addLine('Renamed ' + d.old_filename + ' → ' + d.new_filename);
+    scanVideos();
+  } catch (e) {
+    alert('Rename failed: ' + e.message);
+  }
 }
 
 async function deleteVideo(videoId, filename) {
@@ -3390,8 +3560,7 @@ function renderList() {
   if (visible.length === 0) {
     // colspan bumped to 7 to cover the new select-all checkbox column.
     var msg = videos.length === 0
-      ? 'No source videos yet. Click <b>Import Video</b> above '
-        + 'to add files from your social channels, a URL, or disk.'
+      ? 'No source videos yet.'
       : 'No videos in this folder. Drag a file row into a folder to '
         + 'add it.';
     tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:36px 0;color:#666">'
@@ -3423,12 +3592,22 @@ function renderList() {
       + ' title="Toggle favorite">' + PG_HEART_SVG + '</button>';
     var actionCell =
         '<div class="row-actions">'
+      +   '<button class="ra-act ra-play"'
+      +   ' onclick="openVideoPlayer(' + v.id + ',\'' + escImp(v.filename) + '\')"'
+      +   ' title="Preview this file">'
+      +   '<svg viewBox="0 0 24 24" fill="currentColor"><polygon points="8,5 19,12 8,19"/></svg>'
+      +   '</button>'
       +   transcriptBtn
       +   heartBtn
       +   '<button class="ra-act ra-analyze"' + disabled
       +   ' onclick="openAnalyzeOpts(event,' + v.id + ',\'both\')"'
       +   ' title="Pick a model and run Visual or Audio analysis">'
       +   '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.4 5.6L19 9l-5.6 1.4L12 16l-1.4-5.6L5 9l5.6-1.4L12 2zm6 12l.8 3.2L22 18l-3.2.8L18 22l-.8-3.2L14 18l3.2-.8L18 14z"/></svg>'
+      +   '</button>'
+      +   '<button class="ra-act ra-edit"' + disabled
+      +   ' onclick="renameVideo(' + v.id + ',\'' + escImp(v.filename) + '\')"'
+      +   ' title="Rename this file (renames on disk too)">'
+      +   '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>'
       +   '</button>'
       +   '<button class="ra-act ra-del"' + disabled
       +   ' onclick="deleteVideo(' + v.id + ',\'' + escImp(v.filename) + '\')"'

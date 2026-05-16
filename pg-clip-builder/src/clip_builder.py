@@ -2106,6 +2106,18 @@ footer{
   background:linear-gradient(90deg,#ffb74d,#ff9800);border-radius:4px;
   pointer-events:none;
 }
+/* Minute marks on the full-video bar — helps the user judge "where in
+   the file" they are at a glance. Sits under the fill so an active
+   selection still reads cleanly on top. */
+.ss-trim-ticks{position:absolute;inset:0;pointer-events:none}
+.ss-trim-ticks .ss-mtick{
+  position:absolute;top:6px;bottom:6px;width:1px;background:#3a3a3a;
+}
+.ss-trim-ticks .ss-mlabel{
+  position:absolute;bottom:-14px;font-size:8px;color:#666;
+  transform:translateX(-50%);font-variant-numeric:tabular-nums;
+  pointer-events:none;
+}
 .ss-trim-handle{
   position:absolute;top:0;bottom:0;width:14px;
   display:flex;align-items:center;justify-content:center;
@@ -2122,7 +2134,7 @@ footer{
 }
 .ss-trim-playhead.on{display:block}
 .ss-trim-foot{
-  display:flex;align-items:center;gap:10px;margin-top:10px;font-size:12px;
+  display:flex;align-items:center;gap:10px;margin-top:22px;font-size:12px;
 }
 .ss-play-btn{
   width:34px;height:34px;border-radius:50%;background:#e53935;border:none;
@@ -2134,6 +2146,52 @@ footer{
 .ss-time{font-variant-numeric:tabular-nums;color:#ddd;font-weight:600}
 .ss-time-sep{color:#666}
 .ss-time-dur{color:#888;font-size:11px}
+
+/* Loupe (zoomed sub-window) — sits above the main trim bar so the user
+   can drag handles with sub-second precision when the selection is tiny
+   compared to the source video. Shown only when (selection < 10s) AND
+   (video > 60s). The 0.5-second tick marks make the granularity
+   readable at a glance. */
+.ss-trim-loupe{margin-bottom:10px}
+.ss-loupe-bar{
+  position:relative;height:32px;background:#0a0a0a;
+  border:1px dashed #2e3a4a;border-radius:6px;user-select:none;
+  overflow:hidden;
+}
+.ss-loupe-ticks{
+  position:absolute;inset:0;pointer-events:none;
+}
+.ss-loupe-ticks .ss-loupe-tick{
+  position:absolute;top:0;bottom:0;width:1px;background:#1c2630;
+}
+.ss-loupe-ticks .ss-loupe-tick.major{background:#2a3744;width:1px}
+.ss-loupe-ticks .ss-loupe-tlabel{
+  position:absolute;bottom:1px;font-size:8px;color:#5b6675;
+  transform:translateX(-50%);font-variant-numeric:tabular-nums;
+  pointer-events:none;
+}
+.ss-loupe-fill{
+  background:linear-gradient(90deg,#90caf9,#42a5f5)!important;
+}
+.ss-loupe-bar .ss-trim-handle:hover .ss-trim-grip{background:#90caf9}
+.ss-loupe-foot{
+  display:flex;align-items:center;gap:8px;margin-top:4px;font-size:11px;
+}
+.ss-loupe-label{
+  font-size:9px;font-weight:700;letter-spacing:1px;color:#5b6675;
+}
+.ss-loupe-zbtn{
+  background:#1a1a1a;border:1px solid #333;color:#bbb;cursor:pointer;
+  width:20px;height:20px;border-radius:3px;line-height:1;
+  display:inline-flex;align-items:center;justify-content:center;font-size:13px;
+}
+.ss-loupe-zbtn:hover{border-color:#90caf9;color:#fff}
+.ss-loupe-win{
+  color:#90caf9;font-weight:600;font-variant-numeric:tabular-nums;min-width:48px;
+}
+.ss-loupe-range{
+  color:#666;font-variant-numeric:tabular-nums;margin-left:auto;
+}
 
 
 .cf-toolbar{
@@ -2787,8 +2845,33 @@ footer{
          with start/end trim + play preview against the source video. -->
     <div id="ss-trim-block" class="ss-section" style="display:none;margin-top:14px">
       <div class="ss-section-title">Scene Duration</div>
+      <!-- Loupe (zoomed) bar — shown only when the selection is short
+           AND the source video is long enough that the main bar's 0.5s
+           steps become hair-thin. Breaks the magnified window into 0.5s
+           tick segments and lets the user adjust the zoom window. -->
+      <div class="ss-trim-loupe" id="ss-trim-loupe" style="display:none">
+        <div class="ss-loupe-bar" id="ss-loupe-bar">
+          <div class="ss-loupe-ticks" id="ss-loupe-ticks"></div>
+          <div class="ss-trim-fill ss-loupe-fill" id="ss-loupe-fill"></div>
+          <div class="ss-trim-handle ss-trim-handle-start" id="ss-loupe-handle-start" data-h="start">
+            <div class="ss-trim-grip"></div>
+          </div>
+          <div class="ss-trim-handle ss-trim-handle-end" id="ss-loupe-handle-end" data-h="end">
+            <div class="ss-trim-grip"></div>
+          </div>
+          <div class="ss-trim-playhead" id="ss-loupe-playhead"></div>
+        </div>
+        <div class="ss-loupe-foot">
+          <span class="ss-loupe-label">LOUPE</span>
+          <button class="ss-loupe-zbtn" onclick="ssLoupeZoom(-1)" title="Wider zoom window">−</button>
+          <span class="ss-loupe-win" id="ss-loupe-win">10.0s</span>
+          <button class="ss-loupe-zbtn" onclick="ssLoupeZoom(1)" title="Narrower zoom window">+</button>
+          <span class="ss-loupe-range" id="ss-loupe-range"></span>
+        </div>
+      </div>
       <div class="ss-trim-bar" id="ss-trim-bar">
         <div class="ss-trim-track"></div>
+        <div class="ss-trim-ticks" id="ss-trim-ticks"></div>
         <div class="ss-trim-fill" id="ss-trim-fill"></div>
         <div class="ss-trim-handle ss-trim-handle-start" id="ss-trim-handle-start" data-h="start">
           <div class="ss-trim-grip"></div>
@@ -5363,6 +5446,28 @@ function ssRenderTrim() {
   var w = bar.clientWidth;
   if (!w) { setTimeout(ssRenderTrim, 30); return; }
   var d = _ssVidDur || 1;
+  // Minute marks across the full video. Skipped on very short files
+  // (under ~30s) since the bar would just get cluttered.
+  var ticksEl = document.getElementById('ss-trim-ticks');
+  if (ticksEl) {
+    var th = '';
+    if (d >= 30) {
+      // Pick a step that keeps labels readable: 1m for short files,
+      // bumping to 2/5/10m as the bar gets longer.
+      var stepMin = 1;
+      if (d > 600)  stepMin = 2;
+      if (d > 1800) stepMin = 5;
+      if (d > 3600) stepMin = 10;
+      var stepSec = stepMin * 60;
+      for (var tm = stepSec; tm < d; tm += stepSec) {
+        var xm = (tm / d) * w;
+        th += '<div class="ss-mtick" style="left:' + xm.toFixed(1) + 'px"></div>';
+        th += '<div class="ss-mlabel" style="left:' + xm.toFixed(1) + 'px">'
+            + (tm / 60) + 'm</div>';
+      }
+    }
+    ticksEl.innerHTML = th;
+  }
   var sx = (_ssStart / d) * w;
   var ex = (_ssEnd / d) * w;
   var fill = document.getElementById('ss-trim-fill');
@@ -5377,6 +5482,101 @@ function ssRenderTrim() {
   document.getElementById('ss-time-dur').textContent =
     '(' + Math.max(0, _ssEnd - _ssStart).toFixed(1) + 's)';
   ssUpdatePlayhead();
+  ssRenderLoupe();
+}
+
+// ── Loupe (zoomed sub-window) ───────────────────────────────────────────────
+// Visible only for tight selections on long videos. Maintains its own
+// window (centered on the selection) that the user can shrink/grow with
+// the +/− buttons, and renders 0.5s tick marks inside the visible span.
+var _ssLoupeWindow = 10;  // seconds visible in the loupe
+var _SS_LOUPE_MIN = 3;
+var _SS_LOUPE_MAX = 30;
+var _SS_LOUPE_STEP = 1;
+var _SS_LOUPE_SHOW_IF_SEL_UNDER = 10;  // seconds
+var _SS_LOUPE_SHOW_IF_VID_OVER = 60;   // seconds
+var _SS_TICK = 0.5;                    // tick spacing in seconds
+
+function _ssLoupeShouldShow() {
+  return (_ssEnd - _ssStart) < _SS_LOUPE_SHOW_IF_SEL_UNDER
+      && (_ssVidDur || 0) > _SS_LOUPE_SHOW_IF_VID_OVER;
+}
+
+function _ssLoupeBounds() {
+  // Window centered on the selection's midpoint, clamped to the video.
+  var win = Math.max(_SS_LOUPE_MIN, Math.min(_SS_LOUPE_MAX, _ssLoupeWindow));
+  win = Math.min(win, _ssVidDur || win);
+  var mid = (_ssStart + _ssEnd) / 2;
+  var s = mid - win / 2;
+  var e = s + win;
+  if (s < 0) { s = 0; e = win; }
+  if (e > _ssVidDur) { e = _ssVidDur; s = Math.max(0, e - win); }
+  return {start: s, end: e, win: e - s};
+}
+
+function ssRenderLoupe() {
+  var wrap = document.getElementById('ss-trim-loupe');
+  if (!wrap) return;
+  if (!_ssLoupeShouldShow()) {
+    wrap.style.display = 'none';
+    return;
+  }
+  wrap.style.display = '';
+  var bar = document.getElementById('ss-loupe-bar');
+  var w = bar.clientWidth;
+  if (!w) { setTimeout(ssRenderLoupe, 30); return; }
+
+  var b = _ssLoupeBounds();
+  // Ticks every 0.5s. First major tick at the smallest integer ≥ b.start.
+  var ticks = document.getElementById('ss-loupe-ticks');
+  var html = '';
+  var t = Math.ceil(b.start / _SS_TICK) * _SS_TICK;
+  while (t <= b.end + 0.0001) {
+    var x = ((t - b.start) / b.win) * w;
+    var isMajor = (Math.abs(t - Math.round(t)) < 0.001);
+    html += '<div class="ss-loupe-tick' + (isMajor ? ' major' : '')
+         + '" style="left:' + x.toFixed(2) + 'px"></div>';
+    if (isMajor && Math.round(t) % 1 === 0 && b.win <= 12) {
+      html += '<div class="ss-loupe-tlabel" style="left:' + x.toFixed(2)
+           + 'px">' + Math.round(t) + 's</div>';
+    }
+    t += _SS_TICK;
+  }
+  ticks.innerHTML = html;
+
+  // Fill + handles mapped from time-in-window to pixels.
+  var sx = ((_ssStart - b.start) / b.win) * w;
+  var ex = ((_ssEnd   - b.start) / b.win) * w;
+  sx = Math.max(0, Math.min(w, sx));
+  ex = Math.max(0, Math.min(w, ex));
+  var fill = document.getElementById('ss-loupe-fill');
+  var hs = document.getElementById('ss-loupe-handle-start');
+  var he = document.getElementById('ss-loupe-handle-end');
+  fill.style.left = sx + 'px';
+  fill.style.width = Math.max(0, ex - sx) + 'px';
+  hs.style.left = (sx - 7) + 'px';
+  he.style.left = (ex - 7) + 'px';
+
+  document.getElementById('ss-loupe-win').textContent = b.win.toFixed(1) + 's';
+  document.getElementById('ss-loupe-range').textContent =
+    b.start.toFixed(1) + 's – ' + b.end.toFixed(1) + 's';
+
+  // Playhead within the loupe.
+  var ph = document.getElementById('ss-loupe-playhead');
+  var vid = document.getElementById('cf-src-video');
+  if (_ssPlaying && vid && vid.currentTime >= b.start && vid.currentTime <= b.end) {
+    ph.classList.add('on');
+    ph.style.left = (((vid.currentTime - b.start) / b.win) * w).toFixed(2) + 'px';
+  } else {
+    ph.classList.remove('on');
+  }
+}
+
+function ssLoupeZoom(dir) {
+  // dir > 0 zooms in (narrower window), dir < 0 zooms out.
+  _ssLoupeWindow = Math.max(_SS_LOUPE_MIN,
+    Math.min(_SS_LOUPE_MAX, _ssLoupeWindow - dir * _SS_LOUPE_STEP));
+  ssRenderLoupe();
 }
 
 function ssUpdatePlayhead() {
@@ -5384,46 +5584,87 @@ function ssUpdatePlayhead() {
   if (!bar) return;
   var ph = document.getElementById('ss-trim-playhead');
   var vid = document.getElementById('cf-src-video');
-  if (!_ssPlaying) { ph.classList.remove('on'); return; }
+  if (!_ssPlaying) {
+    ph.classList.remove('on');
+    var ph2 = document.getElementById('ss-loupe-playhead');
+    if (ph2) ph2.classList.remove('on');
+    return;
+  }
   ph.classList.add('on');
   var w = bar.clientWidth;
   var d = _ssVidDur || 1;
   var x = (vid.currentTime / d) * w;
   ph.style.left = x + 'px';
+  // Loupe shares the playhead; let its renderer place its own indicator.
+  ssRenderLoupe();
 }
 
 function ssWireTrim() {
   var bar = document.getElementById('ss-trim-bar');
-  if (bar._wired) return;
-  bar._wired = true;
-  ['start', 'end'].forEach(function(which) {
-    var h = document.getElementById('ss-trim-handle-' + which);
-    h.addEventListener('mousedown', function(e) { _ssBegin(e, which); });
-    h.addEventListener('touchstart', function(e) { _ssBegin(e, which); }, {passive:false});
-  });
-  // Click on track to seek the preview video.
-  bar.addEventListener('click', function(e) {
-    if (e.target.closest('.ss-trim-handle')) return;
-    var rect = bar.getBoundingClientRect();
-    var x = e.clientX - rect.left;
-    var d = _ssVidDur || 1;
-    var t = Math.max(0, Math.min(d, (x / rect.width) * d));
-    var vid = document.getElementById('cf-src-video');
-    try { vid.currentTime = t; } catch (err) {}
-  });
+  if (!bar._wired) {
+    bar._wired = true;
+    ['start', 'end'].forEach(function(which) {
+      var h = document.getElementById('ss-trim-handle-' + which);
+      h.addEventListener('mousedown', function(e) { _ssBegin(e, which, 'main'); });
+      h.addEventListener('touchstart', function(e) { _ssBegin(e, which, 'main'); }, {passive:false});
+    });
+    bar.addEventListener('click', function(e) {
+      if (e.target.closest('.ss-trim-handle')) return;
+      var rect = bar.getBoundingClientRect();
+      var x = e.clientX - rect.left;
+      var d = _ssVidDur || 1;
+      var t = Math.max(0, Math.min(d, (x / rect.width) * d));
+      var vid = document.getElementById('cf-src-video');
+      try { vid.currentTime = t; } catch (err) {}
+    });
+  }
+  // Loupe handles + click-to-seek. Wiring lives here so it survives
+  // re-renders of the trim block.
+  var lbar = document.getElementById('ss-loupe-bar');
+  if (lbar && !lbar._wired) {
+    lbar._wired = true;
+    ['start', 'end'].forEach(function(which) {
+      var h = document.getElementById('ss-loupe-handle-' + which);
+      h.addEventListener('mousedown', function(e) { _ssBegin(e, which, 'loupe'); });
+      h.addEventListener('touchstart', function(e) { _ssBegin(e, which, 'loupe'); }, {passive:false});
+    });
+    lbar.addEventListener('click', function(e) {
+      if (e.target.closest('.ss-trim-handle')) return;
+      var rect = lbar.getBoundingClientRect();
+      var b = _ssLoupeBounds();
+      var x = e.clientX - rect.left;
+      var t = b.start + (x / rect.width) * b.win;
+      t = Math.max(0, Math.min(_ssVidDur || 0, t));
+      var vid = document.getElementById('cf-src-video');
+      try { vid.currentTime = t; } catch (err) {}
+    });
+  }
 }
 
-function _ssBegin(e, which) {
+function _ssBegin(e, which, source) {
   e.preventDefault();
-  var bar = document.getElementById('ss-trim-bar');
+  source = source || 'main';
+  var bar = document.getElementById(source === 'loupe' ? 'ss-loupe-bar' : 'ss-trim-bar');
   var rect = bar.getBoundingClientRect();
-  _ssDrag = {which: which, rect: rect};
+  // Loupe maps drag X through the current loupe window; main bar maps
+  // through the full video duration. _ssDrag.toTime() returns the time
+  // at the cursor for either source.
+  var bounds = (source === 'loupe') ? _ssLoupeBounds() : null;
+  _ssDrag = {
+    which: which, rect: rect, source: source,
+    toTime: function(cx) {
+      var x = Math.max(0, Math.min(rect.width, cx - rect.left));
+      if (source === 'loupe') {
+        return bounds.start + (x / rect.width) * bounds.win;
+      }
+      return (x / rect.width) * (_ssVidDur || 1);
+    },
+  };
   function onMove(ev) {
     ev.preventDefault();
     var cx = ev.touches ? ev.touches[0].clientX : ev.clientX;
-    var x = Math.max(0, Math.min(_ssDrag.rect.width, cx - _ssDrag.rect.left));
     var d = _ssVidDur || 1;
-    var t = (x / _ssDrag.rect.width) * d;
+    var t = _ssDrag.toTime(cx);
     var minGap = 0.2;
     if (_ssDrag.which === 'start') {
       _ssStart = Math.max(0, Math.min(_ssEnd - minGap, t));
