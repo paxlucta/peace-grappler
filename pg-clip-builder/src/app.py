@@ -620,41 +620,6 @@ header{padding:6px 20px 7px}
   }
 })();
 </script>
-<style>
-.nav-badge{
-  display:inline-flex;align-items:center;justify-content:center;
-  min-width:16px;height:16px;padding:0 4px;
-  background:#e53935;color:#fff;font-size:10px;font-weight:700;
-  border-radius:8px;margin-left:4px;vertical-align:middle;
-  animation:badge-pulse 2s ease-in-out infinite;
-}
-@keyframes badge-pulse{0%,100%{opacity:1}50%{opacity:.6}}
-</style>
-<script>
-(function(){
-  var analyzeLink = document.querySelector('nav a[href="/analyze"]');
-  if (!analyzeLink) return;
-  var badge = null;
-  function updateBadge() {
-    fetch('/api/unanalyzed-count').then(function(r){return r.json()}).then(function(d) {
-      var c = d.count || 0;
-      if (c > 0) {
-        if (!badge) {
-          badge = document.createElement('span');
-          badge.className = 'nav-badge';
-          analyzeLink.appendChild(badge);
-        }
-        badge.textContent = c;
-      } else if (badge) {
-        badge.remove();
-        badge = null;
-      }
-    }).catch(function(){});
-  }
-  updateBadge();
-  setInterval(updateBadge, 15000);
-})();
-</script>
 """
 
 
@@ -875,18 +840,6 @@ def check_for_updates():
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)})
-
-
-@app.route("/api/unanalyzed-count")
-def unanalyzed_count():
-    """Return count of videos that haven't been analyzed yet."""
-    from db import get_all_videos, get_analyzed_tags
-    try:
-        videos = get_all_videos()
-        count = sum(1 for v in videos if not get_analyzed_tags(v["id"]) and v["duration"] > 0)
-        return jsonify({"count": count})
-    except Exception:
-        return jsonify({"count": 0})
 
 
 @app.after_request

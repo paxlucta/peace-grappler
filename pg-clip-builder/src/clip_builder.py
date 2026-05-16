@@ -523,6 +523,17 @@ def _parse_scene_free_crops(raw):
         return None
 
 
+_VIDEO_MIME_BY_EXT = {
+    ".mp4": "video/mp4",
+    ".m4v": "video/mp4",
+    ".mov": "video/quicktime",
+    ".webm": "video/webm",
+    ".ogv": "video/ogg",
+    ".mkv": "video/x-matroska",
+    ".avi": "video/x-msvideo",
+}
+
+
 @clip_builder_bp.route("/api/source-video/<int:scene_id>")
 def api_source_video(scene_id):
     """Stream the underlying source video for a scene. Used by the scene
@@ -534,8 +545,9 @@ def api_source_video(scene_id):
     path = scene["video_path"]
     if not path or not os.path.exists(path):
         return "", 404
-    return send_file(os.path.abspath(path), mimetype="video/mp4",
-                     conditional=True)
+    ext = os.path.splitext(path)[1].lower()
+    mime = _VIDEO_MIME_BY_EXT.get(ext, "video/mp4")
+    return send_file(os.path.abspath(path), mimetype=mime, conditional=True)
 
 
 @clip_builder_bp.route("/api/scene/<int:scene_id>/trim", methods=["POST"])
@@ -1631,6 +1643,15 @@ main.bb-cols{
   background:rgba(0,0,0,.75);color:#fff;font-size:10px;font-weight:600;
   padding:2px 5px;border-radius:3px;
 }
+/* Crop flag — uses the same size + glyph as the layer-sidebar
+   .th-btn.crop-btn so the two surfaces share one visual language. */
+.clip-card .crop-flag{
+  position:absolute;top:7px;right:38px;z-index:2;
+  width:18px;height:18px;border-radius:3px;
+  border:1px solid #2a2a2a;background:#181818;color:#90caf9;
+  display:inline-flex;align-items:center;justify-content:center;
+}
+.clip-card .crop-flag svg{width:12px;height:12px;display:block}
 /* AI provider icon — bottom-right of the THUMBNAIL (not the card) in
    a 26px dark circle. Same dimensions + position as /rate, accounting
    for the new vote-row below the thumbnail (~46px tall). */
@@ -1846,6 +1867,22 @@ footer{
   position:absolute;left:0;top:0;width:100%;height:100%;
   object-fit:cover;opacity:.5;border-radius:4px;
 }
+/* Crop overlay — draws the active crop region(s) over a thumbnail so a
+   glance at the grid or timeline tells you which scenes/clips have a
+   crop applied (standard strip = single vertical rect; free mode = each
+   source rectangle). Used on .clip-card and .vblock. */
+.crop-overlay{
+  position:absolute;inset:0;width:100%;height:100%;
+  pointer-events:none;z-index:2;
+}
+.crop-overlay rect{
+  fill:rgba(33,150,243,.18);
+  stroke:rgba(33,150,243,.95);
+  stroke-width:1.5;
+  vector-effect:non-scaling-stroke;
+}
+.clip-card .crop-overlay{border-radius:8px 8px 0 0}
+.vblock .crop-overlay{border-radius:4px}
 .vblock .blk-label{
   position:absolute;top:4px;right:4px;z-index:1;
   background:rgba(0,0,0,.7);padding:1px 6px;border-radius:3px;
@@ -2100,16 +2137,26 @@ footer{
 
 
 .cf-toolbar{
-  display:flex;align-items:center;gap:6px;
-  padding:6px 8px;background:#111;border-radius:6px;margin-bottom:10px;
+  display:flex;align-items:flex-end;gap:18px;
+  padding:8px 12px;background:#111;border-radius:6px;margin-bottom:10px;
+  justify-content:center;
 }
+.cf-toolbar .cf-group{display:flex;flex-direction:column;gap:4px;align-items:center}
+.cf-toolbar .cf-group-label{
+  font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;
+  color:#777;
+}
+.cf-toolbar .cf-group-row{display:flex;gap:6px;align-items:center}
+/* Equal-width buttons. min-width keeps short labels (Add, Save) from
+   reading narrower than the long ones (Remove All, Backwards) sitting
+   beside them. */
 .cf-toolbar .cf-btn{
   background:#1a1a1a;border:1px solid #333;color:#ddd;border-radius:4px;
-  padding:4px 10px;font-size:13px;line-height:1;cursor:pointer;
+  padding:6px 10px;font-size:12px;line-height:1;cursor:pointer;
+  min-width:96px;text-align:center;height:30px;
 }
 .cf-toolbar .cf-btn:hover{border-color:#2196f3;color:#fff}
-.cf-toolbar .cf-sep{width:1px;height:18px;background:#2a2a2a;margin:0 4px}
-.cf-toolbar .cf-status{font-size:11px;color:#888;margin-left:8px;flex:1;text-align:right}
+.cf-toolbar .cf-status{display:none}
 
 /* Flex (not grid) so each pane's width is derived from aspect-ratio *
  * height, not forced to share an equal column width. Without this, a   *
@@ -2135,8 +2182,12 @@ footer{
 .cf-src-wrap video{
   position:absolute;inset:0;
   width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;
-  background:#000;
 }
+/* Video sits on top of the thumbnail in DOM order. Keep its background
+   transparent so the static thumbnail behind shows through until the
+   first decoded frame replaces it visually. */
+.cf-src-wrap video{background:transparent}
+.cf-src-wrap img{background:#000}
 .cf-dst-wrap canvas{
   position:absolute;inset:0;width:100%;height:100%;display:block;
   background:#000;pointer-events:none;
@@ -2688,22 +2739,36 @@ footer{
          right, with a toolbar above them. -->
     <div id="crop-mode-free" class="crop-mode-pane" style="display:none">
       <div class="cf-toolbar">
-        <button type="button" class="cf-btn" onclick="cfAddRect()" title="Add rectangle">+</button>
-        <button type="button" class="cf-btn" onclick="cfDeleteSelected()" title="Delete selected (Del)">×</button>
-        <span class="cf-sep"></span>
-        <button type="button" class="cf-btn" onclick="cfBumpZ(1)" title="Bring forward">↑</button>
-        <button type="button" class="cf-btn" onclick="cfBumpZ(-1)" title="Send back">↓</button>
-        <span class="cf-sep"></span>
-        <button type="button" class="cf-btn" onclick="cfOpenPresetLoad()">Load…</button>
-        <button type="button" class="cf-btn" onclick="cfSavePreset()">Save preset…</button>
-        <span class="cf-status" id="cf-status"></span>
+        <div class="cf-group">
+          <div class="cf-group-label">Crop</div>
+          <div class="cf-group-row">
+            <button type="button" class="cf-btn" onclick="cfAddRect()" title="Add a new 9:16 crop region">Add</button>
+            <button type="button" class="cf-btn" onclick="cfDeleteSelected()" title="Delete the selected crop (Del)">Remove</button>
+            <button type="button" class="cf-btn" onclick="clearCrop()" title="Remove every crop on this scene">Remove All</button>
+          </div>
+        </div>
+        <div class="cf-group">
+          <div class="cf-group-label">Layer</div>
+          <div class="cf-group-row">
+            <button type="button" class="cf-btn" onclick="cfBumpZ(1)" title="Move the selected crop forward in z-order">Forward</button>
+            <button type="button" class="cf-btn" onclick="cfBumpZ(-1)" title="Move the selected crop backwards in z-order">Backwards</button>
+          </div>
+        </div>
+        <div class="cf-group">
+          <div class="cf-group-label">Preset</div>
+          <div class="cf-group-row">
+            <button type="button" class="cf-btn" onclick="cfOpenPresetLoad()">Load</button>
+            <button type="button" class="cf-btn" onclick="cfSavePreset()">Save</button>
+          </div>
+        </div>
+        <span class="cf-status" id="cf-status" hidden></span>
       </div>
       <div class="cf-stage">
         <div class="cf-pane">
           <div class="cf-pane-label">Source</div>
           <div class="cf-src-wrap" id="cf-src-wrap">
             <img id="cf-src-img" alt="">
-            <video id="cf-src-video" playsinline muted preload="metadata" style="display:none"></video>
+            <video id="cf-src-video" playsinline muted preload="auto" style="display:none"></video>
             <div class="cf-rects" id="cf-src-rects"></div>
           </div>
         </div>
@@ -2746,8 +2811,7 @@ footer{
       </div>
     </div>
 
-    <div style="margin-top:14px;display:flex;gap:8px;justify-content:center;align-items:center">
-      <button onclick="clearCrop()">Remove Crop</button>
+    <div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end;align-items:center">
       <button onclick="closeCropModal()">Cancel</button>
       <button onclick="saveCrop()" class="primary" style="background:#2196f3;border-color:#2196f3;color:#fff">Save</button>
     </div>
@@ -3421,7 +3485,14 @@ function renderVideoTrack() {
           + '</span>';
       }
 
+      // Resolve the effective crop for this clip: per-clip override
+      // first, then the wide layer default for wide source clips.
+      var effCrop = (typeof vi.crop_x_frac === 'number')
+        ? vi.crop_x_frac
+        : (vi.clip.wide ? trackSettings[t].default_crop_x_frac : null);
+      var cropSvg = cropOverlayHTML(effCrop, vi.free_crops, null);
       blk.innerHTML = (thumbUrl ? '<img class="vblock-thumb" src="' + thumbUrl + '"/>' : '')
+        + cropSvg
         + '<span class="blk-label">' + vi.duration.toFixed(1) + 's</span>'
         + (vi.clip.wide ? '<span class="vblock-wide"></span>' : '')
         + '<div class="vblk-icons">' + icons + transBadges + '</div>';
@@ -4494,8 +4565,20 @@ function _cfActivateVideoPreview() {
   var img = document.getElementById('cf-src-img');
   var vid = document.getElementById('cf-src-video');
   var canvas = document.getElementById('cf-dst-canvas');
-  if (img) img.style.display = 'none';
-  if (vid) vid.style.display = '';
+  // Keep the static thumbnail visible behind the video until the video
+  // has actually decoded a frame; preload="auto" pulls enough bytes to
+  // surface one but it isn't instant. 'loadeddata' fires when at least
+  // the current frame is available, at which point the video covers the
+  // thumbnail naturally (later DOM order = on top).
+  if (vid) {
+    vid.style.display = '';
+    var onReady = function() {
+      if (img) img.style.display = 'none';
+      vid.removeEventListener('loadeddata', onReady);
+    };
+    vid.addEventListener('loadeddata', onReady);
+    if (vid.readyState >= 2) onReady();
+  }
   if (canvas) canvas.style.display = '';
   // Re-render rects so the dst-pane per-rect background-image is dropped
   // (the canvas now owns the visual fill on the output side).
@@ -4524,18 +4607,27 @@ function _cfDeactivateVideoPreview() {
 
 function _cfDrawCanvas() {
   var canvas = document.getElementById('cf-dst-canvas');
+  if (!canvas) return;
+  // Prefer the live video when it has frames; fall back to the static
+  // thumbnail so the output preview shows something even before
+  // /api/source-video/<id> finishes loading (or if it can't load at all).
   var video = document.getElementById('cf-src-video');
-  if (!canvas || !video) return;
-  var vw = video.videoWidth, vh = video.videoHeight;
-  if (!vw || !vh) return;
+  var img = document.getElementById('cf-src-img');
+  var src = null, vw = 0, vh = 0;
+  if (video && video.videoWidth && video.videoHeight && video.readyState >= 2) {
+    src = video; vw = video.videoWidth; vh = video.videoHeight;
+  } else if (img && img.naturalWidth && img.naturalHeight && img.complete) {
+    src = img; vw = img.naturalWidth; vh = img.naturalHeight;
+  }
+  if (!src) return;
   // First frame with real video dimensions: lock the source pane to the
   // actual video aspect ratio (overrides the placeholder 16/9 from the
   // thumbnail load) so the left preview matches the playing video.
-  if (!_cfVideoAspectLocked) {
+  if (src === video && !_cfVideoAspectLocked) {
     _cfVideoAspectLocked = true;
     _cfSrcAspect = vw / vh;
-    var wrap = document.getElementById('cf-src-wrap');
-    if (wrap) wrap.style.aspectRatio = vw + '/' + vh;
+    var sw1 = document.getElementById('cf-src-wrap');
+    if (sw1) sw1.style.aspectRatio = vw + '/' + vh;
     _cfLayout(); _cfRender();
   }
   var wrap = document.getElementById('cf-dst-wrap');
@@ -4554,7 +4646,7 @@ function _cfDrawCanvas() {
     var sW = Math.max(1, r.sw * vw), sH = Math.max(1, r.sh * vh);
     var dx = r.dx * w, dy = r.dy * h;
     var dW = Math.max(1, r.dw * w), dH = Math.max(1, r.dh * h);
-    try { ctx.drawImage(video, sx, sy, sW, sH, dx, dy, dW, dH); } catch(e){}
+    try { ctx.drawImage(src, sx, sy, sW, sH, dx, dy, dW, dH); } catch(e){}
   }
 }
 
@@ -5047,6 +5139,54 @@ function setupTracks() {
   syncTl();
 }
 
+// SVG overlay outlining the crop region(s) on a thumbnail. Returns ''
+// when no crop is set so callers can blindly concat the result.
+// `freeCrops` is the saved-rect array, `cropXFrac` is the legacy single
+// strip, and `srcAspect` is the source video's pixel aspect (W/H,
+// default 16/9) — used to figure out the strip width for standard mode.
+function cropOverlayHTML(cropXFrac, freeCrops, srcAspect) {
+  if (Array.isArray(freeCrops) && freeCrops.length) {
+    var parts = freeCrops.map(function(r){
+      var s = r && r.src;
+      if (!s) return '';
+      var x = (s.x_frac || 0) * 100;
+      var y = (s.y_frac || 0) * 100;
+      var w = (s.w_frac || 0) * 100;
+      var h = (s.h_frac || 0) * 100;
+      return '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1)
+           + '" width="' + w.toFixed(1) + '" height="' + h.toFixed(1) + '"/>';
+    }).join('');
+    if (!parts) return '';
+    return '<svg class="crop-overlay" preserveAspectRatio="none" viewBox="0 0 100 100">'
+         + parts + '</svg>';
+  }
+  if (typeof cropXFrac === 'number') {
+    var asp = srcAspect || (16/9);
+    // 9:16 strip: strip_w_frac = (9/16) / srcAspect, clamped to [0,1].
+    var sw = Math.min(1, Math.max(0.02, (9/16) / asp));
+    var sx = Math.max(0, Math.min(1, cropXFrac)) * (1 - sw);
+    return '<svg class="crop-overlay" preserveAspectRatio="none" viewBox="0 0 100 100">'
+         + '<rect x="' + (sx*100).toFixed(1) + '" y="0" '
+         + 'width="' + (sw*100).toFixed(1) + '" height="100"/>'
+         + '</svg>';
+  }
+  return '';
+}
+
+// Same stroke-based crop glyph as the timeline layer sidebar's
+// .th-btn.crop-btn (see renderTrackHeaders) so both surfaces match.
+var CROP_FLAG_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'
+  + '<path d="M6 2v14a2 2 0 0 0 2 2h14"/>'
+  + '<path d="M2 6h14a2 2 0 0 1 2 2v14"/></svg>';
+function cropFlagHTML(c) {
+  // Small badge that flags a scene as having a custom crop saved on it
+  // (Builder gear → Scene Settings). Returns '' when no crop is set.
+  var hasCrop = (Array.isArray(c.free_crops) && c.free_crops.length)
+             || (typeof c.crop_x_frac === 'number');
+  if (!hasCrop) return '';
+  return '<span class="crop-flag" title="Custom crop applied">' + CROP_FLAG_SVG + '</span>';
+}
+
 function cardHTML(c) {
   var clipIds = getTlClipIds();
   var cls = 'clip-card';
@@ -5089,6 +5229,7 @@ function cardHTML(c) {
     + '<span class="wide-badge" title="Widescreen source">'
     +   '<svg viewBox="0 0 16 9"><rect x="0.75" y="0.75" width="14.5" height="7.5" rx="1.5"/></svg>'
     + '</span>'
+    + cropFlagHTML(c)
     + '<span class="dur">' + c.duration + 's</span>'
     + aiBadge
     + ((c.ignored || c.excluded) ? '<span class="excluded-badge">HIDDEN</span>' : '')
@@ -5182,7 +5323,14 @@ function openSceneSettings(sceneId) {
     }
   };
   vid.onended = function() { _ssPlaying = false; ssUpdatePlayIcon(); };
+  vid.onerror = function() {
+    var err = vid.error;
+    var code = err ? err.code : null;
+    console.warn('[scene-settings] source video failed to load',
+                 {sceneId: sceneId, code: code, src: vid.currentSrc || vid.src});
+  };
   vid.src = '/api/source-video/' + sceneId;
+  vid.load();
   // Live-preview the source video in the source pane and a composite of
   // every rect in the dst pane. The RAF loop no-ops until videoWidth is
   // available, so it's safe to activate before metadata arrives.

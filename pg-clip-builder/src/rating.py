@@ -77,8 +77,24 @@ def api_scenes():
             "speech_analyzer_provider": s.get("speech_analyzer_provider") or "",
             "speech_analyzer_model":    s.get("speech_analyzer_model")    or "",
             "has_transcript": s["id"] in transcript_scene_ids,
+            # Per-scene crop overrides (Builder gear → Scene Settings) —
+            # surfaced so the /rate scene card can overlay the crop region
+            # on its thumbnail.
+            "crop_x_frac": s.get("crop_x_frac"),
+            "free_crops": _parse_scene_free_crops(s.get("free_crops")),
         })
     return jsonify(result)
+
+
+def _parse_scene_free_crops(raw):
+    if not raw:
+        return None
+    try:
+        import json as _json
+        v = _json.loads(raw)
+        return v if isinstance(v, list) and v else None
+    except Exception:
+        return None
 
 
 @rating_bp.route("/rate/api/grade", methods=["POST"])
@@ -472,6 +488,16 @@ nav a.active{color:#e53935;border-color:#e53935}
   width:100%;aspect-ratio:9/16;object-fit:cover;display:block;background:#111;
   cursor:pointer;
 }
+/* Crop flag — a small badge that sits to the left of the duration pill
+   on scenes that have a per-scene crop saved (Builder gear → Scene
+   Settings). Just an indicator; no region preview on the thumbnail. */
+.scene-card .crop-flag{
+  position:absolute;top:7px;right:38px;z-index:2;
+  width:18px;height:18px;border-radius:3px;
+  border:1px solid #2a2a2a;background:#181818;color:#90caf9;
+  display:inline-flex;align-items:center;justify-content:center;
+}
+.scene-card .crop-flag svg{width:12px;height:12px;display:block}
 .scene-card .play-overlay{
   position:absolute;top:0;left:0;right:0;bottom:56px;
   display:flex;align-items:center;justify-content:center;
@@ -1244,6 +1270,20 @@ function getFiltered() {
   return base;
 }
 
+// Small crop icon sitting just to the left of the duration pill on
+// scenes whose per-scene crop has been customized via the gear popup.
+// Stroke-based crop glyph — matches /builder's timeline layer sidebar
+// .th-btn.crop-btn so the indicator reads identically across surfaces.
+var CROP_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'
+  + '<path d="M6 2v14a2 2 0 0 0 2 2h14"/>'
+  + '<path d="M2 6h14a2 2 0 0 1 2 2v14"/></svg>';
+function cropFlagHTML(scene) {
+  var hasCrop = (Array.isArray(scene.free_crops) && scene.free_crops.length)
+             || (typeof scene.crop_x_frac === 'number');
+  if (!hasCrop) return '';
+  return '<span class="crop-flag" title="Custom crop applied">' + CROP_ICON_SVG + '</span>';
+}
+
 function renderGrid() {
   var filtered = getFiltered();
   document.getElementById('scene-count').textContent = filtered.length + ' scene' + (filtered.length !== 1 ? 's' : '');
@@ -1306,6 +1346,7 @@ function renderGrid() {
       + '<span class="wide-badge" title="Widescreen source">'
       +   '<svg viewBox="0 0 16 9"><rect x="0.75" y="0.75" width="14.5" height="7.5" rx="1.5"/></svg>'
       + '</span>'
+      + cropFlagHTML(s)
       + '<span class="dur-badge">' + s.duration + 's</span>'
       + aiBadge
       + badge

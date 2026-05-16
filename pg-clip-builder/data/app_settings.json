@@ -4,6 +4,11 @@
   "whisper_language": "",
   "whisper_translate": true,
   "ai": {
+    "tasks": {
+      "analysis": "minimax",
+      "captions": "claude",
+      "wizard": "claude"
+    },
     "providers": {
       "claude": {
         "bin": "claude",
@@ -21,11 +26,6 @@
         "bin": "",
         "model": "MiniMax-M1"
       }
-    },
-    "tasks": {
-      "analysis": "minimax",
-      "captions": "claude",
-      "wizard": "claude"
     }
   },
   "transcribe_provider": "gemini",

@@ -838,6 +838,26 @@ def scan_videos():
 
     videos = get_all_videos()
     transcript_video_ids = db.get_video_ids_with_transcripts()
+    # Per-video scene + distinct-tag counts powered by two grouped queries
+    # (one trip each) so the table cells can render without N round trips.
+    _conn = db.get_db()
+    try:
+        scene_count_by_video = {
+            r["video_id"]: r["c"] for r in _conn.execute(
+                "SELECT video_id, COUNT(*) AS c FROM scenes "
+                "WHERE ignored=0 GROUP BY video_id"
+            ).fetchall()
+        }
+        tag_count_by_video = {
+            r["video_id"]: r["c"] for r in _conn.execute(
+                "SELECT s.video_id AS video_id, "
+                "       COUNT(DISTINCT st.tag) AS c "
+                "FROM scenes s JOIN scene_tags st ON st.scene_id = s.id "
+                "WHERE s.ignored = 0 GROUP BY s.video_id"
+            ).fetchall()
+        }
+    finally:
+        _conn.close()
     result = []
     for v in videos:
         analyzed_tags = get_analyzed_tags(v["id"])
@@ -845,6 +865,8 @@ def scan_videos():
         result.append({
             "id": v["id"],
             "filename": v["filename"],
+            "scene_count": scene_count_by_video.get(v["id"], 0),
+            "tag_count": tag_count_by_video.get(v["id"], 0),
             "path": v["path"],
             "duration": round(v["duration"], 1),
             "width": v["width"],
@@ -2034,16 +2056,11 @@ td{font-size:13px}
   background:linear-gradient(135deg,#e53935,#c62828);border:1px solid #e53935;color:#fff;
 }
 
-/* -- Per-row transcript button (lives in its own column now) -- */
-.ra-tx{
-  padding:4px 8px;background:#1a1a1a;border:1px solid #333;color:#aaa;
-  border-radius:4px;cursor:pointer;font-size:13px;line-height:1;
-  display:inline-flex;align-items:center;
-}
+/* -- Per-row transcript button (now lives in the Actions column) -- */
+.ra-tx{color:#aaa}
 .ra-tx:hover:not(:disabled){
   color:#1976d2;border-color:#1976d2;background:#0d1f30;
 }
-.ra-tx svg{width:14px;height:14px;fill:currentColor}
 /* Em-dash placeholder shown in the Transcript column when a video has
  * none yet — keeps the column visually clean instead of running an
  * "(no transcript)" tooltip across every row. */
@@ -2052,23 +2069,39 @@ td{font-size:13px}
 /* -- Per-row Analyze + Delete buttons (consolidated from the old
  *    Visual / Audio / cog trio). The Analyze button opens the model
  *    picker modal; Delete removes the file + dependent rows. */
+/* Unified action button — every button in .row-actions (transcript,
+   favorite, analyze, delete) uses the same 28×28 square so the row
+   reads as a consistent strip. Color tints come from per-variant
+   classes (.ra-tx, .ra-fav, .ra-analyze, .ra-del). */
+.row-actions{justify-content:flex-end}
+.row-actions .ra-act{
+  width:28px;height:28px;padding:0;
+  background:#1a1a1a;border:1px solid #333;color:#aaa;
+  border-radius:4px;cursor:pointer;line-height:1;
+  display:inline-flex;align-items:center;justify-content:center;
+}
+.row-actions .ra-act:hover:not(:disabled){
+  background:#252525;color:#fff;border-color:#555;
+}
+.row-actions .ra-act svg{width:16px;height:16px;fill:currentColor}
+/* Heart-as-action: override the default .pg-heart sizing/colors so it
+   fits the same 28×28 cell as its siblings. The .on (favorited) state
+   keeps its filled red look. */
+.row-actions .ra-fav{color:#555}
+.row-actions .ra-fav:hover:not(:disabled){color:#ef9a9a;border-color:#5a3030}
+.row-actions .ra-fav.on{color:#ef5350;border-color:#5a3030}
+.row-actions .ra-fav.on:hover:not(:disabled){color:#e53935}
 .row-actions .ra-analyze{
   background:linear-gradient(135deg,#1976d2,#1565c0);
-  border-color:#1976d2;color:#fff;font-weight:600;
+  border-color:#1976d2;color:#fff;
 }
 .row-actions .ra-analyze:hover:not(:disabled){
   background:linear-gradient(135deg,#1e88e5,#1976d2);
-  border-color:#42a5f5;
-}
-.row-actions .ra-del{
-  padding:4px 8px;background:#1a1a1a;border:1px solid #333;color:#aaa;
-  border-radius:4px;cursor:pointer;line-height:1;
-  display:inline-flex;align-items:center;justify-content:center;
+  border-color:#42a5f5;color:#fff;
 }
 .row-actions .ra-del:hover:not(:disabled){
   color:#fff;background:#c62828;border-color:#c62828;
 }
-.row-actions .ra-del svg{width:14px;height:14px;fill:currentColor}
 
 /* -- Video transcript modal (Analyze page) -- */
 .vtx-overlay{
@@ -2575,9 +2608,11 @@ td{font-size:13px}
       <th>Filename</th>
       <th>Duration</th>
       <th>Size</th>
-      <th>Status</th>
-      <th>Transcript</th>
-      <th>Action</th>
+      <th style="text-align:center">Scenes</th>
+      <th style="text-align:center">Tags</th>
+      <th style="text-align:center">Video</th>
+      <th style="text-align:center">Audio</th>
+      <th style="text-align:right">Actions</th>
     </tr>
   </thead>
   <tbody id="video-list"></tbody>
@@ -3037,6 +3072,20 @@ function escImp(s){
     .replace(/"/g,'&quot;');
 }
 
+// User-facing filename: strip the extension and swap underscores for
+// spaces. Source filenames are URL-safe (underscores from download/
+// import) but those underscores read as noise on the Input Videos table.
+// Always HTML-escape the result since it goes straight into innerHTML.
+function friendlyFileName(name) {
+  if (!name) return '';
+  var s = String(name);
+  var dot = s.lastIndexOf('.');
+  if (dot > 0) s = s.slice(0, dot);
+  s = s.replace(/_/g, ' ');
+  return escImp(s);
+}
+window.friendlyFileName = friendlyFileName;
+
 function fmtDur(secs){
   secs = Math.round(secs || 0);
   if (!secs) return '';
@@ -3345,7 +3394,7 @@ function renderList() {
         + 'to add files from your social channels, a URL, or disk.'
       : 'No videos in this folder. Drag a file row into a folder to '
         + 'add it.';
-    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:36px 0;color:#666">'
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:36px 0;color:#666">'
       + msg + '</td></tr>';
     _refreshSelectAll();
     _updateBulkDeleteBtn();
@@ -3357,50 +3406,78 @@ function renderList() {
     if (v.wide) dims += ' (wide)';
     var disabled = analyzing ? ' disabled' : '';
     var rowChecked = _selectedVideoIds.has(v.id) ? ' checked' : '';
-    // Transcript icon is now its own column; only rendered when the
-    // video actually has a saved transcript so a glance at the column
-    // tells the user which files are searchable / cuttable.
-    var txCell = v.has_transcript
-      ? '<button class="ra-tx" onclick="openVideoTranscript(' + v.id + ')"'
+    // Action cell: analyze (sparkle), transcript (when present), delete.
+    // Transcript only renders for files that actually have one — same
+    // rule as the old standalone column. All three buttons are the
+    // same size via .row-actions .ra-act so the row reads as a unit.
+    var transcriptBtn = v.has_transcript
+      ? '<button class="ra-act ra-tx" onclick="openVideoTranscript(' + v.id + ')"'
         + ' title="View full transcript (click to read; select + Cut Scene to extract a moment)">'
         + '<svg viewBox="0 0 24 24"><path d="M4 4h16v2H4V4zm0 4h16v2H4V8zm0 4h10v2H4v-2zm0 4h16v2H4v-2zm0 4h10v2H4v-2z"/></svg>'
         + '</button>'
-      : '<span class="ra-empty" title="No transcript yet — run audio analysis to generate one.">—</span>';
-    // Consolidated action cell: a single ✨ Analyze button opens the
-    // popover (model picker for visual + audio + Run buttons) — same UX
-    // as the old ⚙ cog. The trash icon is the only sibling and removes
-    // the file + scenes after confirm.
+      : '';
+    var favCls = bbFileFavorites.has(v.filename) ? ' on' : '';
+    var heartBtn = '<button class="ra-act ra-fav pg-heart' + favCls + '"'
+      + ' data-fn="' + escImp(v.filename) + '"'
+      + ' onclick="event.stopPropagation();bbToggleFileFavorite(\'' + escImp(v.filename).replace(/'/g,"\\'") + '\')"'
+      + ' title="Toggle favorite">' + PG_HEART_SVG + '</button>';
     var actionCell =
         '<div class="row-actions">'
-      +   '<button class="ra-btn ra-analyze"' + disabled
+      +   transcriptBtn
+      +   heartBtn
+      +   '<button class="ra-act ra-analyze"' + disabled
       +   ' onclick="openAnalyzeOpts(event,' + v.id + ',\'both\')"'
-      +   ' title="Pick a model and run Visual or Audio analysis">✨ Analyze</button>'
-      +   '<button class="ra-del"' + disabled
+      +   ' title="Pick a model and run Visual or Audio analysis">'
+      +   '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.4 5.6L19 9l-5.6 1.4L12 16l-1.4-5.6L5 9l5.6-1.4L12 2zm6 12l.8 3.2L22 18l-3.2.8L18 22l-.8-3.2L14 18l3.2-.8L18 14z"/></svg>'
+      +   '</button>'
+      +   '<button class="ra-act ra-del"' + disabled
       +   ' onclick="deleteVideo(' + v.id + ',\'' + escImp(v.filename) + '\')"'
       +   ' title="Delete this file and all its scenes">'
       +   '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>'
       +   '</button>'
       + '</div>';
-    var favCls = bbFileFavorites.has(v.filename) ? ' on' : '';
-    var heartBtn = '<button class="pg-heart' + favCls + '"'
-      + ' data-fn="' + escImp(v.filename) + '"'
-      + ' onclick="event.stopPropagation();bbToggleFileFavorite(\'' + escImp(v.filename).replace(/'/g,"\\'") + '\')"'
-      + ' title="Toggle favorite">' + PG_HEART_SVG + '</button>';
+    // Per-mode provider cells: render the AI badge if the file has been
+    // analyzed in that mode, otherwise empty. Falls back to the legacy
+    // single-provider columns when the per-mode fields aren't populated.
+    var visualDone = !!v.visual_analyzed_at;
+    var speechDone = !!(v.speech_analyzed_at || v.has_transcript);
+    var visualProv = v.visual_analyzer_provider || v.analyzer_provider || '';
+    var visualModel = v.visual_analyzer_model || v.analyzer_model || '';
+    var speechProv = v.speech_analyzer_provider || v.analyzer_provider || '';
+    var speechModel = v.speech_analyzer_model || v.analyzer_model || '';
+    function _provCell(done, prov, modelStr) {
+      if (!done || !prov || !window.pgAiBadge) {
+        return '<td style="text-align:center;color:#555">—</td>';
+      }
+      var title = 'Analyzed by ' + prov + (modelStr ? ' · ' + modelStr : '');
+      return '<td style="text-align:center">'
+           + window.pgAiBadge(prov, {size: 18, model: modelStr, title: title})
+           + '</td>';
+    }
+    var videoCell = _provCell(visualDone, visualProv, visualModel);
+    var audioCell = _provCell(speechDone, speechProv, speechModel);
+    // After-analysis counts: render the number when the file has scenes
+    // or tags, an em-dash otherwise so unanalyzed rows don't show "0".
+    var sceneCell = (v.scene_count > 0)
+      ? ('<td style="text-align:center">' + v.scene_count + '</td>')
+      : '<td style="text-align:center;color:#555">—</td>';
+    var tagCell = (v.tag_count > 0)
+      ? ('<td style="text-align:center">' + v.tag_count + '</td>')
+      : '<td style="text-align:center;color:#555">—</td>';
     tbody.innerHTML += '<tr draggable="true" data-fn="' + escImp(v.filename) + '">'
       + '<td style="text-align:center">'
       +   '<input type="checkbox" class="row-sel" data-vid="' + v.id + '"'
       +     rowChecked + ' onchange="onRowSelectToggle(this)"'
       +     ' style="accent-color:#e53935;cursor:pointer">'
       + '</td>'
-      + '<td>' + heartBtn + v.filename + '</td>'
+      + '<td>' + friendlyFileName(v.filename) + '</td>'
       + '<td>' + v.duration + 's</td>'
       + '<td>' + dims + '</td>'
-      + '<td><div class="status-stack">'
-      +     _modeStatus(v, 'visual')
-      +     _modeStatus(v, 'speech')
-      + '</div></td>'
-      + '<td>' + txCell + '</td>'
-      + '<td>' + actionCell + '</td>'
+      + sceneCell
+      + tagCell
+      + videoCell
+      + audioCell
+      + '<td style="text-align:right">' + actionCell + '</td>'
       + '</tr>';
   }
   // Prune stale entries (videos that no longer exist after a scan/delete)
