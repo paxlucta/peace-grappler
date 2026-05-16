@@ -286,6 +286,34 @@ def api_create():
                     "kind": "user", "files": [], "scope": scope})
 
 
+@folders_bp.route("/api/folders/reorder", methods=["POST"])
+def api_reorder():
+    """Reorder user folders within a scope. Body: ``{order: [fid, ...]}``.
+    Smart folders are not in the list (they have a fixed catalog order);
+    any user folder ids missing from *order* are appended to preserve
+    them across racy reorder calls."""
+    body = request.get_json(force=True) or {}
+    scope = _resolve_scope_from(body)
+    order = body.get("order") or []
+    if not isinstance(order, list):
+        return jsonify({"error": "order must be a list"}), 400
+    with _lock:
+        data = _read(scope)
+        by_id = {f.get("id"): f for f in data["folders"] if f.get("id")}
+        new_list = []
+        seen = set()
+        for fid in order:
+            if fid in by_id and fid not in seen:
+                new_list.append(by_id[fid])
+                seen.add(fid)
+        for fid, f in by_id.items():
+            if fid not in seen:
+                new_list.append(f)
+        data["folders"] = new_list
+        _write_scope(scope, data)
+    return jsonify({"ok": True})
+
+
 @folders_bp.route("/api/folders/<fid>/rename", methods=["POST"])
 def api_rename(fid):
     if fid in SMART_IDS:

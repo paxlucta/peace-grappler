@@ -1502,12 +1502,17 @@ main.bb-cols{
 
 /* Folders column extras */
 .bb-col-head .bb-col-head-action{
-  background:transparent;border:1px solid #2e2e3e;color:#aaa;
-  border-radius:4px;padding:0;width:18px;height:18px;line-height:14px;
-  text-align:center;font-size:13px;cursor:pointer;
-  text-transform:none;letter-spacing:0;font-weight:400;flex-shrink:0;
+  border:1px solid #2e2e3e;border-radius:4px;padding:0;
+  width:18px;height:18px;cursor:pointer;flex-shrink:0;
+  font-size:0;color:transparent;
+  background:transparent center / 10px 10px no-repeat;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath stroke='%23aaa' stroke-width='2' stroke-linecap='round' d='M8 3v10M3 8h10'/%3E%3C/svg%3E");
 }
-.bb-col-head .bb-col-head-action:hover{border-color:#1976d2;color:#fff}
+.bb-col-head .bb-col-head-action:hover{
+  border-color:#1976d2;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath stroke='%23fff' stroke-width='2' stroke-linecap='round' d='M8 3v10M3 8h10'/%3E%3C/svg%3E");
+}
+.bb-row.bb-row-drag-ghost{opacity:.35;background:#1f2a3a}
 .bb-row.bb-row-smart{color:#9ec0e8}
 .bb-row.bb-row-smart.selected{background:#1f2a3a}
 .bb-row .bb-row-smart-icon{
@@ -1555,9 +1560,11 @@ main.bb-cols{
 }
 .clip-card .vote-row .pg-heart svg{width:16px;height:16px;fill:currentColor}
 
-/* Vote row + thumbs buttons — identical to /rate's .scene-card .vote-row */
+/* Vote row + thumbs buttons — identical to /rate's .scene-card .vote-row.
+   Right padding reserves space for the absolutely-positioned right
+   cluster so the centered thumbs-down button doesn't crowd it. */
 .clip-card .vote-row{
-  display:flex;justify-content:center;gap:8px;padding:6px;
+  display:flex;justify-content:center;gap:8px;padding:6px 80px 6px 6px;
   border-top:1px solid #222;align-items:center;position:relative;
 }
 .clip-card .vote-row .vote-btn-end{
@@ -2129,8 +2136,15 @@ footer{
 }
 .cf-src-wrap{aspect-ratio:16/9}     /* default; overridden once we know src aspect */
 .cf-dst-wrap{aspect-ratio:9/16}
-.cf-src-wrap img{
+.cf-src-wrap img,
+.cf-src-wrap video{
+  position:absolute;inset:0;
   width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;
+  background:#000;
+}
+.cf-dst-wrap canvas{
+  position:absolute;inset:0;width:100%;height:100%;display:block;
+  background:#000;pointer-events:none;
 }
 .cf-rects{position:absolute;inset:0;pointer-events:none}
 .cf-rect{
@@ -2694,12 +2708,14 @@ footer{
           <div class="cf-pane-label">Source</div>
           <div class="cf-src-wrap" id="cf-src-wrap">
             <img id="cf-src-img" alt="">
+            <video id="cf-src-video" playsinline muted preload="metadata" style="display:none"></video>
             <div class="cf-rects" id="cf-src-rects"></div>
           </div>
         </div>
         <div class="cf-pane">
           <div class="cf-pane-label">Output (9:16)</div>
           <div class="cf-dst-wrap" id="cf-dst-wrap">
+            <canvas id="cf-dst-canvas" style="display:none"></canvas>
             <div class="cf-rects" id="cf-dst-rects"></div>
           </div>
         </div>
@@ -2711,9 +2727,6 @@ footer{
          with start/end trim + play preview against the source video. -->
     <div id="ss-trim-block" class="ss-section" style="display:none;margin-top:14px">
       <div class="ss-section-title">Scene Duration</div>
-      <div class="ss-trim-stage">
-        <video id="ss-trim-video" playsinline muted preload="metadata"></video>
-      </div>
       <div class="ss-trim-bar" id="ss-trim-bar">
         <div class="ss-trim-track"></div>
         <div class="ss-trim-fill" id="ss-trim-fill"></div>
@@ -3098,6 +3111,15 @@ async function init() {
     if (c) {
       addVideoItem(c, undefined, 0);
     }
+    window.history.replaceState({}, '', '/builder');
+  }
+
+  /* Open the Scene Settings popup via ?scene_settings=<id> — handoff from
+   * the /rate Scenes page's gear button so both surfaces share one editor. */
+  var ssId = parseInt(params.get('scene_settings'), 10);
+  if (!isNaN(ssId)) {
+    var sc = allClips.find(function(x){ return x.id === ssId; });
+    if (sc) openSceneSettings(ssId);
     window.history.replaceState({}, '', '/builder');
   }
 
@@ -4462,6 +4484,85 @@ function _cfLoadImage(url) {
   else img.removeAttribute('src');
 }
 
+// Scene-mode live preview: swap the static source image for a <video>
+// streaming the source file, and draw a per-rect crop composite onto a
+// canvas inside the dst pane. The trim controls drive the same video,
+// so play/seek updates both panes live.
+var _cfUseVideo = false;
+var _cfCanvasRaf = null;
+var _cfVideoAspectLocked = false;
+
+function _cfActivateVideoPreview() {
+  if (_cfUseVideo) return;
+  _cfUseVideo = true;
+  _cfVideoAspectLocked = false;
+  var img = document.getElementById('cf-src-img');
+  var vid = document.getElementById('cf-src-video');
+  var canvas = document.getElementById('cf-dst-canvas');
+  if (img) img.style.display = 'none';
+  if (vid) vid.style.display = '';
+  if (canvas) canvas.style.display = '';
+  // Re-render rects so the dst-pane per-rect background-image is dropped
+  // (the canvas now owns the visual fill on the output side).
+  _cfRender();
+  function frame() {
+    _cfDrawCanvas();
+    _cfCanvasRaf = requestAnimationFrame(frame);
+  }
+  if (_cfCanvasRaf) cancelAnimationFrame(_cfCanvasRaf);
+  frame();
+}
+
+function _cfDeactivateVideoPreview() {
+  if (_cfCanvasRaf) { cancelAnimationFrame(_cfCanvasRaf); _cfCanvasRaf = null; }
+  if (!_cfUseVideo) return;
+  _cfUseVideo = false;
+  _cfVideoAspectLocked = false;
+  var img = document.getElementById('cf-src-img');
+  var vid = document.getElementById('cf-src-video');
+  var canvas = document.getElementById('cf-dst-canvas');
+  if (vid) vid.style.display = 'none';
+  if (canvas) canvas.style.display = 'none';
+  if (img) img.style.display = '';
+  _cfRender();
+}
+
+function _cfDrawCanvas() {
+  var canvas = document.getElementById('cf-dst-canvas');
+  var video = document.getElementById('cf-src-video');
+  if (!canvas || !video) return;
+  var vw = video.videoWidth, vh = video.videoHeight;
+  if (!vw || !vh) return;
+  // First frame with real video dimensions: lock the source pane to the
+  // actual video aspect ratio (overrides the placeholder 16/9 from the
+  // thumbnail load) so the left preview matches the playing video.
+  if (!_cfVideoAspectLocked) {
+    _cfVideoAspectLocked = true;
+    _cfSrcAspect = vw / vh;
+    var wrap = document.getElementById('cf-src-wrap');
+    if (wrap) wrap.style.aspectRatio = vw + '/' + vh;
+    _cfLayout(); _cfRender();
+  }
+  var wrap = document.getElementById('cf-dst-wrap');
+  var w = wrap.clientWidth, h = wrap.clientHeight;
+  if (!w || !h) return;
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w; canvas.height = h;
+  }
+  var ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, w, h);
+  var sorted = _cfRects.slice().sort(function(a,b){ return a.z - b.z; });
+  for (var i = 0; i < sorted.length; i++) {
+    var r = sorted[i];
+    var sx = r.sx * vw, sy = r.sy * vh;
+    var sW = Math.max(1, r.sw * vw), sH = Math.max(1, r.sh * vh);
+    var dx = r.dx * w, dy = r.dy * h;
+    var dW = Math.max(1, r.dw * w), dH = Math.max(1, r.dh * h);
+    try { ctx.drawImage(video, sx, sy, sW, sH, dx, dy, dW, dH); } catch(e){}
+  }
+}
+
 function _cfLayout() {
   // Heights + widths are driven entirely by CSS (height: min(60vh, 460px)
   // + aspect-ratio set on the wrap). Nothing to do here — kept as a hook
@@ -4567,7 +4668,10 @@ function _cfRender() {
     // DST rectangle (uniform-scale on SE corner + drag to move).
     var dEl = document.createElement('div');
     dEl.className = 'cf-rect' + sel;
-    var bg = _cfThumbUrl
+    // When the live-video preview is active the canvas underneath owns
+    // the rect fill, so skip the CSS background to avoid a stale-thumb
+    // mismatch with the playing frame.
+    var bg = (_cfThumbUrl && !_cfUseVideo)
       ? ("background-image:url('" + _cfThumbUrl + "');"
          + "background-size:" + (100/r.sw) + "% " + (100/r.sh) + "%;"
          + "background-position:" + (-r.sx/(1-r.sw)*100) + "% " + (-r.sy/(1-r.sh)*100) + "%;")
@@ -5058,7 +5162,7 @@ function openSceneSettings(sceneId) {
   _ssEnd = _ssOrigEnd;
   openCropModal({sceneId: sceneId});
 
-  var vid = document.getElementById('ss-trim-video');
+  var vid = document.getElementById('cf-src-video');
   vid.onloadedmetadata = function() {
     if (vid.duration && isFinite(vid.duration)) {
       _ssVidDur = vid.duration;
@@ -5078,13 +5182,18 @@ function openSceneSettings(sceneId) {
   };
   vid.onended = function() { _ssPlaying = false; ssUpdatePlayIcon(); };
   vid.src = '/api/source-video/' + sceneId;
+  // Live-preview the source video in the source pane and a composite of
+  // every rect in the dst pane. The RAF loop no-ops until videoWidth is
+  // available, so it's safe to activate before metadata arrives.
+  _cfActivateVideoPreview();
 
   ssRenderTrim();
   ssWireTrim();
 }
 
 function _ssTeardown() {
-  var vid = document.getElementById('ss-trim-video');
+  _cfDeactivateVideoPreview();
+  var vid = document.getElementById('cf-src-video');
   if (vid) { try { vid.pause(); vid.removeAttribute('src'); vid.load(); } catch (e) {} }
   _ssSceneId = null;
   _ssPlaying = false;
@@ -5095,7 +5204,7 @@ function ssResetTrim() {
   _ssStart = _ssOrigStart;
   _ssEnd = _ssOrigEnd;
   ssRenderTrim();
-  var vid = document.getElementById('ss-trim-video');
+  var vid = document.getElementById('cf-src-video');
   try { vid.currentTime = _ssStart; } catch (e) {}
 }
 
@@ -5125,7 +5234,7 @@ function ssUpdatePlayhead() {
   var bar = document.getElementById('ss-trim-bar');
   if (!bar) return;
   var ph = document.getElementById('ss-trim-playhead');
-  var vid = document.getElementById('ss-trim-video');
+  var vid = document.getElementById('cf-src-video');
   if (!_ssPlaying) { ph.classList.remove('on'); return; }
   ph.classList.add('on');
   var w = bar.clientWidth;
@@ -5150,7 +5259,7 @@ function ssWireTrim() {
     var x = e.clientX - rect.left;
     var d = _ssVidDur || 1;
     var t = Math.max(0, Math.min(d, (x / rect.width) * d));
-    var vid = document.getElementById('ss-trim-video');
+    var vid = document.getElementById('cf-src-video');
     try { vid.currentTime = t; } catch (err) {}
   });
 }
@@ -5174,7 +5283,7 @@ function _ssBegin(e, which) {
     }
     ssRenderTrim();
     // Live-seek the preview to the dragged handle.
-    var vid = document.getElementById('ss-trim-video');
+    var vid = document.getElementById('cf-src-video');
     try { vid.currentTime = (_ssDrag.which === 'start') ? _ssStart : _ssEnd; } catch (err) {}
   }
   function onUp() {
@@ -5191,7 +5300,7 @@ function _ssBegin(e, which) {
 }
 
 function ssTogglePlay() {
-  var vid = document.getElementById('ss-trim-video');
+  var vid = document.getElementById('cf-src-video');
   if (_ssPlaying) {
     vid.pause();
     _ssPlaying = false;
@@ -5594,6 +5703,7 @@ function bbRenderFolderCol() {
   (bbFolders.user || []).forEach(function(f){ html += rowHtml(f, false); });
   var list = document.getElementById('bb-folders-list');
   list.innerHTML = html;
+  _bbWireFolderSort(list);
   // Wire per-row action buttons (rename / delete). One delegated handler
   // would also work but doing it here keeps the click intent crystal.
   list.querySelectorAll('.bb-row-icon-btn').forEach(function(b){
@@ -5604,6 +5714,47 @@ function bbRenderFolderCol() {
       if (act === 'rename') bbRenameFolder(fid);
       else if (act === 'delete') bbDeleteFolder(fid);
     });
+  });
+}
+
+var _bbFolderSort = null;
+function _bbWireFolderSort(list) {
+  // SortableJS for user-folder rows only — smart rows are filtered out
+  // so they can't be picked up, and the onMove guard rejects any drop
+  // target that would land a user row above the smart cluster.
+  if (_bbFolderSort) { try { _bbFolderSort.destroy(); } catch (e) {} _bbFolderSort = null; }
+  if (typeof Sortable === 'undefined') return;
+  _bbFolderSort = new Sortable(list, {
+    animation: 120,
+    draggable: '.bb-row',
+    filter: '.bb-row-smart',
+    preventOnFilter: false,
+    ghostClass: 'bb-row-drag-ghost',
+    // Only allow user rows to be swapped past *other* user rows.
+    onMove: function(evt) {
+      if (!evt.related || !evt.dragged) return true;
+      if (evt.dragged.classList.contains('bb-row-smart')) return false;
+      if (evt.related.classList.contains('bb-row-smart')) return false;
+      return true;
+    },
+    onEnd: function() {
+      var order = [];
+      list.querySelectorAll('.bb-row:not(.bb-row-smart)').forEach(function(el){
+        var fid = el.getAttribute('data-fid');
+        if (fid) order.push(fid);
+      });
+      // Mirror the new order client-side so subsequent renders don't
+      // snap back to the server's stale order before the POST returns.
+      if (bbFolders && Array.isArray(bbFolders.user)) {
+        var byId = {};
+        bbFolders.user.forEach(function(f){ byId[f.id] = f; });
+        bbFolders.user = order.map(function(id){ return byId[id]; }).filter(Boolean);
+      }
+      fetch('/api/folders/reorder', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({order: order}),
+      }).catch(function(){});
+    },
   });
 }
 

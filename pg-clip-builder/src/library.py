@@ -230,12 +230,16 @@ select:focus{outline:none;border-color:#e53935}
   height:34px;display:flex;align-items:center;justify-content:space-between;
 }
 .bb-col-head .bb-col-head-action{
-  background:transparent;border:1px solid #2e2e3e;color:#aaa;
-  border-radius:4px;padding:0;width:18px;height:18px;line-height:14px;
-  text-align:center;font-size:13px;cursor:pointer;
-  text-transform:none;letter-spacing:0;font-weight:400;flex-shrink:0;
+  border:1px solid #2e2e3e;border-radius:4px;padding:0;
+  width:18px;height:18px;cursor:pointer;flex-shrink:0;
+  font-size:0;color:transparent;
+  background:transparent center / 10px 10px no-repeat;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath stroke='%23aaa' stroke-width='2' stroke-linecap='round' d='M8 3v10M3 8h10'/%3E%3C/svg%3E");
 }
-.bb-col-head .bb-col-head-action:hover{border-color:#1976d2;color:#fff}
+.bb-col-head .bb-col-head-action:hover{
+  border-color:#1976d2;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath stroke='%23fff' stroke-width='2' stroke-linecap='round' d='M8 3v10M3 8h10'/%3E%3C/svg%3E");
+}
 .bb-list{flex:1;overflow-y:auto;min-height:0}
 .bb-row{
   display:flex;align-items:center;justify-content:space-between;
@@ -245,6 +249,7 @@ select:focus{outline:none;border-color:#e53935}
 .bb-row:hover{background:#1a1a24;color:#fff}
 .bb-row.selected{background:#1f2a3a;color:#fff}
 .bb-row.bb-row-all{font-weight:600;border-bottom:1px solid #2a2a3a}
+.bb-row.bb-row-drag-ghost{opacity:.35;background:#1f2a3a}
 .bb-row.bb-row-smart{color:#9ec0e8}
 .bb-row.bb-row-smart.selected{background:#1f2a3a}
 .bb-row .bb-row-smart-icon{
@@ -298,15 +303,16 @@ select:focus{outline:none;border-color:#e53935}
   padding:2px 4px;border-radius:4px;
   background:rgba(0,0,0,.55);align-items:center;
 }
+/* Multi-select checkbox: first item in the toolbar (.actions row), no
+   border — just a bare checkbox sized to read at the same scale as the
+   circular vote-style buttons next to it. */
 .video-card .card-check{
-  position:absolute;top:6px;left:6px;z-index:3;
-  width:22px;height:22px;border-radius:4px;
-  background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.25);
-  display:flex;align-items:center;justify-content:center;cursor:pointer;
-  padding:0;
+  width:32px;height:32px;
+  display:inline-flex;align-items:center;justify-content:center;
+  cursor:pointer;padding:0;flex-shrink:0;background:transparent;border:none;
 }
 .video-card .card-check input{
-  width:14px;height:14px;margin:0;cursor:pointer;accent-color:#e53935;
+  width:16px;height:16px;margin:0;cursor:pointer;accent-color:#e53935;
 }
 .video-card.selected{outline:2px solid #e53935;outline-offset:-2px}
 
@@ -320,10 +326,11 @@ select:focus{outline:none;border-color:#e53935}
 .bulk-btn.danger{border-color:#e53935;color:#e53935}
 .bulk-btn.danger:hover{background:#e53935;color:#fff}
 .bulk-btn[hidden]{display:none}
+/* Duration pill — top-right, matching the /builder clip-card .dur badge. */
 .video-card .dur-badge{
-  position:absolute;bottom:8px;right:8px;
-  background:rgba(0,0,0,.8);color:#fff;font-size:12px;font-weight:600;
-  padding:2px 8px;border-radius:4px;
+  position:absolute;top:6px;right:6px;z-index:2;
+  background:rgba(0,0,0,.75);color:#fff;font-size:10px;font-weight:600;
+  padding:2px 5px;border-radius:3px;
 }
 .video-card .card-del{
   position:absolute;top:6px;right:6px;
@@ -339,16 +346,17 @@ select:focus{outline:none;border-color:#e53935}
   display:flex;align-items:center;gap:8px;
 }
 .video-card .meta .date{flex:1}
-.video-card .actions{display:flex;gap:2px;align-items:center}
+.video-card .actions{display:flex;gap:8px;align-items:center}
+/* Toolbar buttons: pixel-identical to /builder's .clip-card .vote-btn —
+   32×32 circle, 1.5px dark border, dark fill, scale(1.15) on hover. */
 .video-card .act-btn{
-  width:26px;height:26px;border-radius:5px;
-  background:transparent;border:none;color:#999;
-  display:inline-flex;align-items:center;justify-content:center;cursor:pointer;
-  transition:background .12s,color .12s;
+  width:32px;height:32px;border-radius:50%;border:1.5px solid #444;
+  background:#111;color:#666;cursor:pointer;transition:all .12s;
+  display:flex;align-items:center;justify-content:center;padding:0;
 }
-.video-card .act-btn:hover{background:#2a2a2a;color:#fff}
-.video-card .act-btn.danger:hover{background:#e53935;color:#fff}
-.video-card .act-btn svg{width:15px;height:15px;fill:currentColor}
+.video-card .act-btn:hover{transform:scale(1.15);border-color:#888;color:#fff}
+.video-card .act-btn.danger:hover{background:#e53935;border-color:#e53935;color:#fff}
+.video-card .act-btn svg{width:16px;height:16px;fill:currentColor}
 
 /* Share picker popup (rendered into document.body, positioned at runtime). */
 .share-pop{
@@ -613,6 +621,42 @@ function bbRenderFolderCol() {
       else if (act === 'delete') bbDeleteFolder(fid);
     });
   });
+  _bbWireFolderSort(list);
+}
+
+var _bbFolderSort = null;
+function _bbWireFolderSort(list) {
+  if (_bbFolderSort) { try { _bbFolderSort.destroy(); } catch (e) {} _bbFolderSort = null; }
+  if (typeof Sortable === 'undefined') return;
+  _bbFolderSort = new Sortable(list, {
+    animation: 120,
+    draggable: '.bb-row',
+    filter: '.bb-row-smart',
+    preventOnFilter: false,
+    ghostClass: 'bb-row-drag-ghost',
+    onMove: function(evt) {
+      if (!evt.related || !evt.dragged) return true;
+      if (evt.dragged.classList.contains('bb-row-smart')) return false;
+      if (evt.related.classList.contains('bb-row-smart')) return false;
+      return true;
+    },
+    onEnd: function() {
+      var order = [];
+      list.querySelectorAll('.bb-row:not(.bb-row-smart)').forEach(function(el){
+        var fid = el.getAttribute('data-fid');
+        if (fid) order.push(fid);
+      });
+      if (bbFolders && Array.isArray(bbFolders.user)) {
+        var byId = {};
+        bbFolders.user.forEach(function(f){ byId[f.id] = f; });
+        bbFolders.user = order.map(function(id){ return byId[id]; }).filter(Boolean);
+      }
+      fetch('/api/folders/reorder', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({order: order}),
+      }).catch(function(){});
+    },
+  });
 }
 
 function _bbWireColumnHandlers() {
@@ -862,10 +906,6 @@ function renderGrid(videos) {
       + '<video data-id="' + v.id + '" preload="none" playsinline'
       +   ' poster="/library/api/thumbnail/' + v.id + '"'
       +   ' src="/library/api/video/' + v.id + '"></video>'
-      + '<label class="card-check" onclick="event.stopPropagation()">'
-      + '<input type="checkbox" data-id="' + v.id + '"' + (isSel ? ' checked' : '')
-      + ' onchange="toggleSelect(' + v.id + ', this.checked)">'
-      + '</label>'
       + '<div class="play-btn" onclick="playInline(' + v.id + ')">'
       + '<div class="play-icon"><svg viewBox="0 0 24 24"><polygon points="8,5 19,12 8,19"/></svg></div>'
       + '</div>'
@@ -876,6 +916,10 @@ function renderGrid(videos) {
       + '<div class="meta-row">'
       +   '<div class="date">' + formatDate(v.generated_at) + '</div>'
       +   '<div class="actions" onclick="event.stopPropagation()">'
+      +     '<label class="card-check" title="Select">'
+      +       '<input type="checkbox" data-id="' + v.id + '"' + (isSel ? ' checked' : '')
+      +         ' onchange="toggleSelect(' + v.id + ', this.checked)">'
+      +     '</label>'
       +     '<button class="act-btn" title="Share" onclick="shareToggle(event,' + v.id + ')">'
       +       '<svg viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/></svg>'
       +     '</button>'

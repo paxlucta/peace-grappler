@@ -333,12 +333,17 @@ nav a.active{color:#e53935;border-color:#e53935}
 
 /* Folders column extras (mirrors /builder) */
 .bb-col-head .bb-col-head-action{
-  background:transparent;border:1px solid #2e2e3e;color:#aaa;
-  border-radius:4px;padding:0;width:18px;height:18px;line-height:14px;
-  text-align:center;font-size:13px;cursor:pointer;
-  text-transform:none;letter-spacing:0;font-weight:400;flex-shrink:0;
+  border:1px solid #2e2e3e;border-radius:4px;padding:0;
+  width:18px;height:18px;cursor:pointer;flex-shrink:0;
+  font-size:0;color:transparent;
+  background:transparent center / 10px 10px no-repeat;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath stroke='%23aaa' stroke-width='2' stroke-linecap='round' d='M8 3v10M3 8h10'/%3E%3C/svg%3E");
 }
-.bb-col-head .bb-col-head-action:hover{border-color:#1976d2;color:#fff}
+.bb-col-head .bb-col-head-action:hover{
+  border-color:#1976d2;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath stroke='%23fff' stroke-width='2' stroke-linecap='round' d='M8 3v10M3 8h10'/%3E%3C/svg%3E");
+}
+.bb-row.bb-row-drag-ghost{opacity:.35;background:#1f2a3a}
 .bb-row.bb-row-smart{color:#9ec0e8}
 .bb-row.bb-row-smart.selected{background:#1f2a3a}
 .bb-row .bb-row-smart-icon{
@@ -527,7 +532,7 @@ nav a.active{color:#e53935;border-color:#e53935}
 
 /* -- Thumbs row on each card -- */
 .scene-card .vote-row{
-  display:flex;justify-content:center;gap:8px;padding:6px;
+  display:flex;justify-content:center;gap:8px;padding:6px 80px 6px 6px;
   border-top:1px solid #222;align-items:center;position:relative;
 }
 /* Transcript button anchors to the far right without shifting the
@@ -536,6 +541,17 @@ nav a.active{color:#e53935;border-color:#e53935}
   position:absolute;right:6px;top:50%;transform:translateY(-50%);
 }
 .scene-card .vote-row .vote-btn-end:hover{transform:translateY(-50%) scale(1.15)}
+/* Right-side cluster: transcript + gear stacked to the right edge —
+   mirrors the /builder clip-card toolbar exactly. */
+.scene-card .vote-row .vote-right-cluster{
+  position:absolute;right:6px;top:50%;transform:translateY(-50%);
+  display:flex;gap:4px;align-items:center;
+}
+.scene-card .vote-row .vote-right-cluster .vote-btn:hover{transform:scale(1.15)}
+.vote-btn.vgear{border-color:#555}
+.vote-btn.vgear svg{fill:#888}
+.vote-btn.vgear:hover{background:#555;border-color:#888}
+.vote-btn.vgear:hover svg{fill:#fff}
 .vote-btn{
   width:32px;height:32px;border-radius:50%;border:1.5px solid #444;
   background:#111;cursor:pointer;transition:all .12s;
@@ -924,6 +940,42 @@ function bbRenderFolderCol() {
       else if (act === 'delete') bbDeleteFolder(fid);
     });
   });
+  _bbWireFolderSort(list);
+}
+
+var _bbFolderSort = null;
+function _bbWireFolderSort(list) {
+  if (_bbFolderSort) { try { _bbFolderSort.destroy(); } catch (e) {} _bbFolderSort = null; }
+  if (typeof Sortable === 'undefined') return;
+  _bbFolderSort = new Sortable(list, {
+    animation: 120,
+    draggable: '.bb-row',
+    filter: '.bb-row-smart',
+    preventOnFilter: false,
+    ghostClass: 'bb-row-drag-ghost',
+    onMove: function(evt) {
+      if (!evt.related || !evt.dragged) return true;
+      if (evt.dragged.classList.contains('bb-row-smart')) return false;
+      if (evt.related.classList.contains('bb-row-smart')) return false;
+      return true;
+    },
+    onEnd: function() {
+      var order = [];
+      list.querySelectorAll('.bb-row:not(.bb-row-smart)').forEach(function(el){
+        var fid = el.getAttribute('data-fid');
+        if (fid) order.push(fid);
+      });
+      if (bbFolders && Array.isArray(bbFolders.user)) {
+        var byId = {};
+        bbFolders.user.forEach(function(f){ byId[f.id] = f; });
+        bbFolders.user = order.map(function(id){ return byId[id]; }).filter(Boolean);
+      }
+      fetch('/api/folders/reorder', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({order: order}),
+      }).catch(function(){});
+    },
+  });
 }
 
 function bbSelectFolder(fid) {
@@ -1268,14 +1320,14 @@ function renderGrid() {
       + '<button class="vote-btn vdown' + (s.status === 'down' ? ' active' : '') + '" onclick="vote(' + s.id + ',\'down\')" title="Hide scene">'
       + '<svg viewBox="0 0 24 24"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>'
       + '</button>'
-      + '<button class="vote-btn vup' + (s.status === 'up' ? ' active' : '') + '" onclick="vote(' + s.id + ',\'up\')" title="Keep scene">'
-      + '<svg viewBox="0 0 24 24"><path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg>'
-      + '</button>'
-      + (s.has_transcript
-          ? '<button class="vote-btn vtxt vote-btn-end" onclick="openTranscript(' + s.id + ')" title="Show transcript">'
-            + '<svg viewBox="0 0 24 24"><path d="M4 4h16v2H4V4zm0 4h16v2H4V8zm0 4h10v2H4v-2zm0 4h16v2H4v-2zm0 4h10v2H4v-2z"/></svg>'
-            + '</button>'
-          : '')
+      + '<div class="vote-right-cluster">'
+      +   (s.has_transcript
+            ? '<button class="vote-btn vtxt" onclick="openTranscript(' + s.id + ')" title="Show transcript">'
+              + '<svg viewBox="0 0 24 24"><path d="M4 4h16v2H4V4zm0 4h16v2H4V8zm0 4h10v2H4v-2zm0 4h16v2H4v-2zm0 4h10v2H4v-2z"/></svg>'
+              + '</button>'
+            : '')
+      +   '<button class="vote-btn vgear" onclick="openSceneSettings(' + s.id + ')" title="Scene settings"><svg viewBox="0 0 24 24"><path d="M19.43 12.98c.04-.32.07-.65.07-.98s-.03-.66-.07-.98l2.11-1.65a.5.5 0 0 0 .12-.64l-2-3.46a.5.5 0 0 0-.61-.22l-2.49 1a7.03 7.03 0 0 0-1.69-.98l-.38-2.65A.488.488 0 0 0 14 2h-4a.488.488 0 0 0-.49.42l-.38 2.65c-.61.25-1.17.58-1.69.98l-2.49-1a.5.5 0 0 0-.61.22l-2 3.46a.5.5 0 0 0 .12.64L4.57 11.02c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65a.5.5 0 0 0-.12.64l2 3.46c.14.24.42.34.66.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.05.24.25.42.49.42h4c.24 0 .44-.18.49-.42l.38-2.65c.61-.25 1.17-.58 1.69-.98l2.49 1c.24.1.52 0 .66-.22l2-3.46a.5.5 0 0 0-.12-.64l-2.11-1.65zM12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5z"/></svg></button>'
+      + '</div>'
       + '</div>'
       + '</div>';
   }
@@ -1283,6 +1335,12 @@ function renderGrid() {
 }
 
 async function vote(sceneId, action) {
+  // Down = hide. Confirm before hiding (mirrors /builder's vote flow) so
+  // an accidental click on the small thumb-down can't silently drop the
+  // scene out of the grid.
+  if (action === 'down') {
+    if (!window.confirm('Hide this scene from the grid?')) return;
+  }
   await fetch('/rate/api/grade', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -1300,6 +1358,12 @@ async function vote(sceneId, action) {
   bbRenderFilesCol();
   bbRenderTagsCol();
   renderGrid();
+}
+
+// The full scene-settings popup (crop + trim) lives on /builder; jump
+// there with a query param that auto-opens it for this scene.
+function openSceneSettings(sceneId) {
+  window.location.href = '/builder?scene_settings=' + sceneId;
 }
 
 function playScene(sceneId) {
