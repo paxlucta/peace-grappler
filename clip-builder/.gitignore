@@ -1,0 +1,37 @@
+.venv/
+__pycache__/
+*.pyc
+# User runtime state — never ship the developer's local profiles / databases.
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/active_profile.json
+data/app_settings.json
+data/profiles/
+data/profiles_db/
+data/profiles_folders/
+data/folders.json
+data/crop_presets.json
+# Per-profile working folders live here on end-user machines.
+Documents/ClipBuilder/
+.cache/
+.DS_Store
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.m4v
+*.mp3
+*.m4a
+*.wav
+*.aac
+*.ogg
+*.xlsx
+.env
+.env.*
+!.env.example
+node_modules/
+src/drive_client.json
+data/drive_token.json
+data/drive_config.json

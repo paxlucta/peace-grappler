@@ -1,0 +1,35 @@
+{
+  "analysis_mode": "speech",
+  "whisper_model": "base",
+  "whisper_language": "",
+  "whisper_translate": true,
+  "ai": {
+    "tasks": {
+      "analysis": "minimax",
+      "captions": "claude",
+      "wizard": "claude"
+    },
+    "providers": {
+      "claude": {
+        "bin": "claude",
+        "model": "claude-haiku-4-5-20251001"
+      },
+      "codex": {
+        "bin": "codex",
+        "model": "gpt-5-mini"
+      },
+      "gemini": {
+        "bin": "gemini",
+        "model": "gemini-2.5-flash"
+      },
+      "minimax": {
+        "bin": "",
+        "model": "MiniMax-M1"
+      }
+    }
+  },
+  "transcribe_provider": "gemini",
+  "transcribe_model": "gemini-2.5-pro",
+  "theme": "default",
+  "transcribe_hint": "Mixes Russian and English; keep each in its native script."
+}
