@@ -19,8 +19,8 @@ from pathlib import Path
 from flask import Blueprint, Response, jsonify, request, send_file
 
 from db import (
-    get_db, get_all_scenes, get_scene_grades, save_generated_video,
-    update_video_caption,
+    get_db, get_all_scenes, get_scene_grades, get_transcripts_in_range,
+    get_words_in_range, save_generated_video, update_video_caption,
 )
 from video import (
     ASSETS_DIR, AUDIO_EXTENSIONS, OUTPUT_DIR, TRANSITIONS, XFADE_DUR,
@@ -433,6 +433,18 @@ near beat positions. Viewers subconsciously feel beat-synced cuts as more profes
 For each clip, specify a sub-range within the scene. Keep clips tight (1.5-5s each).
 Prefer scenes tagged "high-energy" or with action/impact tags from the available list.
 
+SPEECH-AWARE CUTS — MANDATORY when a scene has a "speech:" line:
+- The "speech:" line lists transcript segments with their absolute start/end \
+times in the source video, e.g. `[12.40-14.10] "and the submission was locked"`.
+- Pick clip `start` AT or just before a segment start, and clip `end` AT a \
+segment end (preferably one that completes a sentence — ends with . ! or ?).
+- NEVER set start/end inside a word or mid-phrase — the resulting clip will \
+sound clipped and unprofessional, which is the #1 retention killer.
+- If you must cut a single long segment, prefer the segment boundary even if \
+it makes the clip 0.5-1s longer than ideal.
+- For scenes WITHOUT a "speech:" line (no dialogue / pure action), choose \
+start/end on visual/beat cues as normal.
+
 Output a JSON object with EXACTLY this structure:
 {{
   "target_duration": <seconds>,
@@ -500,10 +512,48 @@ def _plan_video(model, research, scenes, music_files, feedback,
             grade_info = f" grade:{avg}/5"
         tags_str = ",".join(s["tags"][:8])
         wide = " WIDE" if s["wide"] else ""
+
+        # Speech excerpt with sentence-anchored start/end times so the
+        # model has the data it needs to land cuts on sentence
+        # boundaries. Source-language only (we want what's actually
+        # spoken on the audio track, not a translation).
+        speech = ""
+        try:
+            groups = get_transcripts_in_range(
+                s["video_id"], s["start_time"], s["end_time"],
+            )
+        except Exception:
+            groups = []
+        src_group = next(
+            (g for g in groups if not g.get("is_translation")),
+            (groups[0] if groups else None),
+        )
+        if src_group and src_group.get("segments"):
+            seg_strs = []
+            for seg in src_group["segments"]:
+                # Clamp display range to the scene window so timestamps
+                # are immediately actionable as clip start/end.
+                a = max(float(seg["start"]), s["start_time"])
+                b = min(float(seg["end"]),   s["end_time"])
+                if b <= a:
+                    continue
+                txt = " ".join((seg["text"] or "").split())
+                if not txt:
+                    continue
+                seg_strs.append(f"[{a:.2f}-{b:.2f}] {txt}")
+            if seg_strs:
+                excerpt = " | ".join(seg_strs)
+                # Cap each scene's transcript at ~280 chars so a wordy
+                # video doesn't balloon the prompt past the model's
+                # context.
+                if len(excerpt) > 280:
+                    excerpt = excerpt[:277] + "..."
+                speech = f"\n  speech: {excerpt}"
+
         scene_lines.append(
             f"#{s['id']}: {s['video_filename']} "
             f"[{s['start_time']:.1f}-{s['end_time']:.1f}] "
-            f"{dur}s tags:{tags_str}{wide}{grade_info}"
+            f"{dur}s tags:{tags_str}{wide}{grade_info}{speech}"
         )
 
     if not scene_lines:
@@ -681,6 +731,80 @@ def _plan_video(model, research, scenes, music_files, feedback,
     return plan
 
 
+_SENTENCE_TERMINATORS = (".", "!", "?", "。", "！", "？", "…")
+
+
+def _snap_to_speech(video_id, scene_start, scene_end, clip_start, clip_end,
+                    tol_start=0.6, tol_end=0.9, min_dur=1.0):
+    """Nudge *clip_start/clip_end* onto word and sentence boundaries
+    derived from the scene's transcript so we don't cut mid-phrase.
+
+    Strategy:
+    - Pull word-level timings for the *scene* window (a little context
+      on either side, so a sentence that ends just past the planned cut
+      can still pull the cut to its terminator).
+    - For START: prefer the latest word.start that's just before
+      clip_start (so we don't drop the first syllable). Snap only if
+      within *tol_start* seconds; otherwise leave Claude's choice alone.
+    - For END: prefer the nearest word.end whose token ends with a
+      sentence terminator. Fall back to the nearest word.end if no
+      terminator is in reach. Snap window: *tol_end* seconds.
+    - Never reduce duration below *min_dur*, never escape scene bounds.
+
+    Returns (new_start, new_end). If no word data is available the
+    inputs are returned unchanged.
+    """
+    if not video_id:
+        return clip_start, clip_end
+    pad = max(tol_start, tol_end) + 0.5
+    win_a = max(scene_start, clip_start - pad)
+    win_b = min(scene_end, clip_end + pad)
+    try:
+        words = get_words_in_range(video_id, win_a, win_b)
+    except Exception:
+        return clip_start, clip_end
+    if not words:
+        return clip_start, clip_end
+
+    # START — prefer the most recent word boundary at or before clip_start.
+    candidates_before = [w for w in words
+                         if w["start"] <= clip_start + 0.05
+                         and abs(w["start"] - clip_start) <= tol_start]
+    candidates_after  = [w for w in words
+                         if w["start"] > clip_start
+                         and (w["start"] - clip_start) <= tol_start * 0.5]
+    new_start = clip_start
+    if candidates_before:
+        new_start = candidates_before[-1]["start"]
+    elif candidates_after:
+        new_start = candidates_after[0]["start"]
+    new_start = max(scene_start, new_start)
+
+    # END — sentence-terminator words near clip_end win; otherwise nearest word.end.
+    near_end = [w for w in words if abs(w["end"] - clip_end) <= tol_end]
+    new_end = clip_end
+    if near_end:
+        terminators = [w for w in near_end
+                       if w["word"].strip().endswith(_SENTENCE_TERMINATORS)]
+        if terminators:
+            # Prefer the terminator nearest the planned end, biasing
+            # toward LATER endings so we don't chop the punchline.
+            terminators.sort(key=lambda w: (abs(w["end"] - clip_end),
+                                            -w["end"]))
+            new_end = terminators[0]["end"]
+        else:
+            # Otherwise the latest word.end that's still inside the
+            # tolerance — pulls the cut to the last complete word.
+            near_end.sort(key=lambda w: abs(w["end"] - clip_end))
+            new_end = near_end[0]["end"]
+    new_end = min(scene_end, new_end)
+
+    # Safety: enforce min duration and ordering.
+    if new_end - new_start < min_dur:
+        return clip_start, clip_end
+    return round(new_start, 3), round(new_end, 3)
+
+
 def _validate_plan(plan, scenes, music_files):
     """Validate and fix Claude's plan against actual data."""
     scene_map = {s["id"]: s for s in scenes}
@@ -705,6 +829,15 @@ def _validate_plan(plan, scenes, music_files):
         if end - start < 0.5:
             start = scene["start_time"]
             end = min(scene["end_time"], start + 3.0)
+        # Snap to nearest word / sentence boundary so we never cut a
+        # phrase mid-word. Falls back to Claude's choice when there's
+        # no transcript or no nearby boundary.
+        snapped_start, snapped_end = _snap_to_speech(
+            scene.get("video_id"),
+            scene["start_time"], scene["end_time"],
+            start, end,
+        )
+        start, end = snapped_start, snapped_end
         if end - start >= 0.5:
             valid_clips.append({
                 "scene_id": sid,
@@ -732,7 +865,8 @@ def _validate_plan(plan, scenes, music_files):
 
 def _assemble_video(plan, music_files, video_num, total,
                     mute_source=False, add_captions=False,
-                    caption_style=None, auto_crop_wide=False):
+                    caption_style=None, auto_crop_wide=True,
+                    length_tag=None):
     """Assemble a video from Claude's plan. Returns output path or None.
 
     *add_captions* — when True, burn each scene's transcript onto the
@@ -772,7 +906,11 @@ def _assemble_video(plan, music_files, video_num, total,
                         pass
 
     total_dur = int(sum(c["end"] - c["start"] for c in clips))
-    out_file = date_dir / f"wiz-{total_dur}-{counter}.mp4"
+    # When dual-length is on, length_tag is "short" or "long" so the two
+    # outputs are distinguishable at a glance in the library and in any
+    # platform-specific upload pipeline.
+    tag = f"{length_tag}-" if length_tag else ""
+    out_file = date_dir / f"wiz-{tag}{total_dur}-{counter}.mp4"
 
     with tempfile.TemporaryDirectory() as tmp:
         clip_paths = []
@@ -1095,12 +1233,19 @@ def _generate(model, num_videos, num_variations=1, folders=None,
               mute_source=False, enable_text_overlays=False,
               music_folders=None, include_wide=True, provider=None,
               no_music=False, add_captions=False, caption_style=None,
-              auto_crop_wide=False, ai_instructions=""):
+              auto_crop_wide=True, ai_instructions="",
+              dual_length=False):
     """Full wizard generation flow. Runs in a background thread.
 
     *no_music* — when True, the AI plans without a music track and the
     assembly step skips the overlay. Useful for spoken / instructional
     content where original audio carries the value.
+
+    *dual_length* — when True, every video produces TWO renders:
+    a SHORT cut (~22s, IG Reels / TikTok sweet spot) and a LONG cut
+    (~50s, YouTube Shorts sweet spot). Each is independently planned
+    by Claude with the appropriate pacing for that duration; they may
+    share underlying scenes since they target different platforms.
     """
     # Stash the provider + model override so every nested _call_claude in
     # this thread routes through the user's chosen pair, and so the save
@@ -1182,6 +1327,21 @@ def _generate(model, num_videos, num_variations=1, folders=None,
         if num_variations > 1:
             emit(f"Generating {num_variations} A/B variations per video")
 
+        # Per-platform length presets. None entry = use research defaults
+        # (back-compat single-render mode). When dual_length is on we emit
+        # both a short cut (IG Reels / TikTok) and a long cut (YT Shorts)
+        # from independent planning passes — Claude paces each one for
+        # the target duration.
+        if dual_length:
+            length_variants = [
+                ("short", 22, {"min": 15, "max": 30}),
+                ("long",  50, {"min": 40, "max": 65}),
+            ]
+            emit("Dual-length mode: each video will render a SHORT "
+                 "(~22s for IG/TikTok) AND a LONG (~50s for YouTube Shorts) cut.")
+        else:
+            length_variants = [(None, None, None)]
+
         # 3. Generate each video (with variations)
         used_scene_ids = set()
         results = []
@@ -1190,73 +1350,114 @@ def _generate(model, num_videos, num_variations=1, folders=None,
             prev_rationales = []
 
             for var_num in range(1, num_variations + 1):
-                var_label = (f"Video {vid_num}/{num_videos}"
-                             if num_variations == 1
-                             else f"Video {vid_num} variation {var_num}/{num_variations}")
+                # Snapshot the used-scene set at the start of this
+                # variation so all length variants in the pair see the
+                # same baseline. They're for different platforms, so they
+                # may share clips with each other — but they should still
+                # avoid scenes used by earlier videos/variations.
+                used_at_var_start = set(used_scene_ids)
+                this_var_used = set()
 
-                emit(f"\nPhase 2: Planning {var_label}...")
+                for lv_name, lv_opt, lv_range in length_variants:
+                    # Compose the label so logs make it obvious which
+                    # variant is being worked on.
+                    parts = [f"Video {vid_num}/{num_videos}"]
+                    if num_variations > 1:
+                        parts.append(f"variation {var_num}/{num_variations}")
+                    if lv_name:
+                        parts.append(f"{lv_name} cut ~{lv_opt}s")
+                    var_label = " ".join(parts)
 
-                variation_ctx = None
-                if num_variations > 1:
-                    variation_ctx = {
-                        "num": var_num,
-                        "total": num_variations,
-                        "prev_rationales": prev_rationales[:],
-                    }
+                    emit(f"\nPhase 2: Planning {var_label}...")
 
-                plan = _plan_video(model, research, scenes, music_files,
-                                   feedback, used_scene_ids,
-                                   variation_ctx=variation_ctx,
-                                   enable_text_overlays=enable_text_overlays,
-                                   ai_instructions=ai_instructions)
-                if not plan or not plan.get("clips"):
-                    emit(f"{var_label}: {_active_provider_label()} couldn't create a plan")
-                    continue
+                    variation_ctx = None
+                    if num_variations > 1:
+                        variation_ctx = {
+                            "num": var_num,
+                            "total": num_variations,
+                            "prev_rationales": prev_rationales[:],
+                        }
 
-                n_clips = len(plan["clips"])
-                target = plan.get("target_duration", optimal)
-                music_name = (plan.get("music") or {}).get("name", "none")
-                rationale = plan.get("rationale", "")
-                prev_rationales.append(rationale)
+                    # Per-length research override so the planner targets
+                    # the right duration & range without touching the
+                    # cached research data.
+                    if lv_opt is not None:
+                        research_for_plan = {
+                            **research,
+                            "optimal_duration": lv_opt,
+                            "ideal_duration_range": lv_range,
+                        }
+                    else:
+                        research_for_plan = research
 
-                emit(f"Plan: {n_clips} clips, ~{target}s, music: {music_name}")
-                if rationale:
-                    emit(f"Strategy: {rationale}")
+                    plan = _plan_video(model, research_for_plan, scenes,
+                                       music_files, feedback,
+                                       used_at_var_start,
+                                       variation_ctx=variation_ctx,
+                                       enable_text_overlays=enable_text_overlays,
+                                       ai_instructions=ai_instructions)
+                    if not plan or not plan.get("clips"):
+                        emit(f"{var_label}: {_active_provider_label()} "
+                             f"couldn't create a plan")
+                        continue
 
-                # Track used scenes across variations
-                for clip in plan["clips"]:
-                    used_scene_ids.add(clip["scene_id"])
+                    n_clips = len(plan["clips"])
+                    target = plan.get("target_duration", lv_opt or optimal)
+                    music_name = (plan.get("music") or {}).get("name", "none")
+                    rationale = plan.get("rationale", "")
+                    # Only the first length variant adds to the rationale
+                    # history — otherwise the second variant looks like a
+                    # repeat and trips the "don't repeat" guard.
+                    if lv_name in (None, "short"):
+                        prev_rationales.append(rationale)
 
-                emit(f"\nPhase 3: Assembling {var_label}...")
-                result = _assemble_video(plan, music_files, vid_num, num_videos,
-                                        mute_source=mute_source,
-                                        add_captions=add_captions,
-                                        caption_style=caption_style,
-                                        auto_crop_wide=auto_crop_wide)
-                if result:
-                    # Generate caption
-                    emit("Generating Instagram caption...")
-                    caption = _generate_caption(model, plan, result["duration"])
-                    if caption:
-                        # Update the DB record with caption
-                        from db import get_all_generated_videos
-                        vids = get_all_generated_videos()
-                        match = next(
-                            (v for v in vids
-                             if Path(v["path"]).name == result["filename"]),
-                            None,
-                        )
-                        if match:
-                            _cp, _cm = _active_provider_and_model("captions")
-                            update_video_caption(match["id"], caption,
-                                                 provider=_cp, model=_cm)
-                        result["caption"] = caption
-                        emit("Caption generated!")
+                    emit(f"Plan: {n_clips} clips, ~{target}s, music: {music_name}")
+                    if rationale:
+                        emit(f"Strategy: {rationale}")
 
-                    results.append(result)
-                    emit(f"VIDEO:{result['filename']}:{result['duration']}")
-                    emit(f"{var_label} complete! {result['duration']}s -> "
-                         f"{result['filename']}")
+                    # Scenes used by THIS variant feed back into the
+                    # cross-video pool, so the next video doesn't repeat
+                    # them. Length variants within a pair are allowed to
+                    # share scenes (different platforms).
+                    for clip in plan["clips"]:
+                        this_var_used.add(clip["scene_id"])
+
+                    emit(f"\nPhase 3: Assembling {var_label}...")
+                    result = _assemble_video(plan, music_files, vid_num, num_videos,
+                                            mute_source=mute_source,
+                                            add_captions=add_captions,
+                                            caption_style=caption_style,
+                                            auto_crop_wide=auto_crop_wide,
+                                            length_tag=lv_name)
+                    if result:
+                        # Generate caption
+                        emit("Generating Instagram caption...")
+                        caption = _generate_caption(model, plan, result["duration"])
+                        if caption:
+                            # Update the DB record with caption
+                            from db import get_all_generated_videos
+                            vids = get_all_generated_videos()
+                            match = next(
+                                (v for v in vids
+                                 if Path(v["path"]).name == result["filename"]),
+                                None,
+                            )
+                            if match:
+                                _cp, _cm = _active_provider_and_model("captions")
+                                update_video_caption(match["id"], caption,
+                                                     provider=_cp, model=_cm)
+                            result["caption"] = caption
+                            emit("Caption generated!")
+
+                        results.append(result)
+                        emit(f"VIDEO:{result['filename']}:{result['duration']}")
+                        emit(f"{var_label} complete! {result['duration']}s -> "
+                             f"{result['filename']}")
+
+                # All length variants for this (vid_num, var_num) are
+                # done — fold their scenes into the cross-video pool so
+                # later iterations don't repeat them.
+                used_scene_ids |= this_var_used
 
         if results:
             emit(f"\nAll done! Generated {len(results)} video(s)")
@@ -1440,7 +1641,8 @@ def api_generate():
     include_wide = data.get("include_wide", True)
     no_music = bool(data.get("no_music", False))
     add_captions = bool(data.get("add_captions", False))
-    auto_crop_wide = bool(data.get("auto_crop_wide", False))
+    auto_crop_wide = bool(data.get("auto_crop_wide", True))
+    dual_length = bool(data.get("dual_length", False))
     caption_style = data.get("caption_style") or {}
     ai_instructions = (data.get("ai_instructions") or "").strip()
 
@@ -1462,6 +1664,7 @@ def api_generate():
             "caption_style": caption_style,
             "auto_crop_wide": auto_crop_wide,
             "ai_instructions": ai_instructions,
+            "dual_length": dual_length,
         },
         daemon=True,
     ).start()
@@ -2099,7 +2302,11 @@ button:disabled{opacity:.5;cursor:not-allowed}
       </label>
       <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#aaa;cursor:pointer"
              title="For widescreen scenes, auto-detect the most visually interesting region and crop to 9:16 (1080x1920) instead of letterboxing.">
-        <input type="checkbox" id="auto-crop-wide"> Auto-crop wide videos
+        <input type="checkbox" id="auto-crop-wide" checked> Auto-crop wide videos
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#aaa;cursor:pointer"
+             title="Render TWO cuts of every video: a ~22s short for IG Reels / TikTok, and a ~50s long for YouTube Shorts. Each is independently planned by the AI with pacing appropriate to its duration.">
+        <input type="checkbox" id="dual-length"> Dual length (YT Shorts + IG/TT)
       </label>
       <div style="display:flex;align-items:center;gap:4px">
         <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#aaa;cursor:pointer"
@@ -2740,6 +2947,7 @@ function startGeneration() {
       text_overlays: document.getElementById('text-overlays').checked,
       include_wide: document.getElementById('include-wide').checked,
       auto_crop_wide: document.getElementById('auto-crop-wide').checked,
+      dual_length: document.getElementById('dual-length').checked,
       add_captions: document.getElementById('add-captions').checked,
       ai_instructions: (document.getElementById('ai-instructions') || {}).value || '',
       caption_style: {

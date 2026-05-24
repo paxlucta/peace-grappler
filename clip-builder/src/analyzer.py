@@ -3946,35 +3946,17 @@ async function openAnalyzeOpts(evt, videoId, _mode) {
     + 'Tagging or Run Transcription independently. Force re-run clears '
     + 'that step\'s prior result before starting.</div>';
 
-  // ── Section 1: Tagging / Scene Analysis ──
-  html += '<div class="aopts-section">'
-    + '<div class="aopts-section-title">Tagging / Scene Analysis</div>'
-    + '<label class="field">Source</label>'
-    + '<select id="aopts-tag-source">'
-    + '  <option value="visual">Visual frames — sample frames and tag time ranges</option>'
-    + '  <option value="speech">Audio (speech) — use transcript segments as scene boundaries</option>'
-    + '</select>'
-    + '<label class="field">Tagging LLM</label>'
-    + '<div id="aopts-visual-llm-wrap">'
-    +   _aoptsBuildModelSelect('aopts-visual-llm', catalog)
-    + '</div>'
-    + '<div class="aopts-help" style="margin-top:6px;margin-bottom:8px">'
-    + 'Defaults to the <b>analysis</b> task provider on /settings. '
-    + 'Audio source requires a saved transcript — if none exists yet, '
-    + 'one is generated on the fly using the Transcription settings below.</div>'
-    + '<label class="tog"><input type="checkbox" id="aopts-tag-force" checked> '
-    + 'Force re-tag (clear previous tags)</label>'
-    + '<div class="aopts-section-action">'
-    + '<button class="go" onclick="runAnalyzeOpts(' + videoId + ',\'tag\')">✨ Run Tagging</button>'
-    + '</div>'
-    + '</div>';
-
-  // ── Section 2: Transcription ──
+  // ── Section 1: Transcription ──
+  // Transcription comes first because the speech-mode tagger needs a
+  // transcript, and the wizard's sentence-aware clip snapping needs
+  // word-level timestamps. Running transcription before tagging makes
+  // the dependency obvious in the UI.
   html += '<div class="aopts-section">'
     + '<div class="aopts-section-title">Transcription</div>'
     + '<div class="aopts-help" style="margin-bottom:8px">'
     + 'Produces a transcript in the spoken language. Translation is a '
-    + 'separate step.</div>'
+    + 'separate step. Run this first — scene tagging (below) and the '
+    + 'AI wizard both benefit from an existing transcript.</div>'
     + '<label class="field">Provider</label>'
     + '<select id="aopts-tx-provider"'
     + ' onchange="_aoptsAudioProviderChanged()">'
@@ -3994,6 +3976,29 @@ async function openAnalyzeOpts(evt, videoId, _mode) {
     + 'Force re-transcribe (replace existing transcript)</label>'
     + '<div class="aopts-section-action">'
     + '<button class="go" onclick="runAnalyzeOpts(' + videoId + ',\'transcribe\')">✨ Run Transcription</button>'
+    + '</div>'
+    + '</div>';
+
+  // ── Section 2: Tagging / Scene Analysis ──
+  html += '<div class="aopts-section">'
+    + '<div class="aopts-section-title">Tagging / Scene Analysis</div>'
+    + '<label class="field">Source</label>'
+    + '<select id="aopts-tag-source">'
+    + '  <option value="visual">Visual frames — sample frames and tag time ranges</option>'
+    + '  <option value="speech">Audio (speech) — use transcript segments as scene boundaries</option>'
+    + '</select>'
+    + '<label class="field">Tagging LLM</label>'
+    + '<div id="aopts-visual-llm-wrap">'
+    +   _aoptsBuildModelSelect('aopts-visual-llm', catalog)
+    + '</div>'
+    + '<div class="aopts-help" style="margin-top:6px;margin-bottom:8px">'
+    + 'Defaults to the <b>analysis</b> task provider on /settings. '
+    + 'Audio source requires a saved transcript — if none exists yet, '
+    + 'one is generated on the fly using the Transcription settings above.</div>'
+    + '<label class="tog"><input type="checkbox" id="aopts-tag-force" checked> '
+    + 'Force re-tag (clear previous tags)</label>'
+    + '<div class="aopts-section-action">'
+    + '<button class="go" onclick="runAnalyzeOpts(' + videoId + ',\'tag\')">✨ Run Tagging</button>'
     + '</div>'
     + '</div>';
 

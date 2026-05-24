@@ -157,17 +157,49 @@ def extract_subclip(video_path, start, duration, out_path):
         return False
 
 
-def auto_crop_x_frac(video_path, start, duration, samples=7):
+_FACE_CASCADE = None
+_FACE_CASCADE_TRIED = False
+
+
+def _get_face_cascade():
+    """Lazily load OpenCV's Haar face cascade. Returns None if OpenCV
+    isn't installed or the cascade file can't be located — callers must
+    treat face detection as optional."""
+    global _FACE_CASCADE, _FACE_CASCADE_TRIED
+    if _FACE_CASCADE_TRIED:
+        return _FACE_CASCADE
+    _FACE_CASCADE_TRIED = True
+    try:
+        import cv2
+        path = os.path.join(cv2.data.haarcascades,
+                            "haarcascade_frontalface_default.xml")
+        if os.path.exists(path):
+            cas = cv2.CascadeClassifier(path)
+            if not cas.empty():
+                _FACE_CASCADE = cas
+    except Exception:
+        _FACE_CASCADE = None
+    return _FACE_CASCADE
+
+
+def auto_crop_x_frac(video_path, start, duration, samples=18):
     """Pick a horizontal crop center for a wide clip so a 9:16 window
     captures the most visually interesting content.
 
-    Samples *samples* frames evenly across the clip, scores per-column
-    "interest" as the sum of grayscale stdev (detail) and inter-frame
-    motion (subject movement), then slides a 9:16-wide window across the
-    aggregated score and returns the window center as x_frac in [0,1].
+    Three signals, in priority order:
+    1. Face position (OpenCV Haar cascade, when available) — strongest
+       weight, since cutting off a talking head is the worst failure
+       mode.
+    2. Inter-frame motion — finds the moving subject when no face is
+       detected (action shots, profile views).
+    3. Grayscale detail — texture / contrast as a tiebreaker.
 
-    Returns ``None`` if frame extraction or scoring fails — callers
-    should fall back to a centered crop (x_frac=0.5).
+    The per-column score is convolved with a 9:16-wide rectangular
+    window; the window with the highest aggregate score wins.
+
+    Returns ``None`` only if frame extraction failed outright; on every
+    other error the function falls back to internal heuristics and
+    returns a usable x_frac.
     """
     try:
         import numpy as np
@@ -178,7 +210,7 @@ def auto_crop_x_frac(video_path, start, duration, samples=7):
     if duration <= 0:
         return None
 
-    SAMPLE_W = 384  # downscaled width — per-column work stays cheap
+    SAMPLE_W = 960  # downscaled width — big enough for small-face detect
     with tempfile.TemporaryDirectory() as tmp:
         frames = []
         # Skip the first/last 5% so transitions don't bias the crop.
@@ -224,17 +256,59 @@ def auto_crop_x_frac(video_path, start, duration, samples=7):
             motion += np.abs(a - b).mean(axis=0)
         motion /= max(1, len(frames) - 1)
 
-        # Normalize and combine — motion weighted higher (subject tracking).
+        # Face score — Gaussian bump per detected face, accumulated across
+        # all frames so a face that appears in most frames dominates over
+        # a one-off false positive. The bump width matches the face box
+        # so multi-person shots split influence appropriately.
+        face_score = np.zeros(w, dtype=np.float32)
+        face_hits = 0
+        cas = _get_face_cascade()
+        if cas is not None:
+            xs = np.arange(w, dtype=np.float32)
+            # Drop boxes smaller than ~4% of frame height — these are
+            # almost always false positives on text glyphs, icons, or
+            # background detail (verified on a real test video where
+            # 50-px boxes on title text out-voted the 140-px speaker
+            # face).
+            min_side = max(28, int(round(h * 0.04)))
+            for f in frames:
+                try:
+                    u8 = f.astype("uint8")
+                    boxes = cas.detectMultiScale(
+                        u8, scaleFactor=1.1, minNeighbors=3,
+                        minSize=(min_side, min_side),
+                    )
+                except Exception:
+                    boxes = []
+                for (x, y, bw, bh) in boxes:
+                    cx = float(x) + float(bw) / 2.0
+                    sigma = max(8.0, float(bw) * 0.7)
+                    # Weight by face area so a 140×140 real face beats
+                    # a 54×54 false positive (~6.7× the weight) even if
+                    # both pass the min-size gate.
+                    amplitude = float(bw) * float(bh)
+                    face_score += (amplitude * np.exp(
+                        -((xs - cx) ** 2) / (2.0 * sigma * sigma)
+                    )).astype(np.float32)
+                    face_hits += 1
+
         def _norm(v):
             m = float(v.max()) or 1.0
             return v / m
-        score = 0.4 * _norm(detail) + 0.6 * _norm(motion)
+
+        # Combine. When faces were found in *any* frame, face dominates;
+        # motion is the back-up subject signal; detail is a tiebreaker.
+        if face_hits > 0:
+            score = (0.70 * _norm(face_score)
+                     + 0.22 * _norm(motion)
+                     + 0.08 * _norm(detail))
+        else:
+            score = 0.6 * _norm(motion) + 0.4 * _norm(detail)
 
         # Slide a target_w window; pick the center with the highest sum.
         kernel = np.ones(target_w, dtype=np.float32)
         sums = np.convolve(score, kernel, mode="valid")  # len = w - target_w + 1
         best_left = int(np.argmax(sums))
-        center_px = best_left + target_w / 2.0
         # The render filter expects x_frac in [0,1] where 0 = left edge of
         # the source and 1 = right edge of the *valid* crop range. ffmpeg's
         # crop=ih*9/16:ih:(iw-ih*9/16)*frac:0 maps frac=0 → x=0 and frac=1

@@ -91,7 +91,12 @@ TASK_DEFAULTS = {
 PROVIDER_DEFAULTS = {
     "claude": {
         "bin": "claude",
-        "model": "claude-haiku-4-5-20251001",
+        # Default to the highest-quality model in the family — clip
+        # planning, captioning and tagging are all quality-sensitive
+        # tasks where Opus's stronger multi-constraint reasoning
+        # materially improves output. Users can downshift to
+        # Sonnet/Haiku per-task in settings for cost reasons.
+        "model": "claude-opus-4-7",
         "label": "Claude Code",
         "supports_images": True,
         "homepage": "https://github.com/anthropics/claude-code",
@@ -106,7 +111,8 @@ PROVIDER_DEFAULTS = {
     },
     "codex": {
         "bin": "codex",
-        "model": "gpt-5-mini",
+        # Flagship reasoning model — quality-first default.
+        "model": "gpt-5",
         "label": "Codex CLI",
         "supports_images": False,
         "homepage": "https://github.com/openai/codex",
@@ -121,7 +127,8 @@ PROVIDER_DEFAULTS = {
     },
     "gemini": {
         "bin": "gemini",
-        "model": "gemini-2.5-flash",
+        # Pro tier — best image/video understanding for scene tagging.
+        "model": "gemini-2.5-pro",
         "label": "Gemini CLI",
         "supports_images": True,  # via @file references in the prompt
         "homepage": "https://github.com/google-gemini/gemini-cli",
@@ -137,7 +144,8 @@ PROVIDER_DEFAULTS = {
         # API directly. Auth is via MINIMAX_API_KEY in the environment
         # (loaded from .env at startup, like GEMINI_API_KEY).
         "bin": "minimax",
-        "model": "MiniMax-M1",
+        # Latest flagship.
+        "model": "MiniMax-M2",
         "label": "MiniMax",
         "supports_images": True,           # VL models accept image inputs
         "homepage": "https://www.minimax.io/platform",

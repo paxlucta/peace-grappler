@@ -61,9 +61,12 @@ MODELS = {
     ],
 }
 DEFAULT_MODEL = {
-    "whisper": "base",
+    # Best multilingual accuracy — critical for non-English content and
+    # for the word-level timestamps that drive sentence-aware clip cuts
+    # in the wizard.
+    "whisper": "large-v3",
     "openai":  "whisper-1",
-    "gemini":  "gemini-2.5-flash",
+    "gemini":  "gemini-2.5-pro",
 }
 
 # OpenAI's upload limit on /audio/transcriptions.

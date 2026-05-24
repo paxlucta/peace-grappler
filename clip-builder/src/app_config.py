@@ -76,7 +76,7 @@ DEFAULT_OUTPUT_FOLDER = "~/Documents/ClipBuilder/Default/Output"
 #              podcasts, talking-head content.
 DEFAULT_ANALYSIS_MODE = "visual"
 ANALYSIS_MODES = ("visual", "speech")
-DEFAULT_WHISPER_MODEL = "base"
+DEFAULT_WHISPER_MODEL = "large-v3"
 WHISPER_MODELS = ("tiny", "base", "small", "medium", "large-v3")
 DEFAULT_WHISPER_LANGUAGE = ""  # empty = auto-detect
 DEFAULT_WHISPER_TRANSLATE = False  # if True, transcript is forced to English

@@ -10,3 +10,8 @@ google-auth-httplib2
 yt-dlp>=2025.1.15
 faster-whisper
 numpy
+# opencv-python-headless powers face-aware auto-cropping for wide-source
+# clips (video.auto_crop_x_frac). Headless avoids pulling Qt/GTK on
+# macOS. Optional — the cropper falls back to motion+detail heuristics
+# when cv2 isn't importable.
+opencv-python-headless

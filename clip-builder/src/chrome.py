@@ -30,15 +30,15 @@ NAV_LINKS = [
     # single top-level entry. Parent href points to /wizard so clicking
     # "Builder" lands on the AI tab by default. The sub-tab strip lets
     # the user flip to Manual without going back to the main nav.
+    ("analyze",  "/analyze",  "Input Videos", [
+        ("analyze", "/analyze", "Files"),
+        ("rate",    "/rate",    "Scenes"),
+    ]),
     ("builder",  "/wizard",   "Builder", [
         ("wizard",  "/wizard",  "AI"),
         ("builder", "/builder", "Manual"),
     ]),
     ("library",  "/library",  "Generated Videos", None),
-    ("analyze",  "/analyze",  "Input Videos", [
-        ("analyze", "/analyze", "Files"),
-        ("rate",    "/rate",    "Scenes"),
-    ]),
     ("settings", "/settings", "Settings", None),
     ("drive",    "/drive",    "Drive",    None),
 ]

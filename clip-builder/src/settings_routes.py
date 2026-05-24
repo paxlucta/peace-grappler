@@ -1127,7 +1127,7 @@ function _currentAnalysisMode(){
 const TX_MODELS = {
   whisper: [
     {value:'tiny',     label:'tiny — 39 MB, fastest'},
-    {value:'base',     label:'base — 74 MB, balanced (default)'},
+    {value:'large-v3',     label:'base — 74 MB, balanced (default)'},
     {value:'small',    label:'small — 244 MB, better accuracy'},
     {value:'medium',   label:'medium — 769 MB, very accurate'},
     {value:'large-v3', label:'large-v3 — 1.5 GB, best quality (multilingual)'},
@@ -1142,7 +1142,7 @@ const TX_MODELS = {
     {value:'gemini-2.5-pro',        label:'gemini-2.5-pro — best quality (recommended for code-switching / bilingual content)'},
   ],
 };
-const TX_DEFAULT = {whisper:'base', openai:'whisper-1', gemini:'gemini-2.5-flash'};
+const TX_DEFAULT = {whisper:'large-v3', openai:'whisper-1', gemini:'gemini-2.5-flash'};
 
 function populateTxModels(provider, selected){
   const sel = document.getElementById('tx-model');
@@ -1211,10 +1211,10 @@ function fillFromAppCfg(){
   // model (or that provider's default).
   populateTxModels(txProv,
     appCfg.transcribe_model || (txProv === 'whisper'
-                                  ? (appCfg.whisper_model || 'base')
+                                  ? (appCfg.whisper_model || 'large-v3')
                                   : ''));
   document.getElementById('whisper-model').value =
-    appCfg.whisper_model || 'base';
+    appCfg.whisper_model || 'large-v3';
   document.getElementById('whisper-language').value =
     appCfg.whisper_language || '';
   document.getElementById('whisper-translate').checked =

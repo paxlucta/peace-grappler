@@ -1126,6 +1126,69 @@ def get_transcript_for_clip(video_id, clip_start, clip_end,
         conn.close()
 
 
+def get_words_in_range(video_id, start_time, end_time,
+                       prefer_translation=False):
+    """Flat list of word-level timings overlapping [start_time, end_time].
+
+    Returns ``[{"start": float, "end": float, "word": str}, ...]`` in
+    ABSOLUTE video time, ordered by start. Empty list if no word-level
+    data is stored (older transcripts, providers without word timestamps).
+
+    Used by the wizard to snap clip endpoints onto word/sentence
+    boundaries so we never cut mid-phrase.
+    """
+    if end_time <= start_time:
+        return []
+    conn = get_db()
+    try:
+        try:
+            conn.execute("SELECT words FROM transcripts LIMIT 0")
+        except sqlite3.OperationalError:
+            return []
+        # Same source/translation preference logic as get_transcript_for_clip.
+        rows = []
+        for translate_first in ([1, 0] if prefer_translation else [0, 1]):
+            rows = conn.execute(
+                """SELECT start_time, end_time, words
+                   FROM transcripts
+                   WHERE video_id=? AND is_translation=?
+                     AND start_time < ? AND end_time > ?
+                     AND words IS NOT NULL
+                   ORDER BY start_time""",
+                (video_id, translate_first, end_time, start_time),
+            ).fetchall()
+            if rows:
+                break
+        if not rows:
+            return []
+        import json as _json
+        out = []
+        for r in rows:
+            try:
+                words = _json.loads(r["words"])
+            except Exception:
+                continue
+            if not words:
+                continue
+            for w in words:
+                try:
+                    ws = float(w["start"])
+                    we = float(w["end"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if we <= start_time or ws >= end_time:
+                    continue
+                out.append({
+                    "start": ws,
+                    "end":   we,
+                    "word":  str(w.get("word", "")),
+                })
+        out.sort(key=lambda x: x["start"])
+        return out
+    finally:
+        conn.close()
+
+
 def get_video_transcripts(video_id):
     """All transcript groups for *video_id*. Same shape as
     get_transcripts_in_range() but spans the full video. Used by the
