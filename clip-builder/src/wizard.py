@@ -526,25 +526,16 @@ the same shot.
 """
 
 
-def _plan_video(model, research, scenes, music_files, feedback,
-                used_scene_ids=None, variation_ctx=None,
-                enable_text_overlays=False, ai_instructions="",
-                content_type="narrative"):
-    """Ask Claude to plan a single video.
+def _build_plan_prompt(research, scenes, music_files, feedback,
+                       used_scene_ids=None, variation_ctx=None,
+                       enable_text_overlays=False, ai_instructions="",
+                       content_type="narrative"):
+    """Construct the planning prompt that would be sent to the AI.
 
-    *content_type* — "narrative" (lecture/interview/podcast/explainer)
-    or "highlights" (sports/action montages). Narrative mode swaps in a
-    coherence-first prompt block that prioritizes a single theme and
-    slower pacing over montage variety. Default is "narrative" because
-    most user content benefits from coherence; pick "highlights" only
-    when the source material genuinely is a highlight reel.
-
-    variation_ctx: optional dict {"num": 2, "total": 3,
-                                  "prev_rationales": ["...", "..."]}
-    *ai_instructions* — free-form text the user pinned in the wizard UI.
-    Rendered at the top of the prompt and explicitly marked as taking
-    precedence over every other directive so it can override defaults
-    like clip length, music choice, etc.
+    Pulled out of _plan_video so the preview-prompt endpoint can show
+    the user exactly what _plan_video would send before any AI call
+    runs. Returns None if there are no usable scenes (matches the
+    behaviour of the original _plan_video early-return).
     """
     if used_scene_ids is None:
         used_scene_ids = set()
@@ -805,6 +796,39 @@ def _plan_video(model, research, scenes, music_files, feedback,
         dur_max=dur_range.get("max", 30),
         **app_config.domain_vars(),
     )
+    return prompt
+
+
+def _plan_video(model, research, scenes, music_files, feedback,
+                used_scene_ids=None, variation_ctx=None,
+                enable_text_overlays=False, ai_instructions="",
+                content_type="narrative", prompt_override=None):
+    """Ask the AI to plan a single video.
+
+    *content_type* — "narrative" (lecture/interview/podcast/explainer)
+    or "highlights" (sports/action montages). Narrative mode swaps in a
+    coherence-first prompt block that prioritizes a single theme and
+    slower pacing over montage variety.
+
+    *prompt_override* — when set, the constructed prompt is replaced by
+    this string and sent verbatim to the model. Used by the
+    preview-prompt modal so the user can edit the prompt before
+    proceeding. The scenes list is still passed to _validate_plan so
+    clip scene_ids returned by the model can be resolved.
+    """
+    if prompt_override is not None:
+        prompt = prompt_override
+    else:
+        prompt = _build_plan_prompt(
+            research, scenes, music_files, feedback,
+            used_scene_ids=used_scene_ids,
+            variation_ctx=variation_ctx,
+            enable_text_overlays=enable_text_overlays,
+            ai_instructions=ai_instructions,
+            content_type=content_type,
+        )
+        if prompt is None:
+            return None
 
     label = f"{_active_provider_label()} is planning the video"
     if variation_ctx and variation_ctx["total"] > 1:
@@ -821,16 +845,12 @@ def _plan_video(model, research, scenes, music_files, feedback,
     try:
         plan = _parse_json(raw)
     except (json.JSONDecodeError, ValueError) as e:
-        # Surface what the CLI actually said so the user can diagnose
-        # without us having to dig into stderr. Cap at 400 chars so a
-        # huge dump doesn't drown the log panel.
         snippet = (raw or "").strip().replace("\n", " ")[:400]
         emit(f"Failed to parse {_active_provider_label()}'s plan: {e}")
         emit(f"  Response preview: {snippet!r}")
         emit(f"  Response length: {len(raw or '')} chars")
         return None
 
-    # Validate plan
     plan = _validate_plan(plan, scenes, music_files)
     return plan
 
@@ -1359,7 +1379,8 @@ def _generate(model, num_videos, num_variations=1, folders=None,
               music_folders=None, include_wide=True, provider=None,
               no_music=False, add_captions=False, caption_style=None,
               auto_crop_wide=True, ai_instructions="",
-              dual_length=False, content_type="narrative"):
+              dual_length=False, content_type="narrative",
+              prompt_override=None):
     """Full wizard generation flow. Runs in a background thread.
 
     *no_music* — when True, the AI plans without a music track and the
@@ -1515,13 +1536,21 @@ def _generate(model, num_videos, num_variations=1, folders=None,
                     else:
                         research_for_plan = research
 
+                    # The user-edited preview prompt applies to the
+                    # FIRST plan call only — subsequent variations /
+                    # videos / length-variants get freshly built prompts
+                    # so their variation context, used-scene exclusions,
+                    # and target durations remain correct.
+                    first_call_override = prompt_override
+                    prompt_override = None
                     plan = _plan_video(model, research_for_plan, scenes,
                                        music_files, feedback,
                                        used_at_var_start,
                                        variation_ctx=variation_ctx,
                                        enable_text_overlays=enable_text_overlays,
                                        ai_instructions=ai_instructions,
-                                       content_type=content_type)
+                                       content_type=content_type,
+                                       prompt_override=first_call_override)
                     if not plan or not plan.get("clips"):
                         emit(f"{var_label}: {_active_provider_label()} "
                              f"couldn't create a plan")
@@ -1750,6 +1779,102 @@ def api_folders():
     return jsonify(sorted(folders))
 
 
+@wizard_bp.route("/wizard/api/preview-prompt", methods=["POST"])
+def api_preview_prompt():
+    """Build the prompt the first plan call would send, without
+    invoking the AI. Lets the wizard show the full context in an
+    editable modal before the user kicks off generation.
+
+    Same input shape as /wizard/api/generate. Returns
+    ``{"prompt": "<text>"}`` on success, or ``{"error": "<msg>"}``
+    with a 400 if there's no usable material to plan from. Research
+    is read from cache only — we don't run a fresh research call
+    just for a preview.
+    """
+    data = request.json or {}
+    model = (data.get("model") or "").strip() or None
+    provider = (data.get("provider") or "").strip() or None
+    num_variations = max(1, min(3, data.get("variations", 1)))
+    folders = data.get("folders", []) or []
+    files_pick = data.get("files", []) or []
+    enable_text_overlays = data.get("text_overlays", False)
+    music_folders = data.get("music_folders", [])
+    include_wide = data.get("include_wide", True)
+    no_music = bool(data.get("no_music", False))
+    dual_length = bool(data.get("dual_length", False))
+    content_type = (data.get("content_type") or "narrative").strip()
+    if content_type not in ("narrative", "highlights"):
+        content_type = "narrative"
+    ai_instructions = (data.get("ai_instructions") or "").strip()
+
+    # Apply the same provider/model context the background generator
+    # would use, so any provider-specific defaults baked into the
+    # prompt mirror what /api/generate will run.
+    _call_ctx.provider = provider
+    _call_ctx.model    = model
+
+    research = _get_cached_research() or _default_research()
+
+    scenes = get_all_scenes()
+    if files_pick:
+        scenes = _filter_scenes_by_files(scenes, files_pick)
+    elif folders:
+        from video import VIDEO_DIR
+        scenes = _filter_scenes_by_folders(scenes, folders, VIDEO_DIR)
+    if not include_wide:
+        scenes = [s for s in scenes if not s.get("wide", False)]
+    if not scenes:
+        return jsonify({"error": "No analyzed scenes match the selected sources."}), 400
+
+    if no_music:
+        music_files = []
+    else:
+        music_files = _find_music_files()
+        if music_folders:
+            music_dir = ASSETS_DIR / "music"
+            filtered_music = []
+            for m in music_files:
+                mpath = Path(m["path"])
+                try:
+                    rel = str(mpath.parent.relative_to(music_dir))
+                except ValueError:
+                    rel = "(root)"
+                if rel == ".":
+                    rel = "(root)"
+                if rel in music_folders:
+                    filtered_music.append(m)
+            music_files = filtered_music
+
+    feedback = _get_all_feedback()
+
+    # Match the duration the first plan call will target. Dual-length
+    # mode plans the SHORT cut first, so preview that variant.
+    if dual_length:
+        research = {
+            **research,
+            "optimal_duration": 22,
+            "ideal_duration_range": {"min": 15, "max": 30},
+        }
+
+    # Variation 1 of N — first plan call always has empty
+    # prev_rationales, so the preview matches what _generate sends.
+    variation_ctx = None
+    if num_variations > 1:
+        variation_ctx = {"num": 1, "total": num_variations, "prev_rationales": []}
+
+    prompt = _build_plan_prompt(
+        research, scenes, music_files, feedback,
+        used_scene_ids=set(),
+        variation_ctx=variation_ctx,
+        enable_text_overlays=enable_text_overlays,
+        ai_instructions=ai_instructions,
+        content_type=content_type,
+    )
+    if prompt is None:
+        return jsonify({"error": "No usable scenes after filtering (all too short or missing)."}), 400
+    return jsonify({"prompt": prompt})
+
+
 @wizard_bp.route("/wizard/api/generate", methods=["POST"])
 def api_generate():
     data = request.json or {}
@@ -1776,6 +1901,11 @@ def api_generate():
         content_type = "narrative"
     caption_style = data.get("caption_style") or {}
     ai_instructions = (data.get("ai_instructions") or "").strip()
+    # Optional: the wizard's preview-prompt modal POSTs the user's
+    # (possibly edited) prompt back here. When present, it replaces the
+    # constructed prompt for the FIRST plan call only.
+    raw_override = data.get("prompt_override")
+    prompt_override = raw_override.strip() if isinstance(raw_override, str) and raw_override.strip() else None
 
     threading.Thread(
         target=_generate,
@@ -1797,6 +1927,7 @@ def api_generate():
             "ai_instructions": ai_instructions,
             "dual_length": dual_length,
             "content_type": content_type,
+            "prompt_override": prompt_override,
         },
         daemon=True,
     ).start()
@@ -2487,6 +2618,69 @@ button:disabled{opacity:.5;cursor:not-allowed}
       <button class="btn-primary" id="gen-btn" onclick="startGeneration()">✨ Generate Video</button>
     </div>
 
+    <!-- Prompt preview modal — opens when the user clicks Generate.
+         Shows the full prompt that will be sent to the model provider
+         and lets the user edit it before proceeding (or cancel). The
+         edited text applies to the first plan call only; subsequent
+         variations and length-variants are rebuilt by the server. -->
+    <div id="prompt-preview-modal"
+         style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);
+                z-index:9200;align-items:center;justify-content:center;padding:20px"
+         onclick="if(event.target===this)cancelPromptPreview()">
+      <div style="background:#15151c;border:1px solid #2e2e3e;border-radius:10px;
+                  width:900px;max-width:96vw;height:80vh;display:flex;
+                  flex-direction:column;box-shadow:0 12px 40px rgba(0,0,0,.6)">
+        <div style="padding:14px 18px;border-bottom:1px solid #242424;
+                    display:flex;align-items:center;gap:10px">
+          <h3 style="flex:1;margin:0;font-size:14px;color:#fff">
+            Review prompt before sending
+          </h3>
+          <span id="prompt-preview-meta"
+                style="font-size:11px;color:#777"></span>
+          <button onclick="cancelPromptPreview()"
+                  style="background:none;border:none;color:#888;font-size:22px;
+                         cursor:pointer;padding:0 4px;line-height:1">&times;</button>
+        </div>
+        <div style="padding:10px 18px 4px;font-size:11px;color:#888">
+          This is the full context that will be sent to the model
+          provider for the first plan. You can edit it freely — your
+          edits replace the constructed prompt. Subsequent variations
+          and additional videos are planned with freshly built prompts.
+        </div>
+        <div id="prompt-preview-loading"
+             style="display:none;flex:1;align-items:center;
+                    justify-content:center;color:#888;font-size:13px">
+          Preparing prompt...
+        </div>
+        <textarea id="prompt-preview-text"
+                  spellcheck="false"
+                  style="flex:1;margin:10px 18px;padding:10px 12px;
+                         background:#0c0c14;border:1px solid #2e2e3e;
+                         color:#ddd;border-radius:6px;font-size:12px;
+                         font-family:ui-monospace,Menlo,Consolas,monospace;
+                         line-height:1.45;resize:none;box-sizing:border-box;
+                         min-height:0"></textarea>
+        <div id="prompt-preview-error"
+             style="display:none;padding:6px 18px;color:#ff7676;font-size:12px"></div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;
+                    padding:12px 18px;border-top:1px solid #242424">
+          <button onclick="cancelPromptPreview()"
+                  style="background:#1a1a22;border:1px solid #2e2e3e;color:#aaa;
+                         padding:7px 14px;border-radius:6px;cursor:pointer;
+                         font-size:12px">
+            Cancel
+          </button>
+          <button id="prompt-preview-proceed"
+                  onclick="proceedPromptPreview()"
+                  style="background:#e53935;border:1px solid #e53935;color:#fff;
+                         padding:7px 14px;border-radius:6px;cursor:pointer;
+                         font-size:12px;font-weight:600">
+            Proceed with generation
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- AI Instructions: snippet picker modal. Opens when user clicks Load. -->
     <div id="ai-instr-modal"
          style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);
@@ -2851,18 +3045,22 @@ async function loadMusicFolders() {
   var dd = document.getElementById('music-dropdown');
   // "No Music" sits at the top as a mutually-exclusive choice — checking
   // it deselects the folder rows; checking any folder deselects it.
+  // Default to No Music: most user content is lecture / interview /
+  // instructional where the original audio carries the value, so we
+  // pre-select No Music and leave folder rows unchecked. User can flip
+  // it to add a backing track.
   var html = '<label class="folder-item fi-nomusic">'
-    + '<input type="checkbox" id="music-nomusic"'
+    + '<input type="checkbox" id="music-nomusic" checked'
     +   ' onchange="onMusicNoMusicToggle(this)">'
     + '<span class="fi-name">No Music</span></label>';
   for (var i = 0; i < folders.length; i++) {
     html += '<label class="folder-item">'
-      + '<input type="checkbox" value="' + folders[i] + '" checked'
+      + '<input type="checkbox" value="' + folders[i] + '"'
       +   ' onchange="onMusicFolderToggle(this)"/>'
       + '<span class="fi-name">' + folders[i] + '</span></label>';
   }
   dd.innerHTML = html;
-  updatePickerLabel('music-dropdown', 'music-btn-label', 'All Music');
+  updateMusicLabel();
 }
 
 function onMusicNoMusicToggle(input) {
@@ -3039,15 +3237,121 @@ async function aiInstrDelete(sid) {
   openAiInstrLoad();   // refresh the list in place
 }
 
-function startGeneration() {
-  if (generating) return;
-  generating = true;
+// Holds the request payload between the preview-prompt modal and the
+// actual /api/generate POST, so the user's modal-time edits can be
+// stitched in without re-collecting form state.
+var _pendingGenPayload = null;
 
+function _collectGenPayload() {
   var sel = getSelectedModel();
   var numVids = parseInt(document.getElementById('num-videos').value) || 1;
   var numVars = parseInt(document.getElementById('num-variations').value) || 1;
+  return {
+    model: sel.model,
+    provider: sel.provider,
+    num_videos: numVids,
+    variations: numVars,
+    files: getWizSelectedFiles(),
+    music_folders: (function(){
+      var checks = document.querySelectorAll(
+        '#music-dropdown input[type=checkbox]:not(#music-nomusic)'
+      );
+      var total = checks.length, selected = [];
+      for (var i = 0; i < checks.length; i++) {
+        if (checks[i].checked) selected.push(checks[i].value);
+      }
+      return (selected.length === total) ? [] : selected;
+    })(),
+    mute_source: document.getElementById('mute-source').checked,
+    no_music: !!(document.getElementById('music-nomusic')
+                 && document.getElementById('music-nomusic').checked),
+    text_overlays: document.getElementById('text-overlays').checked,
+    include_wide: document.getElementById('include-wide').checked,
+    auto_crop_wide: document.getElementById('auto-crop-wide').checked,
+    dual_length: document.getElementById('dual-length').checked,
+    content_type: document.getElementById('content-type').value,
+    add_captions: document.getElementById('add-captions').checked,
+    ai_instructions: (document.getElementById('ai-instructions') || {}).value || '',
+    caption_style: {
+      font:     document.getElementById('cap-font').value,
+      color:    document.getElementById('cap-color').value,
+      bg:       document.getElementById('cap-bg-on').checked
+                  ? document.getElementById('cap-bg').value
+                  : null,
+      position: document.getElementById('cap-pos').value,
+    },
+  };
+}
 
-  document.getElementById('gen-btn').disabled = true;
+function startGeneration() {
+  if (generating) return;
+  // Don't flip `generating` yet — the user can still cancel from the
+  // preview modal. Just lock the button so we don't double-open.
+  var btn = document.getElementById('gen-btn');
+  btn.disabled = true;
+
+  _pendingGenPayload = _collectGenPayload();
+
+  var modal      = document.getElementById('prompt-preview-modal');
+  var loadingEl  = document.getElementById('prompt-preview-loading');
+  var textareaEl = document.getElementById('prompt-preview-text');
+  var errorEl    = document.getElementById('prompt-preview-error');
+  var proceedBtn = document.getElementById('prompt-preview-proceed');
+  var metaEl     = document.getElementById('prompt-preview-meta');
+
+  modal.style.display = 'flex';
+  loadingEl.style.display = 'flex';
+  textareaEl.style.display = 'none';
+  textareaEl.value = '';
+  errorEl.style.display = 'none';
+  errorEl.textContent = '';
+  proceedBtn.disabled = true;
+  metaEl.textContent = '';
+
+  fetch('/wizard/api/preview-prompt', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(_pendingGenPayload),
+  }).then(function(r) {
+    return r.json().then(function(j){ return {ok: r.ok, body: j}; });
+  }).then(function(res) {
+    loadingEl.style.display = 'none';
+    if (!res.ok) {
+      errorEl.textContent = (res.body && res.body.error) || 'Failed to build preview prompt.';
+      errorEl.style.display = 'block';
+      textareaEl.style.display = 'none';
+      return;
+    }
+    textareaEl.style.display = 'block';
+    textareaEl.value = res.body.prompt || '';
+    metaEl.textContent = (textareaEl.value.length.toLocaleString()) + ' chars';
+    proceedBtn.disabled = false;
+    textareaEl.focus();
+  }).catch(function(e) {
+    loadingEl.style.display = 'none';
+    errorEl.textContent = 'Failed to build preview prompt: ' + e.message;
+    errorEl.style.display = 'block';
+  });
+}
+
+function cancelPromptPreview() {
+  document.getElementById('prompt-preview-modal').style.display = 'none';
+  _pendingGenPayload = null;
+  document.getElementById('gen-btn').disabled = false;
+}
+
+function proceedPromptPreview() {
+  if (!_pendingGenPayload) { cancelPromptPreview(); return; }
+  var edited = document.getElementById('prompt-preview-text').value || '';
+  var payload = _pendingGenPayload;
+  _pendingGenPayload = null;
+  payload.prompt_override = edited;
+  document.getElementById('prompt-preview-modal').style.display = 'none';
+  _runGeneration(payload);
+}
+
+function _runGeneration(payload) {
+  generating = true;
   generatedVideos = [];
 
   var prog = document.getElementById('progress');
@@ -3064,42 +3368,7 @@ function startGeneration() {
   fetch('/wizard/api/generate', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      model: sel.model,
-      provider: sel.provider,
-      num_videos: numVids,
-      variations: numVars,
-      files: getWizSelectedFiles(),
-      music_folders: (function(){
-        // Exclude the special No-Music checkbox from the folder list.
-        var checks = document.querySelectorAll(
-          '#music-dropdown input[type=checkbox]:not(#music-nomusic)'
-        );
-        var total = checks.length, selected = [];
-        for (var i = 0; i < checks.length; i++) {
-          if (checks[i].checked) selected.push(checks[i].value);
-        }
-        return (selected.length === total) ? [] : selected;
-      })(),
-      mute_source: document.getElementById('mute-source').checked,
-      no_music: !!(document.getElementById('music-nomusic')
-                   && document.getElementById('music-nomusic').checked),
-      text_overlays: document.getElementById('text-overlays').checked,
-      include_wide: document.getElementById('include-wide').checked,
-      auto_crop_wide: document.getElementById('auto-crop-wide').checked,
-      dual_length: document.getElementById('dual-length').checked,
-      content_type: document.getElementById('content-type').value,
-      add_captions: document.getElementById('add-captions').checked,
-      ai_instructions: (document.getElementById('ai-instructions') || {}).value || '',
-      caption_style: {
-        font:     document.getElementById('cap-font').value,
-        color:    document.getElementById('cap-color').value,
-        bg:       document.getElementById('cap-bg-on').checked
-                    ? document.getElementById('cap-bg').value
-                    : null,
-        position: document.getElementById('cap-pos').value,
-      },
-    }),
+    body: JSON.stringify(payload),
   }).then(function() {
     var es = new EventSource('/wizard/api/status');
     es.onmessage = function(e) {
