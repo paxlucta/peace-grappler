@@ -385,7 +385,7 @@ def _default_research():
 # ── Creative planning phase ─────────────────────────────────────────────────
 
 CREATIVE_PROMPT = """\
-You are an expert video editor creating an Instagram Reel for a {domain} \
+You are an expert video editor creating a short-form video for a {domain} \
 channel called {brand}. Your ONLY goal: MAXIMIZE ENGAGEMENT (views, \
 likes, shares, saves).
 {user_instructions}
@@ -410,7 +410,9 @@ likes, shares, saves).
 {variation_info}
 
 ## Instructions
-Create a video plan optimized for maximum Instagram Reel engagement.
+Create a video plan optimized for maximum engagement.
+
+{coherence_block}
 
 FEEDBACK IS YOUR MOST IMPORTANT INPUT. The user's feedback above represents \
 hard-learned lessons from previous generations. You MUST:
@@ -421,17 +423,19 @@ hard-learned lessons from previous generations. You MUST:
 - In your "rationale" field, explicitly mention which feedback items shaped your decisions
 
 KEY PRINCIPLES:
-1. HOOK — First 1-2 seconds must grab attention (most explosive/dramatic moment)
-2. PACING — Tight cuts, no dead time. Target ~{cuts_per_min} cuts per minute
-3. ARC — Even a 20-second video needs rising action
-4. MUSIC — Choose music that amplifies energy. SYNC cuts to beat positions when possible.
-5. ENDING — Strong close that makes viewers replay or share
+1. HOOK — First 1-2 seconds must grab attention (most compelling moment that \
+sets up the theme)
+2. PACING — Target ~{cuts_per_min} cuts per minute
+3. ARC — Even a 20-second video needs rising action that builds ON THE THEME
+4. MUSIC — Choose music that amplifies the mood. SYNC cuts to beat positions when possible.
+5. ENDING — Strong close that resolves or punctuates the theme so viewers replay or share
 6. DURATION — Target {target_dur}s (within {dur_min}-{dur_max}s range)
 7. BEATS — If beat positions are provided, align clip start/end times to land on or \
 near beat positions. Viewers subconsciously feel beat-synced cuts as more professional.
 
 For each clip, specify a sub-range within the scene. Keep clips tight (1.5-5s each).
-Prefer scenes tagged "high-energy" or with action/impact tags from the available list.
+Prefer scenes whose transcript or tags support the chosen theme over scenes that \
+are merely "high-energy" but off-topic.
 
 SPEECH-AWARE CUTS — MANDATORY when a scene has a "speech:" line:
 - The "speech:" line lists transcript segments with their absolute start/end \
@@ -447,8 +451,10 @@ start/end on visual/beat cues as normal.
 
 Output a JSON object with EXACTLY this structure:
 {{
+  "theme": "<ONE short phrase, max 10 words, naming what this video is ABOUT — \
+the single idea, quote, character, moment, or claim every clip develops>",
   "target_duration": <seconds>,
-  "rationale": "<brief creative strategy explanation>",
+  "rationale": "<brief creative strategy explanation — must reference the theme>",
   "music": {{"name": "<music name from list, or null>", "volume": <1-5>}},
   "clips": [
     {{
@@ -457,13 +463,16 @@ Output a JSON object with EXACTLY this structure:
       "end": <end seconds>,
       "wide_split": <true if this WIDE scene should use split-screen>,
       "text_overlay": "<optional text to overlay on this clip, or null>",
-      "reason": "<why this clip, why this position>"
+      "reason": "<how THIS clip develops the theme — not just why it's interesting>"
     }}
   ],
   "transitions": ["<transition name>", ...]
 }}
 
 RULES:
+- "theme" is REQUIRED — it is the unifying idea of the whole video. \
+Every clip must visibly serve this theme; do not pad with off-topic but \
+"interesting" moments.
 - "transitions" array must have exactly len(clips) - 1 elements
 - clip start/end must be within the scene's time range
 - each clip duration should be 1.5-5 seconds
@@ -481,10 +490,54 @@ or engagement hooks. null if no text needed for this clip.
 """
 
 
+NARRATIVE_COHERENCE_BLOCK = """\
+THEME FIRST — read this before anything else:
+
+1. Read the speech excerpts and tags across all scenes. Identify ONE \
+specific, narrow theme — a single idea, quote, claim, character, \
+moment, or insight that the video will be ABOUT.
+   - GOOD themes: "Raskolnikov's guilt", "the one rule Dostoevsky broke", \
+"why this submission worked", "Janey's first Russian sentence".
+   - BAD themes: "best moments", "highlights", "Russian language", \
+"this lecture" — too broad, anything fits.
+2. Every clip you pick MUST visibly develop that single theme. If a clip \
+is interesting but doesn't develop the theme, REJECT IT — even if it's \
+more "exciting" than the alternatives.
+3. The clips together should form ONE coherent thought, like a tiny \
+essay or a single anecdote — not a montage of unrelated good moments.
+4. PACING is secondary to COHERENCE. A slightly slower, single-topic \
+video outperforms a fast-cut montage of disconnected clips for \
+narrative/lecture/interview content. Viewers stay because they want to \
+know how the ONE thought ends.
+5. Watch for DUPLICATES — never pick two clips that show essentially \
+the same shot or repeat the same point. Each clip must advance the theme.
+"""
+
+HIGHLIGHTS_COHERENCE_BLOCK = """\
+THEME FIRST — read this before anything else:
+
+1. Identify ONE specific theme this short is about — the strongest hook \
+or storyline available in the scenes (a single fighter, technique, \
+event, or moment). Avoid generic themes like "best of" or "highlights".
+2. Every clip should develop that theme. Variety within the theme is \
+good; off-topic clips are not — even if exciting.
+3. Watch for DUPLICATES — never pick two clips that show essentially \
+the same shot.
+"""
+
+
 def _plan_video(model, research, scenes, music_files, feedback,
                 used_scene_ids=None, variation_ctx=None,
-                enable_text_overlays=False, ai_instructions=""):
+                enable_text_overlays=False, ai_instructions="",
+                content_type="narrative"):
     """Ask Claude to plan a single video.
+
+    *content_type* — "narrative" (lecture/interview/podcast/explainer)
+    or "highlights" (sports/action montages). Narrative mode swaps in a
+    coherence-first prompt block that prioritizes a single theme and
+    slower pacing over montage variety. Default is "narrative" because
+    most user content benefits from coherence; pick "highlights" only
+    when the source material genuinely is a highlight reel.
 
     variation_ctx: optional dict {"num": 2, "total": 3,
                                   "prev_rationales": ["...", "..."]}
@@ -498,6 +551,43 @@ def _plan_video(model, research, scenes, music_files, feedback,
 
     # Format scenes compactly
     grades = get_scene_grades()
+
+    # De-dup near-adjacent scenes from the same source video. The
+    # analyzer sometimes splits a single continuous shot into multiple
+    # consecutive sub-scenes (e.g. when energy/motion crosses its
+    # threshold mid-shot). If Claude picks two of those back-to-back
+    # the output looks like a duplicate cut. Collapse any run where
+    # consecutive scenes start within DEDUP_GAP_S of the previous
+    # scene's end on the same video; keep the highest-grade member.
+    DEDUP_GAP_S = 2.0
+
+    def _grade(s):
+        g = grades.get(s["id"])
+        if not g or not g.get("times_graded"):
+            return 0.0
+        return g["total_score"] / g["times_graded"]
+
+    by_video = {}
+    for s in scenes:
+        by_video.setdefault(s["video_id"], []).append(s)
+    deduped = []
+    for vid, group in by_video.items():
+        group.sort(key=lambda s: s["start_time"])
+        cluster = []
+        for s in group:
+            if cluster and s["start_time"] - cluster[-1]["end_time"] < DEDUP_GAP_S:
+                cluster.append(s)
+            else:
+                if cluster:
+                    deduped.append(max(cluster, key=_grade))
+                cluster = [s]
+        if cluster:
+            deduped.append(max(cluster, key=_grade))
+    # Replace the input list so downstream code (used_scene_ids
+    # filtering, formatting) sees the deduped set. Sorted back to a
+    # stable order for prompt determinism.
+    scenes = sorted(deduped, key=lambda s: (s["video_id"], s["start_time"]))
+
     scene_lines = []
     for s in scenes:
         if s["id"] in used_scene_ids:
@@ -685,6 +775,19 @@ def _plan_video(model, research, scenes, music_files, feedback,
         )
     else:
         user_instructions_block = ""
+    # Coherence block: narrative content (lecture/interview/podcast)
+    # gets the strict single-theme treatment; highlights content keeps
+    # a lighter constraint that still asks for a theme but tolerates
+    # more variety.
+    coherence = (HIGHLIGHTS_COHERENCE_BLOCK
+                 if content_type == "highlights"
+                 else NARRATIVE_COHERENCE_BLOCK)
+    # Narrative content benefits from slower pacing — override the
+    # research-derived cuts_per_minute so a lecture short doesn't get
+    # the same machine-gun cuts as a sports montage.
+    if content_type == "narrative":
+        cuts = min(cuts, 10)
+
     prompt = CREATIVE_PROMPT.format(
         user_instructions=user_instructions_block,
         research=json.dumps(research, indent=2),
@@ -694,6 +797,7 @@ def _plan_video(model, research, scenes, music_files, feedback,
         beat_info=beat_str,
         feedback=feedback_str,
         variation_info=variation_str,
+        coherence_block=coherence,
         text_overlay_instruction=text_instruction,
         cuts_per_min=cuts,
         target_dur=optimal,
@@ -809,6 +913,22 @@ def _validate_plan(plan, scenes, music_files):
     """Validate and fix Claude's plan against actual data."""
     scene_map = {s["id"]: s for s in scenes}
     music_names = {m["name"] for m in music_files}
+
+    # Surface the theme so callers (emit logs, caption generator) can
+    # reference it. Soft-validate: warn but accept if missing — older
+    # plans / non-narrative content may omit it.
+    theme = (plan.get("theme") or "").strip()
+    if theme:
+        # Trim to a reasonable length — themes longer than ~120 chars
+        # tend to be paragraphs rather than themes and dilute their use.
+        if len(theme) > 120:
+            theme = theme[:117] + "..."
+        plan["theme"] = theme
+        emit(f"Theme: {theme}")
+    else:
+        plan["theme"] = ""
+        emit("Warning: planner did not declare a theme — output may "
+             "feel like an unrelated montage. Consider regenerating.")
 
     # Validate music
     music = plan.get("music") or {}
@@ -1092,9 +1212,13 @@ called {brand} ({handle}).
 
 Generate an Instagram Reel caption + hashtags for a video with these details:
 - Duration: {duration}s
+- Theme (what the video is ABOUT): {theme}
 - Creative strategy: {rationale}
 - Tags/content: {tags}
 - Music: {music}
+
+The caption MUST reflect the theme — readers should understand the single \
+idea the video delivers, not just see generic hype.
 
 Requirements:
 - Caption should be 1-3 punchy lines that drive engagement (likes, comments, saves, shares)
@@ -1123,6 +1247,7 @@ def _generate_caption(model, plan, duration):
     dv = app_config.domain_vars()
     prompt = CAPTION_PROMPT.format(
         duration=duration,
+        theme=(plan.get("theme") or "(theme not declared by planner)"),
         rationale=plan.get("rationale", f"{dv['domain']} highlight reel"),
         tags=", ".join(sorted(tags_used)),
         music=music_name,
@@ -1234,7 +1359,7 @@ def _generate(model, num_videos, num_variations=1, folders=None,
               music_folders=None, include_wide=True, provider=None,
               no_music=False, add_captions=False, caption_style=None,
               auto_crop_wide=True, ai_instructions="",
-              dual_length=False):
+              dual_length=False, content_type="narrative"):
     """Full wizard generation flow. Runs in a background thread.
 
     *no_music* — when True, the AI plans without a music track and the
@@ -1395,7 +1520,8 @@ def _generate(model, num_videos, num_variations=1, folders=None,
                                        used_at_var_start,
                                        variation_ctx=variation_ctx,
                                        enable_text_overlays=enable_text_overlays,
-                                       ai_instructions=ai_instructions)
+                                       ai_instructions=ai_instructions,
+                                       content_type=content_type)
                     if not plan or not plan.get("clips"):
                         emit(f"{var_label}: {_active_provider_label()} "
                              f"couldn't create a plan")
@@ -1643,6 +1769,11 @@ def api_generate():
     add_captions = bool(data.get("add_captions", False))
     auto_crop_wide = bool(data.get("auto_crop_wide", True))
     dual_length = bool(data.get("dual_length", False))
+    # Accept narrative or highlights; default narrative (most user
+    # content is lecture/interview-style and benefits from coherence).
+    content_type = (data.get("content_type") or "narrative").strip()
+    if content_type not in ("narrative", "highlights"):
+        content_type = "narrative"
     caption_style = data.get("caption_style") or {}
     ai_instructions = (data.get("ai_instructions") or "").strip()
 
@@ -1665,6 +1796,7 @@ def api_generate():
             "auto_crop_wide": auto_crop_wide,
             "ai_instructions": ai_instructions,
             "dual_length": dual_length,
+            "content_type": content_type,
         },
         daemon=True,
     ).start()
@@ -2308,6 +2440,14 @@ button:disabled{opacity:.5;cursor:not-allowed}
              title="Render TWO cuts of every video: a ~22s short for IG Reels / TikTok, and a ~50s long for YouTube Shorts. Each is independently planned by the AI with pacing appropriate to its duration.">
         <input type="checkbox" id="dual-length"> Dual length (YT Shorts + IG/TT)
       </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#aaa;cursor:pointer"
+             title="Narrative = lectures, interviews, podcasts, explainers — coherence-first, single theme, slower pacing. Highlights = sports, action, montages — variety + fast cuts. When in doubt, use Narrative.">
+        Content type:
+        <select id="content-type" style="background:#0c0c14;border:1px solid #2e2e3e;color:#eee;border-radius:5px;padding:3px 6px;font-size:12px">
+          <option value="narrative" selected>Narrative (lecture / interview / podcast)</option>
+          <option value="highlights">Highlights (sports / action montage)</option>
+        </select>
+      </label>
       <div style="display:flex;align-items:center;gap:4px">
         <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#aaa;cursor:pointer"
                title="Burn the spoken transcript onto each scene as on-screen captions.">
@@ -2948,6 +3088,7 @@ function startGeneration() {
       include_wide: document.getElementById('include-wide').checked,
       auto_crop_wide: document.getElementById('auto-crop-wide').checked,
       dual_length: document.getElementById('dual-length').checked,
+      content_type: document.getElementById('content-type').value,
       add_captions: document.getElementById('add-captions').checked,
       ai_instructions: (document.getElementById('ai-instructions') || {}).value || '',
       caption_style: {
