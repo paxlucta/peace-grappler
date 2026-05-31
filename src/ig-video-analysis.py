@@ -67,10 +67,42 @@ def _anchor(anchor_date):
     return f"'{anchor_date}'" if anchor_date else "'now'"
 
 
+def _insight_cutoff(anchor_date):
+    """SQL fragment for 'as-of this point in time' filter on ig_media_insights.fetched_at.
+    For live mode (anchor_date=None) no filter is applied — picks the most recent snapshot.
+    For backfill mode it caps at end-of-anchor-day so we read that day's snapshot, not today's.
+    """
+    if not anchor_date:
+        return ""
+    return f"AND fetched_at < datetime('{anchor_date}', '+1 day')"
+
+
+def _latest_insights_cte(anchor_date):
+    """CTE that selects the latest insight row per (media, metric) as-of anchor.
+    Returns SQL like: WITH latest_insights AS ( ... )
+    Joined later via `JOIN latest_insights li ON li.media_id = m.id AND li.metric = ?`.
+    """
+    cutoff = _insight_cutoff(anchor_date)
+    return f"""
+        WITH latest_insights AS (
+            SELECT media_id, metric, value
+            FROM (
+                SELECT media_id, metric, value,
+                       ROW_NUMBER() OVER (PARTITION BY media_id, metric ORDER BY fetched_at DESC) AS rn
+                FROM ig_media_insights
+                WHERE 1=1 {cutoff}
+            )
+            WHERE rn = 1
+        )
+    """
+
+
 def fetch_recent_reels(con, anchor_date=None):
-    """Return reels from the 7 days preceding anchor_date (or now) that have metrics."""
+    """Return reels from the 7 days preceding anchor_date (or now) with their as-of metrics."""
     a = _anchor(anchor_date)
+    cte = _latest_insights_cte(anchor_date)
     rows = con.execute(f"""
+        {cte}
         SELECT
             m.id,
             m.caption,
@@ -78,16 +110,16 @@ def fetch_recent_reels(con, anchor_date=None):
             m.permalink,
             m.media_url,
             m.thumbnail_url,
-            MAX(CASE WHEN i.metric='views'                      THEN i.value END) AS views,
-            MAX(CASE WHEN i.metric='reach'                      THEN i.value END) AS reach,
-            MAX(CASE WHEN i.metric='shares'                     THEN i.value END) AS shares,
-            MAX(CASE WHEN i.metric='saved'                      THEN i.value END) AS saves,
-            MAX(CASE WHEN i.metric='likes'                      THEN i.value END) AS likes,
-            MAX(CASE WHEN i.metric='comments'                   THEN i.value END) AS comments,
-            MAX(CASE WHEN i.metric='ig_reels_avg_watch_time'    THEN i.value END) AS avg_watch_ms,
-            MAX(CASE WHEN i.metric='ig_reels_video_view_total_time' THEN i.value END) AS total_watch_ms
+            MAX(CASE WHEN li.metric='views'                            THEN li.value END) AS views,
+            MAX(CASE WHEN li.metric='reach'                            THEN li.value END) AS reach,
+            MAX(CASE WHEN li.metric='shares'                           THEN li.value END) AS shares,
+            MAX(CASE WHEN li.metric='saved'                            THEN li.value END) AS saves,
+            MAX(CASE WHEN li.metric='likes'                            THEN li.value END) AS likes,
+            MAX(CASE WHEN li.metric='comments'                         THEN li.value END) AS comments,
+            MAX(CASE WHEN li.metric='ig_reels_avg_watch_time'          THEN li.value END) AS avg_watch_ms,
+            MAX(CASE WHEN li.metric='ig_reels_video_view_total_time'   THEN li.value END) AS total_watch_ms
         FROM ig_media m
-        JOIN ig_media_insights i ON m.id = i.media_id
+        JOIN latest_insights li ON li.media_id = m.id
         WHERE m.media_product_type = 'REELS'
           AND m.timestamp >= datetime({a}, '-7 days')
           AND m.timestamp <  datetime({a}, '+1 day')
@@ -98,50 +130,47 @@ def fetch_recent_reels(con, anchor_date=None):
     return [dict(r) for r in rows]
 
 def fetch_benchmarks(con, anchor_date=None):
-    """90-day median-style benchmarks via percentile approximation."""
+    """90-day median-style benchmarks via percentile approximation.
+    Picks one as-of snapshot per (media, metric) before averaging, so daily snapshot
+    history doesn't double-count.
+    """
     a = _anchor(anchor_date)
+    cte = _latest_insights_cte(anchor_date)
     rows = con.execute(f"""
+        {cte}
         SELECT
-            AVG(CASE WHEN i.metric='views'                   THEN i.value END) AS avg_views,
-            AVG(CASE WHEN i.metric='reach'                   THEN i.value END) AS avg_reach,
-            AVG(CASE WHEN i.metric='shares'                  THEN i.value END) AS avg_shares,
-            AVG(CASE WHEN i.metric='saved'                   THEN i.value END) AS avg_saves,
-            AVG(CASE WHEN i.metric='likes'                   THEN i.value END) AS avg_likes,
-            AVG(CASE WHEN i.metric='comments'                THEN i.value END) AS avg_comments,
-            AVG(CASE WHEN i.metric='ig_reels_avg_watch_time' THEN i.value END) AS avg_watch_ms
+            AVG(CASE WHEN li.metric='views'                   THEN li.value END) AS avg_views,
+            AVG(CASE WHEN li.metric='reach'                   THEN li.value END) AS avg_reach,
+            AVG(CASE WHEN li.metric='shares'                  THEN li.value END) AS avg_shares,
+            AVG(CASE WHEN li.metric='saved'                   THEN li.value END) AS avg_saves,
+            AVG(CASE WHEN li.metric='likes'                   THEN li.value END) AS avg_likes,
+            AVG(CASE WHEN li.metric='comments'                THEN li.value END) AS avg_comments,
+            AVG(CASE WHEN li.metric='ig_reels_avg_watch_time' THEN li.value END) AS avg_watch_ms
         FROM ig_media m
-        JOIN ig_media_insights i ON m.id = i.media_id
+        JOIN latest_insights li ON li.media_id = m.id
         WHERE m.media_product_type = 'REELS'
           AND m.timestamp >= datetime({a}, '-90 days')
           AND m.timestamp <  datetime({a}, '+1 day')
     """).fetchone()
     b = dict(rows) if rows else {}
 
-    # also fetch p75 thresholds (top-quartile) using ordered sets
+    # p75/p25 thresholds — one as-of value per media per metric, then percentile
+    # across media. OFFSET = floor(N * pct/100).
     def percentile(metric, pct):
         result = con.execute(f"""
-            SELECT val FROM (
-                SELECT MAX(CASE WHEN i.metric=? THEN i.value END) as val
+            {cte}
+            , per_media AS (
+                SELECT li.value AS val
                 FROM ig_media m
-                JOIN ig_media_insights i ON m.id = i.media_id
+                JOIN latest_insights li ON li.media_id = m.id AND li.metric = ?
                 WHERE m.media_product_type = 'REELS'
                   AND m.timestamp >= datetime({a}, '-90 days')
                   AND m.timestamp <  datetime({a}, '+1 day')
-                GROUP BY m.id
-                HAVING val IS NOT NULL
-                ORDER BY val
+                  AND li.value IS NOT NULL
             )
-            LIMIT 1 OFFSET CAST(
-                (SELECT COUNT(DISTINCT m2.id)
-                 FROM ig_media m2
-                 JOIN ig_media_insights i2 ON m2.id = i2.media_id
-                 WHERE m2.media_product_type = 'REELS'
-                   AND m2.timestamp >= datetime({a}, '-90 days')
-                   AND m2.timestamp <  datetime({a}, '+1 day')
-                   AND i2.metric = ?
-                ) * {pct} / 100.0 AS INT
-            )
-        """, (metric, metric)).fetchone()
+            SELECT val FROM per_media ORDER BY val
+            LIMIT 1 OFFSET CAST((SELECT COUNT(*) FROM per_media) * {pct} / 100.0 AS INT)
+        """, (metric,)).fetchone()
         return result[0] if result else None
 
     b["p75_views"]    = percentile("views",    75)
@@ -157,17 +186,19 @@ def fetch_benchmarks(con, anchor_date=None):
 def fetch_all_reels_for_patterns(con, anchor_date=None):
     """Return last 90 days of reels for pattern mining."""
     a = _anchor(anchor_date)
+    cte = _latest_insights_cte(anchor_date)
     rows = con.execute(f"""
+        {cte}
         SELECT
             m.id, m.caption, m.timestamp,
-            MAX(CASE WHEN i.metric='reach'                   THEN i.value END) AS reach,
-            MAX(CASE WHEN i.metric='shares'                  THEN i.value END) AS shares,
-            MAX(CASE WHEN i.metric='saved'                   THEN i.value END) AS saves,
-            MAX(CASE WHEN i.metric='likes'                   THEN i.value END) AS likes,
-            MAX(CASE WHEN i.metric='comments'                THEN i.value END) AS comments,
-            MAX(CASE WHEN i.metric='ig_reels_avg_watch_time' THEN i.value END) AS avg_watch_ms
+            MAX(CASE WHEN li.metric='reach'                   THEN li.value END) AS reach,
+            MAX(CASE WHEN li.metric='shares'                  THEN li.value END) AS shares,
+            MAX(CASE WHEN li.metric='saved'                   THEN li.value END) AS saves,
+            MAX(CASE WHEN li.metric='likes'                   THEN li.value END) AS likes,
+            MAX(CASE WHEN li.metric='comments'                THEN li.value END) AS comments,
+            MAX(CASE WHEN li.metric='ig_reels_avg_watch_time' THEN li.value END) AS avg_watch_ms
         FROM ig_media m
-        JOIN ig_media_insights i ON m.id = i.media_id
+        JOIN latest_insights li ON li.media_id = m.id
         WHERE m.media_product_type = 'REELS'
           AND m.timestamp >= datetime({a}, '-90 days')
           AND m.timestamp <  datetime({a}, '+1 day')
@@ -794,24 +825,28 @@ def send_email(subject, html_content, recipients):
 
 # ─── main ─────────────────────────────────────────────────────────────────────
 
-def fetch_reels_by_ids(con, reel_ids):
-    """Fetch latest metrics from DB for a fixed list of reel IDs."""
+def fetch_reels_by_ids(con, reel_ids, anchor_date=None):
+    """Fetch as-of metrics from DB for a fixed list of reel IDs.
+    Defaults to latest snapshots; pass anchor_date for historical regeneration.
+    """
     if not reel_ids:
         return []
     placeholders = ",".join(["?"] * len(reel_ids))
+    cte = _latest_insights_cte(anchor_date)
     rows = con.execute(f"""
+        {cte}
         SELECT
             m.id, m.caption, m.timestamp, m.permalink, m.media_url, m.thumbnail_url,
-            MAX(CASE WHEN i.metric='views'                          THEN i.value END) AS views,
-            MAX(CASE WHEN i.metric='reach'                          THEN i.value END) AS reach,
-            MAX(CASE WHEN i.metric='shares'                         THEN i.value END) AS shares,
-            MAX(CASE WHEN i.metric='saved'                          THEN i.value END) AS saves,
-            MAX(CASE WHEN i.metric='likes'                          THEN i.value END) AS likes,
-            MAX(CASE WHEN i.metric='comments'                       THEN i.value END) AS comments,
-            MAX(CASE WHEN i.metric='ig_reels_avg_watch_time'        THEN i.value END) AS avg_watch_ms,
-            MAX(CASE WHEN i.metric='ig_reels_video_view_total_time' THEN i.value END) AS total_watch_ms
+            MAX(CASE WHEN li.metric='views'                            THEN li.value END) AS views,
+            MAX(CASE WHEN li.metric='reach'                            THEN li.value END) AS reach,
+            MAX(CASE WHEN li.metric='shares'                           THEN li.value END) AS shares,
+            MAX(CASE WHEN li.metric='saved'                            THEN li.value END) AS saves,
+            MAX(CASE WHEN li.metric='likes'                            THEN li.value END) AS likes,
+            MAX(CASE WHEN li.metric='comments'                         THEN li.value END) AS comments,
+            MAX(CASE WHEN li.metric='ig_reels_avg_watch_time'          THEN li.value END) AS avg_watch_ms,
+            MAX(CASE WHEN li.metric='ig_reels_video_view_total_time'   THEN li.value END) AS total_watch_ms
         FROM ig_media m
-        JOIN ig_media_insights i ON m.id = i.media_id
+        JOIN latest_insights li ON li.media_id = m.id
         WHERE m.id IN ({placeholders})
         GROUP BY m.id
         ORDER BY m.timestamp DESC
@@ -913,9 +948,13 @@ def regenerate_for_date(target_date: str, rerun_ai: bool = False):
 def backfill_for_date(target_date: str, skip_ai: bool = False):
     """Generate a video-analysis report dated to a past day (no email, no state update).
 
-    Anchors the "last 7 days" / "last 90 days" SQL windows to target_date so the report
-    reflects what would have run on that date — with the caveat that insight metrics
-    are current values, not historical snapshots.
+    Honest historical mode: reel selection AND per-reel metrics are anchored to
+    target_date via `ig_media_insights.fetched_at <= target_date`. Requires that
+    daily syncs were running on/before the target date; otherwise returns empty
+    (the DB has no snapshots to read).
+
+    If you want to refresh an existing sidecar against today's metrics instead
+    (e.g., to update view counts as a reel matures), use --regen-date YYYY-MM-DD.
     """
     out_html = OUTPUT_DIR / f"video-analysis-{target_date}.html"
     if out_html.exists():
@@ -933,6 +972,14 @@ def backfill_for_date(target_date: str, skip_ai: bool = False):
     con.close()
 
     print(f"  reels with metrics in window: {len(new_reels)}")
+    if not new_reels:
+        check_con = sqlite3.connect(str(DB_PATH))
+        first_snap = check_con.execute("SELECT MIN(fetched_at) FROM ig_media_insights").fetchone()[0]
+        check_con.close()
+        if first_snap and first_snap > target_date:
+            print(f"  [warn] no insight snapshots exist on or before {target_date} "
+                  f"(earliest snapshot: {first_snap[:10]}). Daily-snapshot history "
+                  f"starts after that date; older backfills will be empty.")
 
     ai_analyses = {}
     if skip_ai:

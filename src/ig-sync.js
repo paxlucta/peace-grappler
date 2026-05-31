@@ -383,6 +383,9 @@ async function syncMediaInsights(accountId) {
       .prepare("SELECT id, media_product_type FROM ig_media WHERE account_id = ? AND timestamp >= ?")
       .all(accountId, cutoff);
 
+    // Append-only by design: each sync writes a new dated snapshot rather than
+    // overwriting. Downstream queries pick `MAX(fetched_at) <= anchor` to get
+    // the value as-of any point in time. Do NOT add a DELETE/prune here.
     const upsert = db.prepare(
       `INSERT INTO ig_media_insights (media_id, metric, value, fetched_at)
        VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`
