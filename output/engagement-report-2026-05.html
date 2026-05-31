@@ -5,109 +5,35 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Peace Grappler - Instagram Analytics Report — May 2026</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<link rel="stylesheet" href="styles.css">
 <style>
-  :root {
-    --bg: #0f1117;
-    --card: #1a1d27;
-    --border: #2a2d3a;
-    --text: #e1e4ed;
-    --muted: #8b8fa3;
-    --accent: #6366f1;
-    --accent2: #818cf8;
-    --green: #34d399;
-    --orange: #fb923c;
-    --red: #f87171;
-    --pink: #f472b6;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: var(--bg); color: var(--text);
-    line-height: 1.6; padding: 0; margin: 0;
-  }
-  .page-header {
-    padding: 24px 24px 0;
-    max-width: 1400px; margin: 0 auto;
-  }
-  .page-content {
-    padding: 0 24px 24px;
-    max-width: 1400px; margin: 0 auto;
-  }
+  /* engagement-report tweaks */
+  .page-header { max-width: 1400px; }
+  .page-content { max-width: 1400px; }
   h1 { font-size: 28px; margin-bottom: 4px; }
-  h2 { font-size: 20px; margin: 32px 0 16px; color: var(--accent2); }
+  h2 { font-size: 20px; margin: 32px 0 16px; }
   h2:first-child { margin-top: 8px; }
-  h3 { font-size: 16px; margin: 24px 0 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
-  .subtitle { color: var(--muted); font-size: 14px; margin-bottom: 16px; }
 
-  /* Top navigation tabs */
-  .nav-tabs {
-    display: flex; gap: 0;
-    border-bottom: 2px solid var(--border);
-    margin-bottom: 24px;
-  }
-  .nav-tab {
-    padding: 12px 24px; cursor: pointer;
-    color: var(--muted); font-size: 15px; font-weight: 600;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -2px; transition: all 0.2s;
-    user-select: none;
-  }
-  .nav-tab:hover { color: var(--text); }
-  .nav-tab.active { color: var(--accent2); border-bottom-color: var(--accent2); }
-  .page-panel { display: none; }
-  .page-panel.active { display: block; }
-
-  .site-nav { display: flex; align-items: center; gap: 16px; padding: 12px 0; margin-bottom: 12px; border-bottom: 1px solid var(--border); }
-  .site-nav a { color: var(--accent2); text-decoration: none; font-size: 13px; font-weight: 600; }
-  .site-nav a:hover { opacity: 0.8; }
-  .site-nav-label { color: var(--muted); font-size: 13px; }
-
+  /* engagement-report unique components */
   .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
-  .stat-card {
-    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
-    padding: 20px; text-align: center;
-  }
-  .stat-card .value { font-size: 32px; font-weight: 700; color: var(--accent2); }
+  .stat-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; text-align: center; }
+  .stat-card .value { font-size: 32px; font-weight: 700; color: var(--accent); }
   .stat-card .label { font-size: 13px; color: var(--muted); margin-top: 4px; }
-  .card {
-    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
-    padding: 24px; margin-bottom: 24px;
-  }
   .chart-container { position: relative; height: 300px; margin: 16px 0; }
   .chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px; }
   .chart-row .card { margin-bottom: 0; }
   @media (max-width: 768px) { .chart-row { grid-template-columns: 1fr; } }
 
-  /* Sortable tables */
-  table { width: 100%; border-collapse: collapse; font-size: 14px; }
-  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); }
-  th {
-    color: var(--muted); font-weight: 600; font-size: 12px;
-    text-transform: uppercase; letter-spacing: 0.5px;
-    cursor: pointer; user-select: none; white-space: nowrap;
-  }
+  /* Sortable table extras */
+  th { cursor: pointer; user-select: none; white-space: nowrap; }
   th:hover { color: var(--text); }
   th .sort-arrow { margin-left: 4px; font-size: 10px; opacity: 0.4; }
-  th.sorted .sort-arrow { opacity: 1; color: var(--accent2); }
+  th.sorted .sort-arrow { opacity: 1; color: var(--accent); }
   th.no-sort { cursor: default; }
   th.no-sort:hover { color: var(--muted); }
-  tr:hover { background: rgba(99,102,241,0.05); }
 
-  .rank { font-weight: 700; color: var(--accent2); min-width: 36px; display: inline-block; }
-  .rank-1 { color: #fbbf24; }
-  .rank-2 { color: #d1d5db; }
-  .rank-3 { color: #cd7f32; }
   .score { font-weight: 700; color: var(--green); }
-  .badge {
-    display: inline-block; padding: 2px 8px; border-radius: 6px;
-    font-size: 11px; font-weight: 600; text-transform: uppercase;
-  }
-  .badge-feed { background: #6366f133; color: var(--accent2); }
-  .badge-reels { background: #f472b633; color: var(--pink); }
-  .badge-carousel { background: #fb923c33; color: var(--orange); }
   .caption { color: var(--muted); font-size: 13px; max-width: 300px; }
-  a { color: var(--accent2); text-decoration: none; }
-  a:hover { text-decoration: underline; }
   .breakdown { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 8px; }
   .breakdown-item { font-size: 13px; }
   .breakdown-item .bval { font-weight: 600; color: var(--text); }
@@ -115,13 +41,8 @@
 
   /* Sub-tabs (for ranking periods) */
   .sub-tabs { display: flex; gap: 0; margin-bottom: 0; }
-  .sub-tab {
-    padding: 10px 20px; cursor: pointer; border: 1px solid var(--border);
-    background: var(--bg); color: var(--muted); font-size: 14px; font-weight: 600;
-    border-bottom: none; border-radius: 8px 8px 0 0; margin-right: -1px;
-    user-select: none;
-  }
-  .sub-tab.active { background: var(--card); color: var(--accent2); }
+  .sub-tab { padding: 10px 20px; cursor: pointer; border: 1px solid var(--border); background: var(--page); color: var(--muted); font-size: 14px; font-weight: 600; border-bottom: none; border-radius: 8px 8px 0 0; margin-right: -1px; user-select: none; }
+  .sub-tab.active { background: var(--card); color: var(--accent); }
   .sub-content { display: none; }
   .sub-content.active { display: block; }
 
@@ -137,7 +58,7 @@
     <span class="site-nav-label">PeaceGrappler</span>
   </div>
   <h1>@peacegrappler</h1>
-  <div class="subtitle">Peace Grappler | MMA Stories &mdash; Report generated May 31, 2026, 1:54 PM</div>
+  <div class="subtitle">Peace Grappler | MMA Stories &mdash; Report generated May 31, 2026, 6:45 PM</div>
   <div class="nav-tabs">
     <div class="nav-tab active" onclick="switchPage('overview')">Overview</div>
     <div class="nav-tab" onclick="switchPage('posts')">Post Performance</div>
@@ -154,7 +75,7 @@
 
   <div class="stats-grid">
     <div class="stat-card">
-      <div class="value">1,713</div>
+      <div class="value">1,780</div>
       <div class="label">Followers</div>
     </div>
     <div class="stat-card">
@@ -162,27 +83,27 @@
       <div class="label">Following</div>
     </div>
     <div class="stat-card">
-      <div class="value">239</div>
+      <div class="value">240</div>
       <div class="label">Posts</div>
     </div>
     <div class="stat-card">
-      <div class="value">73,165</div>
+      <div class="value">74,035</div>
       <div class="label">Total Reach</div>
     </div>
     <div class="stat-card">
-      <div class="value">117,987</div>
+      <div class="value">119,285</div>
       <div class="label">Total Views</div>
     </div>
     <div class="stat-card">
-      <div class="value">19,699</div>
+      <div class="value">20,231</div>
       <div class="label">Total Interactions</div>
     </div>
     <div class="stat-card">
-      <div class="value">1,463</div>
+      <div class="value">1,452</div>
       <div class="label">Avg Reach / Post</div>
     </div>
     <div class="stat-card">
-      <div class="value">27,124</div>
+      <div class="value">27,328</div>
       <div class="label">Total Comments</div>
     </div>
   </div>
@@ -190,15 +111,15 @@
   <h2>Follower Growth</h2>
   <div class="stats-grid">
     <div class="stat-card">
-      <div class="value" style="color: var(--muted)">-</div>
+      <div class="value" style="color: var(--green)">+134</div>
       <div class="label">Yesterday</div>
     </div>
     <div class="stat-card">
-      <div class="value" style="color: var(--muted)">-</div>
+      <div class="value" style="color: var(--green)">+399</div>
       <div class="label">Last 7 Days</div>
     </div>
     <div class="stat-card">
-      <div class="value" style="color: var(--muted)">0</div>
+      <div class="value" style="color: var(--green)">+729</div>
       <div class="label">Month Total</div>
     </div>
   </div>
@@ -208,13 +129,18 @@
     <table>
       <thead><tr><th>Period</th><th>Total</th><th>Reels</th><th>Feed</th></tr></thead>
       <tbody>
-        <tr><td>Yesterday</td><td>2</td><td>1</td><td>1</td></tr>
-        <tr><td>Last 7 Days</td><td>9</td><td>4</td><td>5</td></tr>
-        <tr><td>Month Total</td><td>50</td><td>39</td><td>11</td></tr>
+        <tr><td>Yesterday</td><td>3</td><td>2</td><td>1</td></tr>
+        <tr><td>Last 7 Days</td><td>10</td><td>5</td><td>5</td></tr>
+        <tr><td>Month Total</td><td>51</td><td>40</td><td>11</td></tr>
       </tbody>
     </table>
   </div>
 
+  
+  <h2>Account Growth</h2>
+  <div class="card">
+    <div class="chart-container"><canvas id="growthChart"></canvas></div>
+  </div>
   
 
   <h2>Content Overview</h2>
@@ -234,184 +160,184 @@
   <div class="stats-grid">
     
       <div class="stat-card">
-        <div class="value">68,439</div>
+        <div class="value">170,526</div>
         <div class="label">accounts engaged</div>
         
       </div>
     
       <div class="stat-card">
-        <div class="value">60,806</div>
+        <div class="value">149,276</div>
         <div class="label">comments</div>
         
           <div class="breakdown">
             
-              <div class="breakdown-item"><span class="bval">66</span> <span class="blabel">AD</span></div>
+              <div class="breakdown-item"><span class="bval">165</span> <span class="blabel">AD</span></div>
             
-              <div class="breakdown-item"><span class="bval">5,071</span> <span class="blabel">POST</span></div>
+              <div class="breakdown-item"><span class="bval">12,607</span> <span class="blabel">POST</span></div>
             
-              <div class="breakdown-item"><span class="bval">25,266</span> <span class="blabel">REEL</span></div>
+              <div class="breakdown-item"><span class="bval">61,866</span> <span class="blabel">REEL</span></div>
             
           </div>
         
       </div>
     
       <div class="stat-card">
-        <div class="value">1,199</div>
+        <div class="value">3,096</div>
         <div class="label">follows and unfollows</div>
         
           <div class="breakdown">
             
-              <div class="breakdown-item"><span class="bval">1,122</span> <span class="blabel">FOLLOWER</span></div>
+              <div class="breakdown-item"><span class="bval">2,907</span> <span class="blabel">FOLLOWER</span></div>
             
-              <div class="breakdown-item"><span class="bval">77</span> <span class="blabel">NON_FOLLOWER</span></div>
+              <div class="breakdown-item"><span class="bval">189</span> <span class="blabel">NON_FOLLOWER</span></div>
             
           </div>
         
       </div>
     
       <div class="stat-card">
-        <div class="value">152,308</div>
+        <div class="value">378,136</div>
         <div class="label">likes</div>
         
           <div class="breakdown">
             
-              <div class="breakdown-item"><span class="bval">9,350</span> <span class="blabel">AD</span></div>
+              <div class="breakdown-item"><span class="bval">23,530</span> <span class="blabel">AD</span></div>
             
-              <div class="breakdown-item"><span class="bval">1,299</span> <span class="blabel">POST</span></div>
+              <div class="breakdown-item"><span class="bval">3,235</span> <span class="blabel">POST</span></div>
             
-              <div class="breakdown-item"><span class="bval">65,505</span> <span class="blabel">REEL</span></div>
+              <div class="breakdown-item"><span class="bval">162,303</span> <span class="blabel">REEL</span></div>
             
           </div>
         
       </div>
     
       <div class="stat-card">
-        <div class="value">8</div>
+        <div class="value">20</div>
         <div class="label">profile links taps</div>
         
           <div class="breakdown">
             
-              <div class="breakdown-item"><span class="bval">4</span> <span class="blabel">EMAIL</span></div>
+              <div class="breakdown-item"><span class="bval">10</span> <span class="blabel">EMAIL</span></div>
             
           </div>
         
       </div>
     
       <div class="stat-card">
-        <div class="value">13,083</div>
+        <div class="value">32,475</div>
         <div class="label">profile views</div>
         
       </div>
     
       <div class="stat-card">
-        <div class="value">993,263</div>
+        <div class="value">2,465,315</div>
         <div class="label">reach</div>
         
           <div class="breakdown">
             
-              <div class="breakdown-item"><span class="bval">2,350</span> <span class="blabel">FOLLOWER</span></div>
+              <div class="breakdown-item"><span class="bval">5,914</span> <span class="blabel">FOLLOWER</span></div>
             
-              <div class="breakdown-item"><span class="bval">322,684</span> <span class="blabel">NON_FOLLOWER</span></div>
+              <div class="breakdown-item"><span class="bval">800,751</span> <span class="blabel">NON_FOLLOWER</span></div>
             
-              <div class="breakdown-item"><span class="bval">216,482</span> <span class="blabel">AD</span></div>
+              <div class="breakdown-item"><span class="bval">542,141</span> <span class="blabel">AD</span></div>
             
-              <div class="breakdown-item"><span class="bval">10,278</span> <span class="blabel">CAROUSEL_CONTAINER</span></div>
+              <div class="breakdown-item"><span class="bval">25,695</span> <span class="blabel">CAROUSEL_CONTAINER</span></div>
             
-              <div class="breakdown-item"><span class="bval">6,162</span> <span class="blabel">POST</span></div>
+              <div class="breakdown-item"><span class="bval">15,378</span> <span class="blabel">POST</span></div>
             
-              <div class="breakdown-item"><span class="bval">107,100</span> <span class="blabel">REEL</span></div>
+              <div class="breakdown-item"><span class="bval">261,636</span> <span class="blabel">REEL</span></div>
             
-              <div class="breakdown-item"><span class="bval">4,003</span> <span class="blabel">STORY</span></div>
+              <div class="breakdown-item"><span class="bval">9,172</span> <span class="blabel">STORY</span></div>
             
           </div>
         
       </div>
     
       <div class="stat-card">
-        <div class="value">102</div>
+        <div class="value">252</div>
         <div class="label">replies</div>
         
       </div>
     
       <div class="stat-card">
-        <div class="value">1,016</div>
+        <div class="value">2,558</div>
         <div class="label">reposts</div>
         
       </div>
     
       <div class="stat-card">
-        <div class="value">3,230</div>
+        <div class="value">8,048</div>
         <div class="label">saves</div>
         
           <div class="breakdown">
             
-              <div class="breakdown-item"><span class="bval">164</span> <span class="blabel">AD</span></div>
+              <div class="breakdown-item"><span class="bval">416</span> <span class="blabel">AD</span></div>
             
-              <div class="breakdown-item"><span class="bval">58</span> <span class="blabel">POST</span></div>
+              <div class="breakdown-item"><span class="bval">145</span> <span class="blabel">POST</span></div>
             
-              <div class="breakdown-item"><span class="bval">1,393</span> <span class="blabel">REEL</span></div>
+              <div class="breakdown-item"><span class="bval">3,463</span> <span class="blabel">REEL</span></div>
             
           </div>
         
       </div>
     
       <div class="stat-card">
-        <div class="value">27,906</div>
+        <div class="value">70,304</div>
         <div class="label">shares</div>
         
           <div class="breakdown">
             
-              <div class="breakdown-item"><span class="bval">100</span> <span class="blabel">AD</span></div>
+              <div class="breakdown-item"><span class="bval">250</span> <span class="blabel">AD</span></div>
             
-              <div class="breakdown-item"><span class="bval">206</span> <span class="blabel">POST</span></div>
+              <div class="breakdown-item"><span class="bval">515</span> <span class="blabel">POST</span></div>
             
-              <div class="breakdown-item"><span class="bval">13,647</span> <span class="blabel">REEL</span></div>
+              <div class="breakdown-item"><span class="bval">34,387</span> <span class="blabel">REEL</span></div>
             
           </div>
         
       </div>
     
       <div class="stat-card">
-        <div class="value">274,614</div>
+        <div class="value">682,234</div>
         <div class="label">total interactions</div>
         
           <div class="breakdown">
             
-              <div class="breakdown-item"><span class="bval">9,892</span> <span class="blabel">AD</span></div>
+              <div class="breakdown-item"><span class="bval">24,895</span> <span class="blabel">AD</span></div>
             
-              <div class="breakdown-item"><span class="bval">6,990</span> <span class="blabel">POST</span></div>
+              <div class="breakdown-item"><span class="bval">17,392</span> <span class="blabel">POST</span></div>
             
-              <div class="breakdown-item"><span class="bval">120,212</span> <span class="blabel">REEL</span></div>
+              <div class="breakdown-item"><span class="bval">298,305</span> <span class="blabel">REEL</span></div>
             
-              <div class="breakdown-item"><span class="bval">213</span> <span class="blabel">STORY</span></div>
+              <div class="breakdown-item"><span class="bval">525</span> <span class="blabel">STORY</span></div>
             
           </div>
         
       </div>
     
       <div class="stat-card">
-        <div class="value">3,319,725</div>
+        <div class="value">8,197,635</div>
         <div class="label">views</div>
         
           <div class="breakdown">
             
-              <div class="breakdown-item"><span class="bval">111,167</span> <span class="blabel">FOLLOWER</span></div>
+              <div class="breakdown-item"><span class="bval">268,128</span> <span class="blabel">FOLLOWER</span></div>
             
-              <div class="breakdown-item"><span class="bval">985,081</span> <span class="blabel">NON_FOLLOWER</span></div>
+              <div class="breakdown-item"><span class="bval">2,439,733</span> <span class="blabel">NON_FOLLOWER</span></div>
             
-              <div class="breakdown-item"><span class="bval">10,327</span> <span class="blabel">UNKNOWN</span></div>
+              <div class="breakdown-item"><span class="bval">24,684</span> <span class="blabel">UNKNOWN</span></div>
             
-              <div class="breakdown-item"><span class="bval">317,704</span> <span class="blabel">AD</span></div>
+              <div class="breakdown-item"><span class="bval">796,552</span> <span class="blabel">AD</span></div>
             
-              <div class="breakdown-item"><span class="bval">21,868</span> <span class="blabel">CAROUSEL_CONTAINER</span></div>
+              <div class="breakdown-item"><span class="bval">54,663</span> <span class="blabel">CAROUSEL_CONTAINER</span></div>
             
               <div class="breakdown-item"><span class="bval">1</span> <span class="blabel">DEFAULT_DO_NOT_USE</span></div>
             
-              <div class="breakdown-item"><span class="bval">17,798</span> <span class="blabel">POST</span></div>
+              <div class="breakdown-item"><span class="bval">44,391</span> <span class="blabel">POST</span></div>
             
-              <div class="breakdown-item"><span class="bval">725,639</span> <span class="blabel">REEL</span></div>
+              <div class="breakdown-item"><span class="bval">1,779,848</span> <span class="blabel">REEL</span></div>
             
-              <div class="breakdown-item"><span class="bval">23,565</span> <span class="blabel">STORY</span></div>
+              <div class="breakdown-item"><span class="bval">57,090</span> <span class="blabel">STORY</span></div>
             
           </div>
         
@@ -475,6 +401,19 @@
       <tbody>
         
           <tr>
+            <td data-sort="2026-05-31T19:00:16+0000">May 31, 2026</td>
+            <td data-sort="REELS"><span class="badge badge-reels">REELS</span></td>
+            <td class="caption" data-sort="🇺🇸 Topuria is a massive betting favorite. A bet of around ...">🇺🇸 Topuria is a massive betting favorite. A bet of around ...</td>
+            <td data-sort="611">611</td>
+            <td data-sort="976">976</td>
+            <td data-sort="50">50</td>
+            <td data-sort="223">223</td>
+            <td data-sort="126">126</td>
+            <td data-sort="4">4</td>
+            <td><a href="https://www.instagram.com/reel/DZAydUDii-j/" target="_blank">View</a></td>
+          </tr>
+        
+          <tr>
             <td data-sort="2026-05-30T21:45:06+0000">May 30, 2026</td>
             <td data-sort="REELS"><span class="badge badge-reels">REELS</span></td>
             <td class="caption" data-sort="🇺🇸 UFC Macau delivered 🔥
@@ -482,12 +421,12 @@
 From brutal knockouts to slick ...">🇺🇸 UFC Macau delivered 🔥
 
 From brutal knockouts to slick ...</td>
-            <td data-sort="996">996</td>
-            <td data-sort="1097">1,097</td>
-            <td data-sort="37">37</td>
-            <td data-sort="65">65</td>
-            <td data-sort="67">67</td>
-            <td data-sort="0">0</td>
+            <td data-sort="1187">1,187</td>
+            <td data-sort="1291">1,291</td>
+            <td data-sort="42">42</td>
+            <td data-sort="165">165</td>
+            <td data-sort="68">68</td>
+            <td data-sort="1">1</td>
             <td><a href="https://www.instagram.com/reel/DY-gg3CCTSO/" target="_blank">View</a></td>
           </tr>
         
@@ -495,8 +434,8 @@ From brutal knockouts to slick ...</td>
             <td data-sort="2026-05-30T15:00:25+0000">May 30, 2026</td>
             <td data-sort="FEED"><span class="badge badge-feed">FEED</span></td>
             <td class="caption" data-sort="🇧🇷 Deiveson Figueiredo e Song Yadong vêm passando por uma ...">🇧🇷 Deiveson Figueiredo e Song Yadong vêm passando por uma ...</td>
-            <td data-sort="140">140</td>
-            <td data-sort="412">412</td>
+            <td data-sort="149">149</td>
+            <td data-sort="419">419</td>
             <td data-sort="26">26</td>
             <td data-sort="119">119</td>
             <td data-sort="0">0</td>
@@ -508,9 +447,9 @@ From brutal knockouts to slick ...</td>
             <td data-sort="2026-05-29T21:50:05+0000">May 29, 2026</td>
             <td data-sort="FEED"><span class="badge badge-feed">FEED</span></td>
             <td class="caption" data-sort="🇺🇸 Staying undefeated in the UFC is rare 😳🔥 Topuria, Evl...">🇺🇸 Staying undefeated in the UFC is rare 😳🔥 Topuria, Evl...</td>
-            <td data-sort="184">184</td>
-            <td data-sort="413">413</td>
-            <td data-sort="35">35</td>
+            <td data-sort="194">194</td>
+            <td data-sort="436">436</td>
+            <td data-sort="37">37</td>
             <td data-sort="183">183</td>
             <td data-sort="20">20</td>
             <td data-sort="1">1</td>
@@ -521,10 +460,10 @@ From brutal knockouts to slick ...</td>
             <td data-sort="2026-05-28T21:50:05+0000">May 28, 2026</td>
             <td data-sort="REELS"><span class="badge badge-reels">REELS</span></td>
             <td class="caption" data-sort="🇺🇸 The UFC built the most powerful machine in combat sport...">🇺🇸 The UFC built the most powerful machine in combat sport...</td>
-            <td data-sort="1193">1,193</td>
-            <td data-sort="1925">1,925</td>
-            <td data-sort="104">104</td>
-            <td data-sort="400">400</td>
+            <td data-sort="1218">1,218</td>
+            <td data-sort="1958">1,958</td>
+            <td data-sort="106">106</td>
+            <td data-sort="402">402</td>
             <td data-sort="100">100</td>
             <td data-sort="1">1</td>
             <td><a href="https://www.instagram.com/reel/DY5Xj4YFKcN/" target="_blank">View</a></td>
@@ -534,8 +473,8 @@ From brutal knockouts to slick ...</td>
             <td data-sort="2026-05-27T21:50:05+0000">May 27, 2026</td>
             <td data-sort="REELS"><span class="badge badge-reels">REELS</span></td>
             <td class="caption" data-sort="🇧🇷 Prospectos, veteranos e lutadores tentando mudar suas c...">🇧🇷 Prospectos, veteranos e lutadores tentando mudar suas c...</td>
-            <td data-sort="535">535</td>
-            <td data-sort="727">727</td>
+            <td data-sort="537">537</td>
+            <td data-sort="730">730</td>
             <td data-sort="45">45</td>
             <td data-sort="151">151</td>
             <td data-sort="1">1</td>
@@ -560,8 +499,8 @@ From brutal knockouts to slick ...</td>
             <td data-sort="2026-05-25T21:50:07+0000">May 25, 2026</td>
             <td data-sort="REELS"><span class="badge badge-reels">REELS</span></td>
             <td class="caption" data-sort="🇺🇸 The UFC gives visibility. The smartest fighters turn th...">🇺🇸 The UFC gives visibility. The smartest fighters turn th...</td>
-            <td data-sort="791">791</td>
-            <td data-sort="1187">1,187</td>
+            <td data-sort="797">797</td>
+            <td data-sort="1194">1,194</td>
             <td data-sort="80">80</td>
             <td data-sort="215">215</td>
             <td data-sort="67">67</td>
@@ -573,8 +512,8 @@ From brutal knockouts to slick ...</td>
             <td data-sort="2026-05-25T13:01:14+0000">May 25, 2026</td>
             <td data-sort="FEED"><span class="badge badge-feed">FEED</span></td>
             <td class="caption" data-sort="🇧🇷 Figueiredo e Yadong entram em uma luta gigantesca para ...">🇧🇷 Figueiredo e Yadong entram em uma luta gigantesca para ...</td>
-            <td data-sort="444">444</td>
-            <td data-sort="1035">1,035</td>
+            <td data-sort="445">445</td>
+            <td data-sort="1059">1,059</td>
             <td data-sort="49">49</td>
             <td data-sort="83">83</td>
             <td data-sort="19">19</td>
@@ -586,8 +525,8 @@ From brutal knockouts to slick ...</td>
             <td data-sort="2026-05-24T15:00:00+0000">May 24, 2026</td>
             <td data-sort="FEED"><span class="badge badge-feed">FEED</span></td>
             <td class="caption" data-sort="🇺🇸 Pure violence 😳🔥 These were some of the most brutal k...">🇺🇸 Pure violence 😳🔥 These were some of the most brutal k...</td>
-            <td data-sort="1882">1,882</td>
-            <td data-sort="4673">4,673</td>
+            <td data-sort="1885">1,885</td>
+            <td data-sort="4679">4,679</td>
             <td data-sort="48">48</td>
             <td data-sort="162">162</td>
             <td data-sort="7">7</td>
@@ -601,8 +540,8 @@ From brutal knockouts to slick ...</td>
             <td class="caption" data-sort="🇺🇸 “I created a monster.” 😳🇺🇸 
 Years ago, Israel Adesan...">🇺🇸 “I created a monster.” 😳🇺🇸 
 Years ago, Israel Adesan...</td>
-            <td data-sort="494">494</td>
-            <td data-sort="927">927</td>
+            <td data-sort="495">495</td>
+            <td data-sort="932">932</td>
             <td data-sort="75">75</td>
             <td data-sort="378">378</td>
             <td data-sort="16">16</td>
@@ -614,8 +553,8 @@ Years ago, Israel Adesan...</td>
             <td data-sort="2026-05-22T21:46:07+0000">May 22, 2026</td>
             <td data-sort="REELS"><span class="badge badge-reels">REELS</span></td>
             <td class="caption" data-sort="🇧🇷 Ilia encurta distância muito bem… mas o Prates tem tama...">🇧🇷 Ilia encurta distância muito bem… mas o Prates tem tama...</td>
-            <td data-sort="5522">5,522</td>
-            <td data-sort="8435">8,435</td>
+            <td data-sort="5523">5,523</td>
+            <td data-sort="8441">8,441</td>
             <td data-sort="240">240</td>
             <td data-sort="631">631</td>
             <td data-sort="144">144</td>
@@ -666,7 +605,7 @@ Years ago, Israel Adesan...</td>
             <td data-sort="2026-05-18T21:50:00+0000">May 18, 2026</td>
             <td data-sort="REELS"><span class="badge badge-reels">REELS</span></td>
             <td class="caption" data-sort="🇧🇷Os rankings oficiais do UFC são votados por um painel de...">🇧🇷Os rankings oficiais do UFC são votados por um painel de...</td>
-            <td data-sort="1765">1,765</td>
+            <td data-sort="1768">1,768</td>
             <td data-sort="3472">3,472</td>
             <td data-sort="115">115</td>
             <td data-sort="324">324</td>
@@ -705,9 +644,9 @@ Years ago, Israel Adesan...</td>
             <td data-sort="2026-05-16T15:00:00+0000">May 16, 2026</td>
             <td data-sort="FEED"><span class="badge badge-feed">FEED</span></td>
             <td class="caption" data-sort="🇧🇷Arnold Allen chega com guerra atrás de guerra no currícu...">🇧🇷Arnold Allen chega com guerra atrás de guerra no currícu...</td>
-            <td data-sort="413">413</td>
-            <td data-sort="1182">1,182</td>
-            <td data-sort="69">69</td>
+            <td data-sort="414">414</td>
+            <td data-sort="1188">1,188</td>
+            <td data-sort="70">70</td>
             <td data-sort="335">335</td>
             <td data-sort="0">0</td>
             <td data-sort="3">3</td>
@@ -810,7 +749,7 @@ Years ago, Israel Adesan...</td>
             <td data-sort="REELS"><span class="badge badge-reels">REELS</span></td>
             <td class="caption" data-sort="🇧🇷 Tem gente ganhando dinheiro só comentando na Peace Grap...">🇧🇷 Tem gente ganhando dinheiro só comentando na Peace Grap...</td>
             <td data-sort="2609">2,609</td>
-            <td data-sort="3727">3,727</td>
+            <td data-sort="3728">3,728</td>
             <td data-sort="99">99</td>
             <td data-sort="298">298</td>
             <td data-sort="141">141</td>
@@ -875,7 +814,7 @@ Years ago, Israel Adesan...</td>
             <td data-sort="REELS"><span class="badge badge-reels">REELS</span></td>
             <td class="caption" data-sort="Josh Hokit x Ilia Topuria !!!! Show business!!!!! #chama #jo...">Josh Hokit x Ilia Topuria !!!! Show business!!!!! #chama #jo...</td>
             <td data-sort="2093">2,093</td>
-            <td data-sort="3485">3,485</td>
+            <td data-sort="3487">3,487</td>
             <td data-sort="117">117</td>
             <td data-sort="376">376</td>
             <td data-sort="42">42</td>
@@ -887,8 +826,8 @@ Years ago, Israel Adesan...</td>
             <td data-sort="2026-05-08T21:50:00+0000">May 8, 2026</td>
             <td data-sort="REELS"><span class="badge badge-reels">REELS</span></td>
             <td class="caption" data-sort="🇧🇷 Chimaev e Strickland já começaram a guerra antes mesmo ...">🇧🇷 Chimaev e Strickland já começaram a guerra antes mesmo ...</td>
-            <td data-sort="470">470</td>
-            <td data-sort="790">790</td>
+            <td data-sort="471">471</td>
+            <td data-sort="791">791</td>
             <td data-sort="50">50</td>
             <td data-sort="451">451</td>
             <td data-sort="9">9</td>
@@ -926,7 +865,7 @@ Years ago, Israel Adesan...</td>
             <td data-sort="2026-05-07T15:00:26+0000">May 7, 2026</td>
             <td data-sort="REELS"><span class="badge badge-reels">REELS</span></td>
             <td class="caption" data-sort="Sean Strickland respondeu aos comentários recentes de Khamza...">Sean Strickland respondeu aos comentários recentes de Khamza...</td>
-            <td data-sort="1333">1,333</td>
+            <td data-sort="1335">1,335</td>
             <td data-sort="1817">1,817</td>
             <td data-sort="70">70</td>
             <td data-sort="325">325</td>
@@ -954,7 +893,7 @@ Marc...</td>
             <td data-sort="2026-05-06T15:00:40+0000">May 6, 2026</td>
             <td data-sort="REELS"><span class="badge badge-reels">REELS</span></td>
             <td class="caption" data-sort="Marco Tulio não está falando em esperar. Ele se vê tomando e...">Marco Tulio não está falando em esperar. Ele se vê tomando e...</td>
-            <td data-sort="1187">1,187</td>
+            <td data-sort="1189">1,189</td>
             <td data-sort="1907">1,907</td>
             <td data-sort="115">115</td>
             <td data-sort="638">638</td>
@@ -994,7 +933,7 @@ Marc...</td>
             <td data-sort="REELS"><span class="badge badge-reels">REELS</span></td>
             <td class="caption" data-sort="Qual a melhor estratégia para Poatan contra Gane? Xicao part...">Qual a melhor estratégia para Poatan contra Gane? Xicao part...</td>
             <td data-sort="4704">4,704</td>
-            <td data-sort="9016">9,016</td>
+            <td data-sort="9018">9,018</td>
             <td data-sort="347">347</td>
             <td data-sort="364">364</td>
             <td data-sort="27">27</td>
@@ -1019,8 +958,8 @@ Marc...</td>
             <td data-sort="2026-05-03T21:00:31+0000">May 3, 2026</td>
             <td data-sort="REELS"><span class="badge badge-reels">REELS</span></td>
             <td class="caption" data-sort="Carlos Prates deixa claro a mentalidade. Não faz sentido tra...">Carlos Prates deixa claro a mentalidade. Não faz sentido tra...</td>
-            <td data-sort="958">958</td>
-            <td data-sort="1341">1,341</td>
+            <td data-sort="959">959</td>
+            <td data-sort="1343">1,343</td>
             <td data-sort="58">58</td>
             <td data-sort="233">233</td>
             <td data-sort="8">8</td>
@@ -1198,6 +1137,15 @@ Marc...</td>
           
             <tr>
               <td data-sort="5"><span class="rank ">5</span></td>
+              <td data-sort="126" class="score">126</td>
+              <td data-sort="REELS"><span class="badge badge-reels">REELS</span></td>
+              <td class="caption" data-sort="🇺🇸 Topuria is a massive betting favorite. A bet of around ...">🇺🇸 Topuria is a massive betting favorite. A bet of around ...</td>
+              <td data-sort="2026-05-31T19:00:16+0000">May 31, 2026</td>
+              <td><a href="https://www.instagram.com/reel/DZAydUDii-j/" target="_blank">View</a></td>
+            </tr>
+          
+            <tr>
+              <td data-sort="6"><span class="rank ">6</span></td>
               <td data-sort="100" class="score">100</td>
               <td data-sort="REELS"><span class="badge badge-reels">REELS</span></td>
               <td class="caption" data-sort="🇺🇸 The UFC built the most powerful machine in combat sport...">🇺🇸 The UFC built the most powerful machine in combat sport...</td>
@@ -1206,7 +1154,7 @@ Marc...</td>
             </tr>
           
             <tr>
-              <td data-sort="6"><span class="rank ">6</span></td>
+              <td data-sort="7"><span class="rank ">7</span></td>
               <td data-sort="95" class="score">95</td>
               <td data-sort="REELS"><span class="badge badge-reels">REELS</span></td>
               <td class="caption" data-sort="Marco Tulio não está falando em esperar. Ele se vê tomando e...">Marco Tulio não está falando em esperar. Ele se vê tomando e...</td>
@@ -1215,7 +1163,7 @@ Marc...</td>
             </tr>
           
             <tr>
-              <td data-sort="7"><span class="rank ">7</span></td>
+              <td data-sort="8"><span class="rank ">8</span></td>
               <td data-sort="91" class="score">91</td>
               <td data-sort="REELS"><span class="badge badge-reels">REELS</span></td>
               <td class="caption" data-sort="🇺🇸 From legends like Jon Jones, Islam Makhachev and George...">🇺🇸 From legends like Jon Jones, Islam Makhachev and George...</td>
@@ -1224,7 +1172,7 @@ Marc...</td>
             </tr>
           
             <tr>
-              <td data-sort="8"><span class="rank ">8</span></td>
+              <td data-sort="9"><span class="rank ">9</span></td>
               <td data-sort="91" class="score">91</td>
               <td data-sort="REELS"><span class="badge badge-reels">REELS</span></td>
               <td class="caption" data-sort="🇺🇸 Francis Ngannou is walking in with a crazy size advanta...">🇺🇸 Francis Ngannou is walking in with a crazy size advanta...</td>
@@ -1233,21 +1181,12 @@ Marc...</td>
             </tr>
           
             <tr>
-              <td data-sort="9"><span class="rank ">9</span></td>
+              <td data-sort="10"><span class="rank ">10</span></td>
               <td data-sort="84" class="score">84</td>
               <td data-sort="REELS"><span class="badge badge-reels">REELS</span></td>
               <td class="caption" data-sort="🇺🇸 Our take on Strickland vs Chimaev 👀🔥 More fight break...">🇺🇸 Our take on Strickland vs Chimaev 👀🔥 More fight break...</td>
               <td data-sort="2026-05-07T19:00:23+0000">May 7, 2026</td>
               <td><a href="https://www.instagram.com/reel/DYC_oXnj3Yf/" target="_blank">View</a></td>
-            </tr>
-          
-            <tr>
-              <td data-sort="10"><span class="rank ">10</span></td>
-              <td data-sort="79" class="score">79</td>
-              <td data-sort="REELS"><span class="badge badge-reels">REELS</span></td>
-              <td class="caption" data-sort="🇧🇷 Melk Costa abriu o coração ao falar sobre o irmão mais ...">🇧🇷 Melk Costa abriu o coração ao falar sobre o irmão mais ...</td>
-              <td data-sort="2026-05-15T15:00:00+0000">May 15, 2026</td>
-              <td><a href="https://www.instagram.com/reel/DYXRJK-Bb8M/" target="_blank">View</a></td>
             </tr>
           
         </tbody>
@@ -1277,9 +1216,9 @@ Marc...</td>
             <tr>
               <td data-sort="1"><span class="rank rank-1">1</span></td>
               <td data-sort="peacegrappler"><strong>@peacegrappler</strong></td>
-              <td data-sort="103">103</td>
-              <td data-sort="6517">6,517</td>
-              <td data-sort="6620" class="score">6,620</td>
+              <td data-sort="105">105</td>
+              <td data-sort="6614">6,614</td>
+              <td data-sort="6719" class="score">6,719</td>
               <td style="font-size:12px;color:var(--muted);max-width:250px;">359x on "🇺🇸 Islam wants Prates… ..."<br>282x on "🇧🇷 Ilia encurta distânc..."<br>268x on "Marco Tulio não está fala..."</td>
             </tr>
             <tr>
@@ -1293,17 +1232,17 @@ Marc...</td>
             <tr>
               <td data-sort="3"><span class="rank rank-3">3</span></td>
               <td data-sort="pedr00jj"><strong>@pedr00jj</strong></td>
-              <td data-sort="1526">1,526</td>
+              <td data-sort="1577">1,577</td>
               <td data-sort="1">1</td>
-              <td data-sort="1527" class="score">1,527</td>
+              <td data-sort="1578" class="score">1,578</td>
               <td style="font-size:12px;color:var(--muted);max-width:250px;">60x on "🇧🇷 Philipe Lins, Junior..."<br>54x on "🇧🇷 Sean Strickland assu..."<br>54x on "🇧🇷 O Brasil chega forte..."</td>
             </tr>
             <tr>
               <td data-sort="4"><span class="rank ">4</span></td>
               <td data-sort="enzocardoso.bjj"><strong>@enzocardoso.bjj</strong></td>
-              <td data-sort="1289">1,289</td>
+              <td data-sort="1297">1,297</td>
               <td data-sort="42">42</td>
-              <td data-sort="1331" class="score">1,331</td>
+              <td data-sort="1339" class="score">1,339</td>
               <td style="font-size:12px;color:var(--muted);max-width:250px;">41x on "🇧🇷 Ilia encurta distânc..."<br>35x on "Qual a melhor estratégia ..."<br>34x on "🇧🇷 Arnold Allen tava co..."</td>
             </tr>
             <tr>
@@ -1317,9 +1256,9 @@ Marc...</td>
             <tr>
               <td data-sort="6"><span class="rank ">6</span></td>
               <td data-sort="quemuel_ottoni"><strong>@quemuel_ottoni</strong></td>
-              <td data-sort="52">52</td>
-              <td data-sort="335">335</td>
-              <td data-sort="387" class="score">387</td>
+              <td data-sort="53">53</td>
+              <td data-sort="337">337</td>
+              <td data-sort="390" class="score">390</td>
               <td style="font-size:12px;color:var(--muted);max-width:250px;">84x on "Qual a melhor estratégia ..."<br>67x on "🇺🇸 Islam wants Prates… ..."<br>51x on "🇧🇷 Ilia encurta distânc..."</td>
             </tr>
             <tr>
@@ -1349,41 +1288,41 @@ Marc...</td>
             <tr>
               <td data-sort="10"><span class="rank ">10</span></td>
               <td data-sort="combintel"><strong>@combintel</strong></td>
-              <td data-sort="171">171</td>
+              <td data-sort="174">174</td>
               <td data-sort="6">6</td>
-              <td data-sort="177" class="score">177</td>
+              <td data-sort="180" class="score">180</td>
               <td style="font-size:12px;color:var(--muted);max-width:250px;">16x on "Dois strikers de alto nív..."<br>14x on "Carlos Prates deixa claro..."<br>13x on "Cris Nogueira, head coach..."</td>
             </tr>
             <tr>
               <td data-sort="11"><span class="rank ">11</span></td>
               <td data-sort="johnmma9"><strong>@johnmma9</strong></td>
-              <td data-sort="99">99</td>
+              <td data-sort="102">102</td>
               <td data-sort="9">9</td>
-              <td data-sort="108" class="score">108</td>
+              <td data-sort="111" class="score">111</td>
               <td style="font-size:12px;color:var(--muted);max-width:250px;">16x on "🇺🇸 Our take on Strickla..."<br>10x on "🇧🇷 Chimaev e Strickland..."<br>10x on "Josh Hokit x Ilia Topuria..."</td>
             </tr>
             <tr>
               <td data-sort="12"><span class="rank ">12</span></td>
               <td data-sort="masonharper_mma"><strong>@masonharper_mma</strong></td>
-              <td data-sort="83">83</td>
+              <td data-sort="86">86</td>
               <td data-sort="5">5</td>
-              <td data-sort="88" class="score">88</td>
+              <td data-sort="91" class="score">91</td>
               <td style="font-size:12px;color:var(--muted);max-width:250px;">15x on "🇧🇷 Chimaev e Strickland..."<br>8x on "🇺🇸 Our take on Strickla..."<br>7x on "Josh Hokit x Ilia Topuria..."</td>
             </tr>
             <tr>
               <td data-sort="13"><span class="rank ">13</span></td>
               <td data-sort="decio_bjj"><strong>@decio_bjj</strong></td>
               <td data-sort="49">49</td>
-              <td data-sort="31">31</td>
-              <td data-sort="80" class="score">80</td>
+              <td data-sort="32">32</td>
+              <td data-sort="81" class="score">81</td>
               <td style="font-size:12px;color:var(--muted);max-width:250px;">7x on "Qual a melhor estratégia ..."<br>5x on "🇺🇸 Part 2 😳🔥 Because ..."<br>4x on "Cris Nogueira, head coach..."</td>
             </tr>
             <tr>
               <td data-sort="14"><span class="rank ">14</span></td>
               <td data-sort="malu832757"><strong>@malu832757</strong></td>
-              <td data-sort="60">60</td>
-              <td data-sort="10">10</td>
-              <td data-sort="70" class="score">70</td>
+              <td data-sort="65">65</td>
+              <td data-sort="11">11</td>
+              <td data-sort="76" class="score">76</td>
               <td style="font-size:12px;color:var(--muted);max-width:250px;">7x on "🇺🇸 The UFC gives visibi..."<br>6x on "🇧🇷 Ilia encurta distânc..."<br>6x on "🇺🇸 Pure violence 😳🔥 T..."</td>
             </tr>
             <tr>
@@ -1396,6 +1335,14 @@ Marc...</td>
             </tr>
             <tr>
               <td data-sort="16"><span class="rank ">16</span></td>
+              <td data-sort="sirleneferreiradiasdias"><strong>@sirleneferreiradiasdias</strong></td>
+              <td data-sort="39">39</td>
+              <td data-sort="1">1</td>
+              <td data-sort="40" class="score">40</td>
+              <td style="font-size:12px;color:var(--muted);max-width:250px;">4x on "Marco Tulio não está fala..."<br>4x on "🇺🇸 Islam wants Prates… ..."<br>4x on "🇧🇷 Tem gente ganhando d..."</td>
+            </tr>
+            <tr>
+              <td data-sort="17"><span class="rank ">17</span></td>
               <td data-sort="karen.ottoni"><strong>@karen.ottoni</strong></td>
               <td data-sort="4">4</td>
               <td data-sort="35">35</td>
@@ -1403,7 +1350,7 @@ Marc...</td>
               <td style="font-size:12px;color:var(--muted);max-width:250px;">32x on "🇧🇷 Tem gente ganhando d..."<br>4x on "🇺🇸 Poatan looks like a ..."<br>1x on "Marco Tulio não está fala..."</td>
             </tr>
             <tr>
-              <td data-sort="17"><span class="rank ">17</span></td>
+              <td data-sort="18"><span class="rank ">18</span></td>
               <td data-sort="matheuscoyoteoficial"><strong>@matheuscoyoteoficial</strong></td>
               <td data-sort="33">33</td>
               <td data-sort="5">5</td>
@@ -1411,20 +1358,12 @@ Marc...</td>
               <td style="font-size:12px;color:var(--muted);max-width:250px;">3x on "UFC Carlos Prates x JDM -..."<br>3x on "🇧🇷 Chimaev e Strickland..."<br>3x on "🇧🇷 Chimaev falou… e o c..."</td>
             </tr>
             <tr>
-              <td data-sort="18"><span class="rank ">18</span></td>
+              <td data-sort="19"><span class="rank ">19</span></td>
               <td data-sort="irmandadefightteam"><strong>@irmandadefightteam</strong></td>
               <td data-sort="1">1</td>
               <td data-sort="36">36</td>
               <td data-sort="37" class="score">37</td>
               <td style="font-size:12px;color:var(--muted);max-width:250px;">4x on "Os rankings mexeram… e nã..."<br>3x on "UFC Carlos Prates x JDM -..."<br>2x on "Marcio Ticoto knockout of..."</td>
-            </tr>
-            <tr>
-              <td data-sort="19"><span class="rank ">19</span></td>
-              <td data-sort="sirleneferreiradiasdias"><strong>@sirleneferreiradiasdias</strong></td>
-              <td data-sort="36">36</td>
-              <td data-sort="1">1</td>
-              <td data-sort="37" class="score">37</td>
-              <td style="font-size:12px;color:var(--muted);max-width:250px;">4x on "Marco Tulio não está fala..."<br>4x on "🇺🇸 Islam wants Prates… ..."<br>4x on "🇧🇷 Tem gente ganhando d..."</td>
             </tr>
             <tr>
               <td data-sort="20"><span class="rank ">20</span></td>
@@ -1479,13 +1418,13 @@ Marc...</td>
           <tr>
             <td data-sort="1"><span class="rank rank-1">1</span></td>
             <td data-sort="peacegrappler"><strong>@peacegrappler</strong></td>
-            <td data-sort="142106" class="score">142,106</td>
-            <td data-sort="9678" style="color: var(--orange);">9,678</td>
-            <td data-sort="493">493</td>
+            <td data-sort="143477" class="score">143,477</td>
+            <td data-sort="9776" style="color: var(--orange);">9,776</td>
+            <td data-sort="495">495</td>
             <td data-sort="0">0</td>
-            <td data-sort="10324">10,324</td>
+            <td data-sort="10421">10,421</td>
             <td data-sort="3">3</td>
-            <td data-sort="10820">10,820</td>
+            <td data-sort="10919">10,919</td>
           </tr>
         
           <tr>
@@ -1503,25 +1442,25 @@ Marc...</td>
           <tr>
             <td data-sort="3"><span class="rank rank-3">3</span></td>
             <td data-sort="enzocardoso.bjj"><strong>@enzocardoso.bjj</strong></td>
-            <td data-sort="14578" class="score">14,578</td>
-            <td data-sort="805" style="color: var(--orange);">805</td>
-            <td data-sort="1762">1,762</td>
+            <td data-sort="14658" class="score">14,658</td>
+            <td data-sort="813" style="color: var(--orange);">813</td>
+            <td data-sort="1770">1,770</td>
             <td data-sort="30">30</td>
             <td data-sort="215">215</td>
             <td data-sort="0">0</td>
-            <td data-sort="2007">2,007</td>
+            <td data-sort="2015">2,015</td>
           </tr>
         
           <tr>
             <td data-sort="4"><span class="rank ">4</span></td>
             <td data-sort="pedr00jj"><strong>@pedr00jj</strong></td>
-            <td data-sort="12315" class="score">12,315</td>
+            <td data-sort="12570" class="score">12,570</td>
             <td data-sort="456" style="color: var(--orange);">456</td>
-            <td data-sort="1926">1,926</td>
+            <td data-sort="1977">1,977</td>
             <td data-sort="5">5</td>
             <td data-sort="50">50</td>
             <td data-sort="1">1</td>
-            <td data-sort="1982">1,982</td>
+            <td data-sort="2033">2,033</td>
           </tr>
         
           <tr>
@@ -1539,13 +1478,13 @@ Marc...</td>
           <tr>
             <td data-sort="6"><span class="rank ">6</span></td>
             <td data-sort="quemuel_ottoni"><strong>@quemuel_ottoni</strong></td>
-            <td data-sort="9388" class="score">9,388</td>
-            <td data-sort="650" style="color: var(--orange);">650</td>
-            <td data-sort="195">195</td>
+            <td data-sort="9426" class="score">9,426</td>
+            <td data-sort="653" style="color: var(--orange);">653</td>
+            <td data-sort="196">196</td>
             <td data-sort="8">8</td>
-            <td data-sort="597">597</td>
+            <td data-sort="599">599</td>
             <td data-sort="6">6</td>
-            <td data-sort="806">806</td>
+            <td data-sort="809">809</td>
           </tr>
         
           <tr>
@@ -1587,13 +1526,13 @@ Marc...</td>
           <tr>
             <td data-sort="10"><span class="rank ">10</span></td>
             <td data-sort="combintel"><strong>@combintel</strong></td>
-            <td data-sort="1920" class="score">1,920</td>
+            <td data-sort="1935" class="score">1,935</td>
             <td data-sort="84" style="color: var(--orange);">84</td>
-            <td data-sort="274">274</td>
+            <td data-sort="277">277</td>
             <td data-sort="2">2</td>
             <td data-sort="16">16</td>
             <td data-sort="0">0</td>
-            <td data-sort="292">292</td>
+            <td data-sort="295">295</td>
           </tr>
         
           <tr>
@@ -1623,13 +1562,13 @@ Marc...</td>
           <tr>
             <td data-sort="13"><span class="rank ">13</span></td>
             <td data-sort="pg_grappling"><strong>@pg_grappling</strong></td>
-            <td data-sort="1250" class="score">1,250</td>
+            <td data-sort="1255" class="score">1,255</td>
             <td data-sort="53" style="color: var(--orange);">53</td>
-            <td data-sort="139">139</td>
+            <td data-sort="140">140</td>
             <td data-sort="0">0</td>
             <td data-sort="38">38</td>
             <td data-sort="0">0</td>
-            <td data-sort="177">177</td>
+            <td data-sort="178">178</td>
           </tr>
         
           <tr>
@@ -1659,25 +1598,25 @@ Marc...</td>
           <tr>
             <td data-sort="16"><span class="rank ">16</span></td>
             <td data-sort="mmmarc20"><strong>@mmmarc20</strong></td>
-            <td data-sort="880" class="score">880</td>
-            <td data-sort="39" style="color: var(--orange);">39</td>
-            <td data-sort="112">112</td>
+            <td data-sort="909" class="score">909</td>
+            <td data-sort="40" style="color: var(--orange);">40</td>
+            <td data-sort="115">115</td>
             <td data-sort="0">0</td>
-            <td data-sort="15">15</td>
+            <td data-sort="16">16</td>
             <td data-sort="0">0</td>
-            <td data-sort="127">127</td>
+            <td data-sort="131">131</td>
           </tr>
         
           <tr>
             <td data-sort="17"><span class="rank ">17</span></td>
             <td data-sort="johnmma9"><strong>@johnmma9</strong></td>
-            <td data-sort="875" class="score">875</td>
+            <td data-sort="890" class="score">890</td>
             <td data-sort="61" style="color: var(--orange);">61</td>
-            <td data-sort="99">99</td>
+            <td data-sort="102">102</td>
             <td data-sort="0">0</td>
             <td data-sort="9">9</td>
             <td data-sort="0">0</td>
-            <td data-sort="108">108</td>
+            <td data-sort="111">111</td>
           </tr>
         
           <tr>
@@ -1695,13 +1634,13 @@ Marc...</td>
           <tr>
             <td data-sort="19"><span class="rank ">19</span></td>
             <td data-sort="masonharper_mma"><strong>@masonharper_mma</strong></td>
-            <td data-sort="745" class="score">745</td>
+            <td data-sort="760" class="score">760</td>
             <td data-sort="57" style="color: var(--orange);">57</td>
-            <td data-sort="83">83</td>
+            <td data-sort="86">86</td>
             <td data-sort="0">0</td>
             <td data-sort="5">5</td>
             <td data-sort="0">0</td>
-            <td data-sort="88">88</td>
+            <td data-sort="91">91</td>
           </tr>
         
           <tr>
@@ -1731,17 +1670,29 @@ Marc...</td>
           <tr>
             <td data-sort="22"><span class="rank ">22</span></td>
             <td data-sort="decio_bjj"><strong>@decio_bjj</strong></td>
-            <td data-sort="568" class="score">568</td>
-            <td data-sort="16" style="color: var(--orange);">16</td>
+            <td data-sort="582" class="score">582</td>
+            <td data-sort="17" style="color: var(--orange);">17</td>
             <td data-sort="49">49</td>
             <td data-sort="0">0</td>
-            <td data-sort="31">31</td>
+            <td data-sort="32">32</td>
             <td data-sort="0">0</td>
-            <td data-sort="80">80</td>
+            <td data-sort="81">81</td>
           </tr>
         
           <tr>
             <td data-sort="23"><span class="rank ">23</span></td>
+            <td data-sort="malu832757"><strong>@malu832757</strong></td>
+            <td data-sort="567" class="score">567</td>
+            <td data-sort="29" style="color: var(--orange);">29</td>
+            <td data-sort="65">65</td>
+            <td data-sort="0">0</td>
+            <td data-sort="11">11</td>
+            <td data-sort="0">0</td>
+            <td data-sort="76">76</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="24"><span class="rank ">24</span></td>
             <td data-sort="karen.ottoni"><strong>@karen.ottoni</strong></td>
             <td data-sort="564" class="score">564</td>
             <td data-sort="40" style="color: var(--orange);">40</td>
@@ -1753,7 +1704,7 @@ Marc...</td>
           </tr>
         
           <tr>
-            <td data-sort="24"><span class="rank ">24</span></td>
+            <td data-sort="25"><span class="rank ">25</span></td>
             <td data-sort="ronemayanmorais"><strong>@ronemayanmorais</strong></td>
             <td data-sort="540" class="score">540</td>
             <td data-sort="13" style="color: var(--orange);">13</td>
@@ -1762,18 +1713,6 @@ Marc...</td>
             <td data-sort="17">17</td>
             <td data-sort="0">0</td>
             <td data-sort="97">97</td>
-          </tr>
-        
-          <tr>
-            <td data-sort="25"><span class="rank ">25</span></td>
-            <td data-sort="malu832757"><strong>@malu832757</strong></td>
-            <td data-sort="503" class="score">503</td>
-            <td data-sort="23" style="color: var(--orange);">23</td>
-            <td data-sort="60">60</td>
-            <td data-sort="0">0</td>
-            <td data-sort="10">10</td>
-            <td data-sort="0">0</td>
-            <td data-sort="70">70</td>
           </tr>
         
           <tr>
@@ -1970,24 +1909,24 @@ Marc...</td>
         
           <tr>
             <td data-sort="42"><span class="rank ">42</span></td>
+            <td data-sort="victus_torquatus00"><strong>@victus_torquatus00</strong></td>
+            <td data-sort="208" class="score">208</td>
+            <td data-sort="8" style="color: var(--orange);">8</td>
+            <td data-sort="23">23</td>
+            <td data-sort="1">1</td>
+            <td data-sort="6">6</td>
+            <td data-sort="0">0</td>
+            <td data-sort="30">30</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="43"><span class="rank ">43</span></td>
             <td data-sort="pedromadeira.s"><strong>@pedromadeira.s</strong></td>
             <td data-sort="205" class="score">205</td>
             <td data-sort="10" style="color: var(--orange);">10</td>
             <td data-sort="26">26</td>
             <td data-sort="0">0</td>
             <td data-sort="3">3</td>
-            <td data-sort="0">0</td>
-            <td data-sort="29">29</td>
-          </tr>
-        
-          <tr>
-            <td data-sort="43"><span class="rank ">43</span></td>
-            <td data-sort="victus_torquatus00"><strong>@victus_torquatus00</strong></td>
-            <td data-sort="198" class="score">198</td>
-            <td data-sort="7" style="color: var(--orange);">7</td>
-            <td data-sort="22">22</td>
-            <td data-sort="1">1</td>
-            <td data-sort="6">6</td>
             <td data-sort="0">0</td>
             <td data-sort="29">29</td>
           </tr>
@@ -2054,26 +1993,26 @@ Marc...</td>
         
           <tr>
             <td data-sort="49"><span class="rank ">49</span></td>
-            <td data-sort="tabajaraharu"><strong>@tabajaraharu</strong></td>
-            <td data-sort="166" class="score">166</td>
-            <td data-sort="17" style="color: var(--orange);">17</td>
-            <td data-sort="12">12</td>
-            <td data-sort="19">19</td>
-            <td data-sort="4">4</td>
-            <td data-sort="1">1</td>
-            <td data-sort="36">36</td>
+            <td data-sort="italothearcher"><strong>@italothearcher</strong></td>
+            <td data-sort="178" class="score">178</td>
+            <td data-sort="13" style="color: var(--orange);">13</td>
+            <td data-sort="20">20</td>
+            <td data-sort="29">29</td>
+            <td data-sort="2">2</td>
+            <td data-sort="0">0</td>
+            <td data-sort="51">51</td>
           </tr>
         
           <tr>
             <td data-sort="50"><span class="rank ">50</span></td>
             <td data-sort="sirleneferreiradiasdias"><strong>@sirleneferreiradiasdias</strong></td>
-            <td data-sort="161" class="score">161</td>
-            <td data-sort="16" style="color: var(--orange);">16</td>
-            <td data-sort="16">16</td>
-            <td data-sort="30">30</td>
+            <td data-sort="173" class="score">173</td>
+            <td data-sort="17" style="color: var(--orange);">17</td>
+            <td data-sort="17">17</td>
+            <td data-sort="32">32</td>
             <td data-sort="1">1</td>
             <td data-sort="0">0</td>
-            <td data-sort="47">47</td>
+            <td data-sort="50">50</td>
           </tr>
         
       </tbody>
@@ -2101,13 +2040,13 @@ Marc...</td>
           <tr>
             <td data-sort="1"><span class="rank rank-1">1</span></td>
             <td data-sort="peacegrappler"><strong>@peacegrappler</strong></td>
-            <td data-sort="90398" class="score">90,398</td>
-            <td data-sort="6338" style="color: var(--orange);">6,338</td>
-            <td data-sort="103">103</td>
+            <td data-sort="91769" class="score">91,769</td>
+            <td data-sort="6436" style="color: var(--orange);">6,436</td>
+            <td data-sort="105">105</td>
             <td data-sort="0">0</td>
-            <td data-sort="6517">6,517</td>
+            <td data-sort="6614">6,614</td>
             <td data-sort="0">0</td>
-            <td data-sort="6620">6,620</td>
+            <td data-sort="6719">6,719</td>
           </tr>
         
           <tr>
@@ -2125,37 +2064,37 @@ Marc...</td>
           <tr>
             <td data-sort="3"><span class="rank rank-3">3</span></td>
             <td data-sort="enzocardoso.bjj"><strong>@enzocardoso.bjj</strong></td>
-            <td data-sort="9969" class="score">9,969</td>
-            <td data-sort="636" style="color: var(--orange);">636</td>
-            <td data-sort="1286">1,286</td>
+            <td data-sort="10049" class="score">10,049</td>
+            <td data-sort="644" style="color: var(--orange);">644</td>
+            <td data-sort="1294">1,294</td>
             <td data-sort="3">3</td>
             <td data-sort="42">42</td>
             <td data-sort="0">0</td>
-            <td data-sort="1331">1,331</td>
+            <td data-sort="1339">1,339</td>
           </tr>
         
           <tr>
             <td data-sort="4"><span class="rank ">4</span></td>
             <td data-sort="pedr00jj"><strong>@pedr00jj</strong></td>
-            <td data-sort="9382" class="score">9,382</td>
+            <td data-sort="9637" class="score">9,637</td>
             <td data-sort="349" style="color: var(--orange);">349</td>
-            <td data-sort="1526">1,526</td>
+            <td data-sort="1577">1,577</td>
             <td data-sort="0">0</td>
             <td data-sort="1">1</td>
             <td data-sort="0">0</td>
-            <td data-sort="1527">1,527</td>
+            <td data-sort="1578">1,578</td>
           </tr>
         
           <tr>
             <td data-sort="5"><span class="rank ">5</span></td>
             <td data-sort="quemuel_ottoni"><strong>@quemuel_ottoni</strong></td>
-            <td data-sort="4792" class="score">4,792</td>
-            <td data-sort="327" style="color: var(--orange);">327</td>
-            <td data-sort="52">52</td>
+            <td data-sort="4830" class="score">4,830</td>
+            <td data-sort="330" style="color: var(--orange);">330</td>
+            <td data-sort="53">53</td>
             <td data-sort="0">0</td>
-            <td data-sort="333">333</td>
+            <td data-sort="335">335</td>
             <td data-sort="2">2</td>
-            <td data-sort="387">387</td>
+            <td data-sort="390">390</td>
           </tr>
         
           <tr>
@@ -2209,53 +2148,65 @@ Marc...</td>
           <tr>
             <td data-sort="10"><span class="rank ">10</span></td>
             <td data-sort="combintel"><strong>@combintel</strong></td>
-            <td data-sort="1175" class="score">1,175</td>
+            <td data-sort="1190" class="score">1,190</td>
             <td data-sort="54" style="color: var(--orange);">54</td>
-            <td data-sort="171">171</td>
+            <td data-sort="174">174</td>
             <td data-sort="0">0</td>
             <td data-sort="6">6</td>
             <td data-sort="0">0</td>
-            <td data-sort="177">177</td>
+            <td data-sort="180">180</td>
           </tr>
         
           <tr>
             <td data-sort="11"><span class="rank ">11</span></td>
             <td data-sort="johnmma9"><strong>@johnmma9</strong></td>
-            <td data-sort="875" class="score">875</td>
+            <td data-sort="890" class="score">890</td>
             <td data-sort="61" style="color: var(--orange);">61</td>
-            <td data-sort="99">99</td>
+            <td data-sort="102">102</td>
             <td data-sort="0">0</td>
             <td data-sort="9">9</td>
             <td data-sort="0">0</td>
-            <td data-sort="108">108</td>
+            <td data-sort="111">111</td>
           </tr>
         
           <tr>
             <td data-sort="12"><span class="rank ">12</span></td>
             <td data-sort="masonharper_mma"><strong>@masonharper_mma</strong></td>
-            <td data-sort="745" class="score">745</td>
+            <td data-sort="760" class="score">760</td>
             <td data-sort="57" style="color: var(--orange);">57</td>
-            <td data-sort="83">83</td>
+            <td data-sort="86">86</td>
             <td data-sort="0">0</td>
             <td data-sort="5">5</td>
             <td data-sort="0">0</td>
-            <td data-sort="88">88</td>
+            <td data-sort="91">91</td>
           </tr>
         
           <tr>
             <td data-sort="13"><span class="rank ">13</span></td>
             <td data-sort="decio_bjj"><strong>@decio_bjj</strong></td>
-            <td data-sort="568" class="score">568</td>
-            <td data-sort="16" style="color: var(--orange);">16</td>
+            <td data-sort="582" class="score">582</td>
+            <td data-sort="17" style="color: var(--orange);">17</td>
             <td data-sort="49">49</td>
             <td data-sort="0">0</td>
-            <td data-sort="31">31</td>
+            <td data-sort="32">32</td>
             <td data-sort="0">0</td>
-            <td data-sort="80">80</td>
+            <td data-sort="81">81</td>
           </tr>
         
           <tr>
             <td data-sort="14"><span class="rank ">14</span></td>
+            <td data-sort="malu832757"><strong>@malu832757</strong></td>
+            <td data-sort="567" class="score">567</td>
+            <td data-sort="29" style="color: var(--orange);">29</td>
+            <td data-sort="65">65</td>
+            <td data-sort="0">0</td>
+            <td data-sort="11">11</td>
+            <td data-sort="0">0</td>
+            <td data-sort="76">76</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="15"><span class="rank ">15</span></td>
             <td data-sort="karen.ottoni"><strong>@karen.ottoni</strong></td>
             <td data-sort="511" class="score">511</td>
             <td data-sort="36" style="color: var(--orange);">36</td>
@@ -2264,18 +2215,6 @@ Marc...</td>
             <td data-sort="35">35</td>
             <td data-sort="0">0</td>
             <td data-sort="39">39</td>
-          </tr>
-        
-          <tr>
-            <td data-sort="15"><span class="rank ">15</span></td>
-            <td data-sort="malu832757"><strong>@malu832757</strong></td>
-            <td data-sort="503" class="score">503</td>
-            <td data-sort="23" style="color: var(--orange);">23</td>
-            <td data-sort="60">60</td>
-            <td data-sort="0">0</td>
-            <td data-sort="10">10</td>
-            <td data-sort="0">0</td>
-            <td data-sort="70">70</td>
           </tr>
         
           <tr>
@@ -2388,6 +2327,18 @@ Marc...</td>
         
           <tr>
             <td data-sort="25"><span class="rank ">25</span></td>
+            <td data-sort="mmmarc20"><strong>@mmmarc20</strong></td>
+            <td data-sort="229" class="score">229</td>
+            <td data-sort="13" style="color: var(--orange);">13</td>
+            <td data-sort="31">31</td>
+            <td data-sort="0">0</td>
+            <td data-sort="1">1</td>
+            <td data-sort="0">0</td>
+            <td data-sort="32">32</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="26"><span class="rank ">26</span></td>
             <td data-sort="_cardoso_caio_"><strong>@_cardoso_caio_</strong></td>
             <td data-sort="215" class="score">215</td>
             <td data-sort="12" style="color: var(--orange);">12</td>
@@ -2396,18 +2347,6 @@ Marc...</td>
             <td data-sort="0">0</td>
             <td data-sort="0">0</td>
             <td data-sort="31">31</td>
-          </tr>
-        
-          <tr>
-            <td data-sort="26"><span class="rank ">26</span></td>
-            <td data-sort="mmmarc20"><strong>@mmmarc20</strong></td>
-            <td data-sort="200" class="score">200</td>
-            <td data-sort="12" style="color: var(--orange);">12</td>
-            <td data-sort="28">28</td>
-            <td data-sort="0">0</td>
-            <td data-sort="0">0</td>
-            <td data-sort="0">0</td>
-            <td data-sort="28">28</td>
           </tr>
         
           <tr>
@@ -2425,13 +2364,13 @@ Marc...</td>
           <tr>
             <td data-sort="28"><span class="rank ">28</span></td>
             <td data-sort="victus_torquatus00"><strong>@victus_torquatus00</strong></td>
-            <td data-sort="176" class="score">176</td>
-            <td data-sort="6" style="color: var(--orange);">6</td>
-            <td data-sort="20">20</td>
+            <td data-sort="186" class="score">186</td>
+            <td data-sort="7" style="color: var(--orange);">7</td>
+            <td data-sort="21">21</td>
             <td data-sort="1">1</td>
             <td data-sort="5">5</td>
             <td data-sort="0">0</td>
-            <td data-sort="26">26</td>
+            <td data-sort="27">27</td>
           </tr>
         
           <tr>
@@ -2449,13 +2388,13 @@ Marc...</td>
           <tr>
             <td data-sort="30"><span class="rank ">30</span></td>
             <td data-sort="sirleneferreiradiasdias"><strong>@sirleneferreiradiasdias</strong></td>
-            <td data-sort="146" class="score">146</td>
-            <td data-sort="15" style="color: var(--orange);">15</td>
-            <td data-sort="15">15</td>
-            <td data-sort="21">21</td>
+            <td data-sort="158" class="score">158</td>
+            <td data-sort="16" style="color: var(--orange);">16</td>
+            <td data-sort="16">16</td>
+            <td data-sort="23">23</td>
             <td data-sort="1">1</td>
             <td data-sort="0">0</td>
-            <td data-sort="37">37</td>
+            <td data-sort="40">40</td>
           </tr>
         
           <tr>
@@ -2472,6 +2411,18 @@ Marc...</td>
         
           <tr>
             <td data-sort="32"><span class="rank ">32</span></td>
+            <td data-sort="washington_cassisno"><strong>@washington_cassisno</strong></td>
+            <td data-sort="138" class="score">138</td>
+            <td data-sort="11" style="color: var(--orange);">11</td>
+            <td data-sort="17">17</td>
+            <td data-sort="6">6</td>
+            <td data-sort="0">0</td>
+            <td data-sort="0">0</td>
+            <td data-sort="23">23</td>
+          </tr>
+        
+          <tr>
+            <td data-sort="33"><span class="rank ">33</span></td>
             <td data-sort="god.motivacao"><strong>@god.motivacao</strong></td>
             <td data-sort="135" class="score">135</td>
             <td data-sort="9" style="color: var(--orange);">9</td>
@@ -2483,19 +2434,19 @@ Marc...</td>
           </tr>
         
           <tr>
-            <td data-sort="33"><span class="rank ">33</span></td>
-            <td data-sort="washington_cassisno"><strong>@washington_cassisno</strong></td>
-            <td data-sort="128" class="score">128</td>
-            <td data-sort="10" style="color: var(--orange);">10</td>
+            <td data-sort="34"><span class="rank ">34</span></td>
+            <td data-sort="italothearcher"><strong>@italothearcher</strong></td>
+            <td data-sort="129" class="score">129</td>
+            <td data-sort="7" style="color: var(--orange);">7</td>
             <td data-sort="16">16</td>
-            <td data-sort="6">6</td>
+            <td data-sort="13">13</td>
+            <td data-sort="1">1</td>
             <td data-sort="0">0</td>
-            <td data-sort="0">0</td>
-            <td data-sort="22">22</td>
+            <td data-sort="30">30</td>
           </tr>
         
           <tr>
-            <td data-sort="34"><span class="rank ">34</span></td>
+            <td data-sort="35"><span class="rank ">35</span></td>
             <td data-sort="ryangandraufc"><strong>@ryangandraufc</strong></td>
             <td data-sort="127" class="score">127</td>
             <td data-sort="8" style="color: var(--orange);">8</td>
@@ -2507,7 +2458,7 @@ Marc...</td>
           </tr>
         
           <tr>
-            <td data-sort="35"><span class="rank ">35</span></td>
+            <td data-sort="36"><span class="rank ">36</span></td>
             <td data-sort="thiagoauper"><strong>@thiagoauper</strong></td>
             <td data-sort="126" class="score">126</td>
             <td data-sort="4" style="color: var(--orange);">4</td>
@@ -2519,7 +2470,7 @@ Marc...</td>
           </tr>
         
           <tr>
-            <td data-sort="36"><span class="rank ">36</span></td>
+            <td data-sort="37"><span class="rank ">37</span></td>
             <td data-sort="marcelogabrielmma"><strong>@marcelogabrielmma</strong></td>
             <td data-sort="122" class="score">122</td>
             <td data-sort="6" style="color: var(--orange);">6</td>
@@ -2531,7 +2482,7 @@ Marc...</td>
           </tr>
         
           <tr>
-            <td data-sort="37"><span class="rank ">37</span></td>
+            <td data-sort="38"><span class="rank ">38</span></td>
             <td data-sort="cjrnavalha"><strong>@cjrnavalha</strong></td>
             <td data-sort="116" class="score">116</td>
             <td data-sort="4" style="color: var(--orange);">4</td>
@@ -2543,7 +2494,7 @@ Marc...</td>
           </tr>
         
           <tr>
-            <td data-sort="38"><span class="rank ">38</span></td>
+            <td data-sort="39"><span class="rank ">39</span></td>
             <td data-sort="jvxz______"><strong>@jvxz______</strong></td>
             <td data-sort="108" class="score">108</td>
             <td data-sort="6" style="color: var(--orange);">6</td>
@@ -2555,7 +2506,7 @@ Marc...</td>
           </tr>
         
           <tr>
-            <td data-sort="39"><span class="rank ">39</span></td>
+            <td data-sort="40"><span class="rank ">40</span></td>
             <td data-sort="manoel_maranhaobjjmma"><strong>@manoel_maranhaobjjmma</strong></td>
             <td data-sort="105" class="score">105</td>
             <td data-sort="3" style="color: var(--orange);">3</td>
@@ -2567,7 +2518,7 @@ Marc...</td>
           </tr>
         
           <tr>
-            <td data-sort="40"><span class="rank ">40</span></td>
+            <td data-sort="41"><span class="rank ">41</span></td>
             <td data-sort="danielbrbjj"><strong>@danielbrbjj</strong></td>
             <td data-sort="105" class="score">105</td>
             <td data-sort="7" style="color: var(--orange);">7</td>
@@ -2579,7 +2530,7 @@ Marc...</td>
           </tr>
         
           <tr>
-            <td data-sort="41"><span class="rank ">41</span></td>
+            <td data-sort="42"><span class="rank ">42</span></td>
             <td data-sort="ottonianalivia"><strong>@ottonianalivia</strong></td>
             <td data-sort="104" class="score">104</td>
             <td data-sort="3" style="color: var(--orange);">3</td>
@@ -2591,7 +2542,7 @@ Marc...</td>
           </tr>
         
           <tr>
-            <td data-sort="42"><span class="rank ">42</span></td>
+            <td data-sort="43"><span class="rank ">43</span></td>
             <td data-sort="maxgandra"><strong>@maxgandra</strong></td>
             <td data-sort="101" class="score">101</td>
             <td data-sort="6" style="color: var(--orange);">6</td>
@@ -2603,7 +2554,7 @@ Marc...</td>
           </tr>
         
           <tr>
-            <td data-sort="43"><span class="rank ">43</span></td>
+            <td data-sort="44"><span class="rank ">44</span></td>
             <td data-sort="_.maduoliveira_"><strong>@_.maduoliveira_</strong></td>
             <td data-sort="92" class="score">92</td>
             <td data-sort="3" style="color: var(--orange);">3</td>
@@ -2615,7 +2566,7 @@ Marc...</td>
           </tr>
         
           <tr>
-            <td data-sort="44"><span class="rank ">44</span></td>
+            <td data-sort="45"><span class="rank ">45</span></td>
             <td data-sort="gustavomohallem"><strong>@gustavomohallem</strong></td>
             <td data-sort="86" class="score">86</td>
             <td data-sort="3" style="color: var(--orange);">3</td>
@@ -2627,7 +2578,7 @@ Marc...</td>
           </tr>
         
           <tr>
-            <td data-sort="45"><span class="rank ">45</span></td>
+            <td data-sort="46"><span class="rank ">46</span></td>
             <td data-sort="kauepraciano"><strong>@kauepraciano</strong></td>
             <td data-sort="85" class="score">85</td>
             <td data-sort="0" style="color: var(--orange);">0</td>
@@ -2636,18 +2587,6 @@ Marc...</td>
             <td data-sort="0">0</td>
             <td data-sort="0">0</td>
             <td data-sort="17">17</td>
-          </tr>
-        
-          <tr>
-            <td data-sort="46"><span class="rank ">46</span></td>
-            <td data-sort="italothearcher"><strong>@italothearcher</strong></td>
-            <td data-sort="85" class="score">85</td>
-            <td data-sort="3" style="color: var(--orange);">3</td>
-            <td data-sort="13">13</td>
-            <td data-sort="13">13</td>
-            <td data-sort="0">0</td>
-            <td data-sort="0">0</td>
-            <td data-sort="26">26</td>
           </tr>
         
           <tr>
@@ -2787,19 +2726,36 @@ function initCharts() {
   chartsInitialized = true;
 
   
+  new Chart(document.getElementById('growthChart'), {
+    type: 'line',
+    data: {
+      labels: ["2026-04-09","2026-04-10","2026-04-11","2026-04-12","2026-04-13","2026-04-14","2026-04-15","2026-04-16","2026-04-17","2026-04-18","2026-04-19","2026-04-20","2026-04-21","2026-04-22","2026-04-23","2026-04-24","2026-04-25","2026-04-26","2026-04-27","2026-04-28","2026-04-29","2026-04-30","2026-05-01","2026-05-02","2026-05-03","2026-05-04","2026-05-05","2026-05-06","2026-05-07","2026-05-08","2026-05-09","2026-05-10","2026-05-11","2026-05-12","2026-05-13","2026-05-14","2026-05-15","2026-05-16","2026-05-17","2026-05-18","2026-05-19","2026-05-20","2026-05-21","2026-05-22","2026-05-23","2026-05-24","2026-05-25","2026-05-26","2026-05-27","2026-05-28","2026-05-29","2026-05-30","2026-05-31"],
+      datasets: [{
+        label: 'Followers',
+        data: [827,837,856,867,871,882,909,915,925,931,943,945,955,970,976,979,990,1019,1026,1030,1032,1039,1051,1054,1057,1061,1080,1122,1141,1147,1158,1166,1176,1185,1196,1201,1203,1253,1278,1287,1292,1297,1312,1310,1320,1381,1413,1428,1505,1506,1541,1646,1780],
+        borderColor: '#6366f1', backgroundColor: '#6366f133',
+        fill: true, tension: 0.3, pointRadius: 2,
+      }]
+    },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: false } }
+    }
+  });
+  
 
   new Chart(document.getElementById('contentMixChart'), {
     type: 'doughnut',
     data: {
       labels: ["FEED","REELS"],
-      datasets: [{ data: [11,39], backgroundColor: COLORS }]
+      datasets: [{ data: [11,40], backgroundColor: COLORS }]
     },
     options: { responsive: true, maintainAspectRatio: false,
       plugins: { legend: { position: 'bottom' } }
     }
   });
 
-  const reachMedia = [{"date":"May 1, 2026","reach":0,"type":"REELS"},{"date":"May 1, 2026","reach":0,"type":"REELS"},{"date":"May 1, 2026","reach":2167,"type":"REELS"},{"date":"May 1, 2026","reach":199,"type":"REELS"},{"date":"May 2, 2026","reach":307,"type":"REELS"},{"date":"May 2, 2026","reach":2776,"type":"REELS"},{"date":"May 3, 2026","reach":233,"type":"REELS"},{"date":"May 3, 2026","reach":559,"type":"REELS"},{"date":"May 3, 2026","reach":958,"type":"REELS"},{"date":"May 4, 2026","reach":223,"type":"FEED"},{"date":"May 4, 2026","reach":4704,"type":"REELS"},{"date":"May 5, 2026","reach":1460,"type":"REELS"},{"date":"May 5, 2026","reach":227,"type":"FEED"},{"date":"May 6, 2026","reach":1187,"type":"REELS"},{"date":"May 6, 2026","reach":3499,"type":"REELS"},{"date":"May 7, 2026","reach":1333,"type":"REELS"},{"date":"May 7, 2026","reach":559,"type":"REELS"},{"date":"May 8, 2026","reach":544,"type":"REELS"},{"date":"May 8, 2026","reach":470,"type":"REELS"},{"date":"May 8, 2026","reach":2093,"type":"REELS"},{"date":"May 9, 2026","reach":134,"type":"REELS"},{"date":"May 9, 2026","reach":573,"type":"REELS"},{"date":"May 10, 2026","reach":1024,"type":"REELS"},{"date":"May 11, 2026","reach":2470,"type":"FEED"},{"date":"May 11, 2026","reach":2609,"type":"REELS"},{"date":"May 12, 2026","reach":564,"type":"REELS"},{"date":"May 13, 2026","reach":194,"type":"FEED"},{"date":"May 13, 2026","reach":852,"type":"REELS"},{"date":"May 14, 2026","reach":374,"type":"REELS"},{"date":"May 15, 2026","reach":785,"type":"REELS"},{"date":"May 15, 2026","reach":1462,"type":"REELS"},{"date":"May 15, 2026","reach":2730,"type":"REELS"},{"date":"May 16, 2026","reach":413,"type":"FEED"},{"date":"May 16, 2026","reach":16774,"type":"REELS"},{"date":"May 17, 2026","reach":261,"type":"REELS"},{"date":"May 18, 2026","reach":1765,"type":"REELS"},{"date":"May 19, 2026","reach":160,"type":"FEED"},{"date":"May 20, 2026","reach":967,"type":"REELS"},{"date":"May 21, 2026","reach":508,"type":"REELS"},{"date":"May 22, 2026","reach":5522,"type":"REELS"},{"date":"May 23, 2026","reach":494,"type":"REELS"},{"date":"May 24, 2026","reach":1882,"type":"FEED"},{"date":"May 25, 2026","reach":444,"type":"FEED"},{"date":"May 25, 2026","reach":791,"type":"REELS"},{"date":"May 26, 2026","reach":2867,"type":"FEED"},{"date":"May 27, 2026","reach":535,"type":"REELS"},{"date":"May 28, 2026","reach":1193,"type":"REELS"},{"date":"May 29, 2026","reach":184,"type":"FEED"},{"date":"May 30, 2026","reach":140,"type":"FEED"},{"date":"May 30, 2026","reach":996,"type":"REELS"}];
+  const reachMedia = [{"date":"May 1, 2026","reach":0,"type":"REELS"},{"date":"May 1, 2026","reach":0,"type":"REELS"},{"date":"May 1, 2026","reach":2167,"type":"REELS"},{"date":"May 1, 2026","reach":199,"type":"REELS"},{"date":"May 2, 2026","reach":307,"type":"REELS"},{"date":"May 2, 2026","reach":2776,"type":"REELS"},{"date":"May 3, 2026","reach":233,"type":"REELS"},{"date":"May 3, 2026","reach":559,"type":"REELS"},{"date":"May 3, 2026","reach":959,"type":"REELS"},{"date":"May 4, 2026","reach":223,"type":"FEED"},{"date":"May 4, 2026","reach":4704,"type":"REELS"},{"date":"May 5, 2026","reach":1460,"type":"REELS"},{"date":"May 5, 2026","reach":227,"type":"FEED"},{"date":"May 6, 2026","reach":1189,"type":"REELS"},{"date":"May 6, 2026","reach":3499,"type":"REELS"},{"date":"May 7, 2026","reach":1335,"type":"REELS"},{"date":"May 7, 2026","reach":559,"type":"REELS"},{"date":"May 8, 2026","reach":544,"type":"REELS"},{"date":"May 8, 2026","reach":471,"type":"REELS"},{"date":"May 8, 2026","reach":2093,"type":"REELS"},{"date":"May 9, 2026","reach":134,"type":"REELS"},{"date":"May 9, 2026","reach":573,"type":"REELS"},{"date":"May 10, 2026","reach":1024,"type":"REELS"},{"date":"May 11, 2026","reach":2470,"type":"FEED"},{"date":"May 11, 2026","reach":2609,"type":"REELS"},{"date":"May 12, 2026","reach":564,"type":"REELS"},{"date":"May 13, 2026","reach":194,"type":"FEED"},{"date":"May 13, 2026","reach":852,"type":"REELS"},{"date":"May 14, 2026","reach":374,"type":"REELS"},{"date":"May 15, 2026","reach":785,"type":"REELS"},{"date":"May 15, 2026","reach":1462,"type":"REELS"},{"date":"May 15, 2026","reach":2730,"type":"REELS"},{"date":"May 16, 2026","reach":414,"type":"FEED"},{"date":"May 16, 2026","reach":16774,"type":"REELS"},{"date":"May 17, 2026","reach":261,"type":"REELS"},{"date":"May 18, 2026","reach":1768,"type":"REELS"},{"date":"May 19, 2026","reach":160,"type":"FEED"},{"date":"May 20, 2026","reach":967,"type":"REELS"},{"date":"May 21, 2026","reach":508,"type":"REELS"},{"date":"May 22, 2026","reach":5523,"type":"REELS"},{"date":"May 23, 2026","reach":495,"type":"REELS"},{"date":"May 24, 2026","reach":1885,"type":"FEED"},{"date":"May 25, 2026","reach":445,"type":"FEED"},{"date":"May 25, 2026","reach":797,"type":"REELS"},{"date":"May 26, 2026","reach":2867,"type":"FEED"},{"date":"May 27, 2026","reach":537,"type":"REELS"},{"date":"May 28, 2026","reach":1218,"type":"REELS"},{"date":"May 29, 2026","reach":194,"type":"FEED"},{"date":"May 30, 2026","reach":149,"type":"FEED"},{"date":"May 30, 2026","reach":1187,"type":"REELS"},{"date":"May 31, 2026","reach":611,"type":"REELS"}];
   new Chart(document.getElementById('reachChart'), {
     type: 'bar',
     data: {
@@ -2823,8 +2779,8 @@ function initCharts() {
   new Chart(document.getElementById('ageChart'), {
     type: 'bar',
     data: {
-      labels: ["25-34","35-44","18-24","45-54","55-64","65+"],
-      datasets: [{ data: [581,451,223,166,47,10], backgroundColor: '#6366f1', borderRadius: 4 }]
+      labels: ["25-34","35-44","18-24","45-54","55-64","13-17","65+"],
+      datasets: [{ data: [581,451,223,166,47,29,10], backgroundColor: '#6366f1', borderRadius: 4 }]
     },
     options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y',
       plugins: { legend: { display: false } }

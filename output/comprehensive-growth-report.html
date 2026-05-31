@@ -4,100 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PeaceGrappler - Evening Report</title>
+<link rel="stylesheet" href="styles.css">
 <style>
-  :root {
-    --bg: #0f1117; --card: #1a1d27; --border: #2a2d3a;
-    --text: #e1e4ed; --muted: #8b8fa3;
-    --accent: #6366f1; --accent2: #818cf8;
-    --green: #34d399; --red: #f87171; --orange: #fb923c; --pink: #f472b6;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
-
-  .page-header { padding: 24px 24px 0; max-width: 1200px; margin: 0 auto; }
-  .page-content { padding: 0 24px 24px; max-width: 1200px; margin: 0 auto; }
-
+  /* comprehensive-growth-report tweaks */
   h1 { font-size: 28px; margin-bottom: 4px; }
-  h2 { font-size: 20px; margin: 28px 0 16px; color: var(--accent2); }
+  h2 { font-size: 20px; margin: 28px 0 16px; }
   h2:first-child { margin-top: 8px; }
-  h3 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; font-weight: 600; margin: 20px 0 10px; }
-  .subtitle { color: var(--muted); font-size: 14px; margin-bottom: 4px; }
-  .report-badge { display: inline-block; background: var(--accent); color: white; padding: 3px 10px; border-radius: 10px; font-size: 12px; font-weight: 600; margin-bottom: 16px; }
-  .section-note { font-size: 12px; color: var(--muted); font-style: italic; margin-bottom: 16px; }
-
-  /* Nav tabs */
-  .nav-tabs { display: flex; gap: 0; border-bottom: 2px solid var(--border); margin-bottom: 24px; overflow-x: auto; }
-  .nav-tab { padding: 12px 20px; cursor: pointer; color: var(--muted); font-size: 14px; font-weight: 600; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all 0.2s; white-space: nowrap; user-select: none; }
-  .nav-tab:hover { color: var(--text); }
-  .nav-tab.active { color: var(--accent2); border-bottom-color: var(--accent2); }
-  .page-panel { display: none; }
-  .page-panel.active { display: block; }
-
-  .site-nav { display: flex; align-items: center; gap: 16px; padding: 12px 0; margin-bottom: 12px; border-bottom: 1px solid var(--border); }
-  .site-nav a { color: var(--accent2); text-decoration: none; font-size: 13px; font-weight: 600; }
-  .site-nav a:hover { opacity: 0.8; }
-  .site-nav-label { color: var(--muted); font-size: 13px; }
-
-  /* Cards & grids */
-  .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
-  .metric-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; text-align: center; }
-  .metric-card .value { font-size: 28px; font-weight: 700; color: var(--accent2); }
-  .metric-card .label { font-size: 12px; color: var(--muted); margin-top: 4px; }
-  .growth-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; }
-  .growth-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; text-align: center; }
-  .growth-card .period { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
-  .growth-card .growth-value { font-size: 24px; font-weight: 700; margin: 4px 0; }
-  .growth-card .sub { font-size: 11px; color: var(--muted); }
-  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 20px; }
-
-  /* Tables */
-  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 20px; }
-  th { background: var(--card); color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; padding: 10px 8px; text-align: left; border-bottom: 2px solid var(--border); }
-  td { padding: 8px; border-bottom: 1px solid #1e2130; vertical-align: top; }
-  tr:hover { background: rgba(99,102,241,0.05); }
-
-  /* Common elements */
-  .rank { font-weight: 700; color: var(--accent2); }
-  .rank-1 { color: #fbbf24; }
-  .rank-2 { color: #d1d5db; }
-  .rank-3 { color: #cd7f32; }
-  .engagement-val { font-weight: 700; color: var(--green); }
-  .positive { color: var(--green); }
-  .negative { color: var(--red); }
-  .neutral { color: var(--muted); }
-  .caption-cell { color: var(--muted); max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; text-transform: uppercase; }
-  .badge-feed { background: #6366f133; color: var(--accent2); }
-  .badge-reels { background: #f472b633; color: var(--pink); }
-  .badge-carousel { background: #fb923c33; color: var(--orange); }
-  a { color: var(--accent2); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-
-  /* Post cards */
-  .post-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 12px; }
-  .post-card .post-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-  .post-card .post-caption { color: var(--muted); font-size: 13px; margin-bottom: 10px; }
-  .post-card .post-metrics { display: flex; gap: 16px; flex-wrap: wrap; }
-  .post-card .pm { text-align: center; }
-  .post-card .pm .pm-val { font-size: 18px; font-weight: 700; color: var(--text); }
-  .post-card .pm .pm-label { font-size: 11px; color: var(--muted); }
-
-  /* Commenter blocks */
-  .commenter-block { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 12px; }
-  .commenter-block .cb-header { font-weight: 600; color: var(--accent2); margin-bottom: 6px; }
-  .commenter-block .cb-sub { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
-  .commenter-block .cb-posts { font-size: 12px; color: var(--muted); }
-  .commenter-block .cb-posts span { color: var(--text); }
-
-  .footer { text-align: center; margin-top: 40px; padding: 20px 0; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
-  .footer a { color: var(--accent2); }
-
-  @media (max-width: 600px) {
-    .metrics-grid { grid-template-columns: repeat(2, 1fr); }
-    .growth-row { grid-template-columns: 1fr; }
-    .post-card .post-metrics { gap: 10px; }
-    .nav-tab { padding: 10px 14px; font-size: 13px; }
-  }
 </style>
 </head>
 <body>
@@ -108,7 +20,7 @@
     <span class="site-nav-label">PeaceGrappler</span>
   </div>
   <h1>PeaceGrappler</h1>
-  <div class="subtitle">@peacegrappler &mdash; Sunday, May 31, 2026 at 1:54 PM</div>
+  <div class="subtitle">@peacegrappler &mdash; Sunday, May 31, 2026 at 6:45 PM</div>
   <div class="report-badge">Evening Report</div>
   <div class="nav-tabs">
     <div class="nav-tab active"    onclick="switchTab('overview')">Overview</div>
@@ -128,11 +40,11 @@
   <h2>Account Summary</h2>
   <div class="metrics-grid">
     <div class="metric-card">
-      <div class="value">1,713</div>
+      <div class="value">1,780</div>
       <div class="label">Followers</div>
     </div>
     <div class="metric-card">
-      <div class="value">239</div>
+      <div class="value">240</div>
       <div class="label">Total Posts</div>
     </div>
     <div class="metric-card">
@@ -140,15 +52,15 @@
       <div class="label">Following</div>
     </div>
     <div class="metric-card">
-      <div class="value">2,038</div>
+      <div class="value">2,279</div>
       <div class="label">Engagement (7d)</div>
     </div>
     <div class="metric-card">
-      <div class="value">15,813</div>
+      <div class="value">17,086</div>
       <div class="label">Views (7d)</div>
     </div>
     <div class="metric-card">
-      <div class="value">9,032</div>
+      <div class="value">9,890</div>
       <div class="label">Reach (7d)</div>
     </div>
   </div>
@@ -157,17 +69,17 @@
   <div class="growth-row">
     <div class="growth-card">
       <div class="period">Yesterday</div>
-      <div class="growth-value ">-</div>
+      <div class="growth-value positive">+134</div>
       <div class="sub">followers</div>
     </div>
     <div class="growth-card">
       <div class="period">Last 7 Days</div>
-      <div class="growth-value ">-</div>
+      <div class="growth-value positive">+399</div>
       <div class="sub">followers</div>
     </div>
     <div class="growth-card">
       <div class="period">Last 30 Days</div>
-      <div class="growth-value ">-</div>
+      <div class="growth-value positive">+729</div>
       <div class="sub">followers</div>
     </div>
   </div>
@@ -177,55 +89,38 @@
     <table>
       <thead><tr><th>Period</th><th>Total</th><th>Reels</th><th>Feed Posts</th><th>Carousels</th></tr></thead>
       <tbody>
-        <tr><td>Yesterday</td><td><strong>2</strong></td><td>1</td><td>1</td><td>1</td></tr>
-        <tr><td>Last 7 Days</td><td><strong>9</strong></td><td>4</td><td>5</td><td>3</td></tr>
-        <tr><td>Last 30 Days</td><td><strong>50</strong></td><td>39</td><td>11</td><td>4</td></tr>
+        <tr><td>Yesterday</td><td><strong>3</strong></td><td>2</td><td>1</td><td>1</td></tr>
+        <tr><td>Last 7 Days</td><td><strong>10</strong></td><td>5</td><td>5</td><td>3</td></tr>
+        <tr><td>Last 30 Days</td><td><strong>51</strong></td><td>40</td><td>11</td><td>4</td></tr>
       </tbody>
     </table>
   </div>
 
   <h2>Engagement Analytics</h2>
+  
+  <h3>7d</h3>
   <div class="metrics-grid">
-    <div class="metric-card">
-      <div class="value">2,038</div>
-      <div class="label">Total Engagement (7d)</div>
-    </div>
-    <div class="metric-card">
-      <div class="value">226</div>
-      <div class="label">Avg per Post (7d)</div>
-    </div>
-    <div class="metric-card">
-      <div class="value">15,813</div>
-      <div class="label">Views (7d)</div>
-    </div>
-    <div class="metric-card">
-      <div class="value">9,032</div>
-      <div class="label">Reach (7d)</div>
-    </div>
-    <div class="metric-card">
-      <div class="value">312</div>
-      <div class="label">Shares (7d)</div>
-    </div>
-    <div class="metric-card">
-      <div class="value">14</div>
-      <div class="label">Saves (7d)</div>
-    </div>
-    <div class="metric-card">
-      <div class="value">17,881</div>
-      <div class="label">Total Engagement (30d)</div>
-    </div>
-    <div class="metric-card">
-      <div class="value">3,697</div>
-      <div class="label">Likes (30d)</div>
-    </div>
-    <div class="metric-card">
-      <div class="value">14,184</div>
-      <div class="label">Comments (30d)</div>
-    </div>
-    <div class="metric-card">
-      <div class="value">50</div>
-      <div class="label">Posts (30d)</div>
-    </div>
+    <div class="metric-card"><div class="value">2,279</div><div class="label">Total Engagement</div></div>
+    <div class="metric-card"><div class="value">228</div><div class="label">Avg per Post</div></div>
+    <div class="metric-card"><div class="value">17,086</div><div class="label">Views</div></div>
+    <div class="metric-card"><div class="value">9,890</div><div class="label">Reach</div></div>
+    <div class="metric-card"><div class="value">439</div><div class="label">Shares</div></div>
+    <div class="metric-card"><div class="value">19</div><div class="label">Saves</div></div>
+    <div class="metric-card"><div class="value">523</div><div class="label">Likes</div></div>
+    <div class="metric-card"><div class="value">1,756</div><div class="label">Comments</div></div>
+    <div class="metric-card"><div class="value">10</div><div class="label">Posts</div></div>
+  </div>
+  <h3>30d</h3>
+  <div class="metrics-grid">
+    <div class="metric-card"><div class="value">18,122</div><div class="label">Total Engagement</div></div>
+    <div class="metric-card"><div class="value">355</div><div class="label">Avg per Post</div></div>
+    <div class="metric-card"><div class="value">119,285</div><div class="label">Views</div></div>
+    <div class="metric-card"><div class="value">74,035</div><div class="label">Reach</div></div>
+    <div class="metric-card"><div class="value">1,826</div><div class="label">Shares</div></div>
+    <div class="metric-card"><div class="value">131</div><div class="label">Saves</div></div>
+    <div class="metric-card"><div class="value">3,735</div><div class="label">Likes</div></div>
+    <div class="metric-card"><div class="value">14,387</div><div class="label">Comments</div></div>
+    <div class="metric-card"><div class="value">51</div><div class="label">Posts</div></div>
   </div>
 
 </div>
@@ -265,9 +160,9 @@ Marcello and Quemuel debate why Michael Mora...</div>
       <div class="pm"><div class="pm-val engagement-val">871</div><div class="pm-label">Engagement</div></div>
       <div class="pm"><div class="pm-val">240</div><div class="pm-label">Likes</div></div>
       <div class="pm"><div class="pm-val">631</div><div class="pm-label">Comments</div></div>
-      <div class="pm"><div class="pm-val">8,435</div><div class="pm-label">Views</div></div>
+      <div class="pm"><div class="pm-val">8,441</div><div class="pm-label">Views</div></div>
       <div class="pm"><div class="pm-val">144</div><div class="pm-label">Shares</div></div>
-      <div class="pm"><div class="pm-val">5,522</div><div class="pm-label">Reach</div></div>
+      <div class="pm"><div class="pm-val">5,523</div><div class="pm-label">Reach</div></div>
     </div>
   </div>
   
@@ -284,7 +179,7 @@ Marcello and Quemuel debate why Michael Mora...</div>
       <div class="pm"><div class="pm-val">638</div><div class="pm-label">Comments</div></div>
       <div class="pm"><div class="pm-val">1,907</div><div class="pm-label">Views</div></div>
       <div class="pm"><div class="pm-val">95</div><div class="pm-label">Shares</div></div>
-      <div class="pm"><div class="pm-val">1,187</div><div class="pm-label">Reach</div></div>
+      <div class="pm"><div class="pm-val">1,189</div><div class="pm-label">Reach</div></div>
     </div>
   </div>
   
@@ -299,7 +194,7 @@ Marcello and Quemuel debate why Michael Mora...</div>
       <div class="pm"><div class="pm-val engagement-val">711</div><div class="pm-label">Engagement</div></div>
       <div class="pm"><div class="pm-val">347</div><div class="pm-label">Likes</div></div>
       <div class="pm"><div class="pm-val">364</div><div class="pm-label">Comments</div></div>
-      <div class="pm"><div class="pm-val">9,016</div><div class="pm-label">Views</div></div>
+      <div class="pm"><div class="pm-val">9,018</div><div class="pm-label">Views</div></div>
       <div class="pm"><div class="pm-val">27</div><div class="pm-label">Shares</div></div>
       <div class="pm"><div class="pm-val">4,704</div><div class="pm-label">Reach</div></div>
     </div>
@@ -333,9 +228,9 @@ Marcello and Quemuel debate why Michael Mora...</div>
       <div class="pm"><div class="pm-val engagement-val">503</div><div class="pm-label">Engagement</div></div>
       <div class="pm"><div class="pm-val">104</div><div class="pm-label">Likes</div></div>
       <div class="pm"><div class="pm-val">399</div><div class="pm-label">Comments</div></div>
-      <div class="pm"><div class="pm-val">1,925</div><div class="pm-label">Views</div></div>
+      <div class="pm"><div class="pm-val">1,958</div><div class="pm-label">Views</div></div>
       <div class="pm"><div class="pm-val">100</div><div class="pm-label">Shares</div></div>
-      <div class="pm"><div class="pm-val">1,193</div><div class="pm-label">Reach</div></div>
+      <div class="pm"><div class="pm-val">1,218</div><div class="pm-label">Reach</div></div>
     </div>
   </div>
   
@@ -350,9 +245,9 @@ Marcello and Quemuel debate why Michael Mora...</div>
       <div class="pm"><div class="pm-val engagement-val">501</div><div class="pm-label">Engagement</div></div>
       <div class="pm"><div class="pm-val">50</div><div class="pm-label">Likes</div></div>
       <div class="pm"><div class="pm-val">451</div><div class="pm-label">Comments</div></div>
-      <div class="pm"><div class="pm-val">790</div><div class="pm-label">Views</div></div>
+      <div class="pm"><div class="pm-val">791</div><div class="pm-label">Views</div></div>
       <div class="pm"><div class="pm-val">9</div><div class="pm-label">Shares</div></div>
-      <div class="pm"><div class="pm-val">470</div><div class="pm-label">Reach</div></div>
+      <div class="pm"><div class="pm-val">471</div><div class="pm-label">Reach</div></div>
     </div>
   </div>
   
@@ -367,7 +262,7 @@ Marcello and Quemuel debate why Michael Mora...</div>
       <div class="pm"><div class="pm-val engagement-val">493</div><div class="pm-label">Engagement</div></div>
       <div class="pm"><div class="pm-val">117</div><div class="pm-label">Likes</div></div>
       <div class="pm"><div class="pm-val">376</div><div class="pm-label">Comments</div></div>
-      <div class="pm"><div class="pm-val">3,485</div><div class="pm-label">Views</div></div>
+      <div class="pm"><div class="pm-val">3,487</div><div class="pm-label">Views</div></div>
       <div class="pm"><div class="pm-val">42</div><div class="pm-label">Shares</div></div>
       <div class="pm"><div class="pm-val">2,093</div><div class="pm-label">Reach</div></div>
     </div>
@@ -608,68 +503,80 @@ Years ago, Israel Adesan...</td>
         
         <tr>
           <td>1</td>
+          <td>May 31</td>
+          <td><span class="badge badge-reels">REELS</span></td>
+          <td class="caption-cell">🇺🇸 Topuria is a massive betting favorite. A bet ...</td>
+          <td><strong>976</strong></td>
+          <td>50</td>
+          <td>223</td>
+          <td>126</td>
+          <td>611</td>
+          <td><a href="https://www.instagram.com/reel/DZAydUDii-j/" target="_blank">View</a></td>
+        </tr>
+        <tr>
+          <td>2</td>
           <td>May 30</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">🇺🇸 UFC Macau delivered 🔥
 
 From brutal knockouts...</td>
-          <td><strong>1,097</strong></td>
-          <td>37</td>
-          <td>65</td>
-          <td>67</td>
-          <td>996</td>
+          <td><strong>1,291</strong></td>
+          <td>42</td>
+          <td>165</td>
+          <td>68</td>
+          <td>1,187</td>
           <td><a href="https://www.instagram.com/reel/DY-gg3CCTSO/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>2</td>
+          <td>3</td>
           <td>May 30</td>
           <td><span class="badge badge-feed">FEED</span></td>
           <td class="caption-cell">🇧🇷 Deiveson Figueiredo e Song Yadong vêm passand...</td>
-          <td><strong>412</strong></td>
+          <td><strong>419</strong></td>
           <td>26</td>
           <td>119</td>
           <td>0</td>
-          <td>140</td>
+          <td>149</td>
           <td><a href="https://www.instagram.com/p/DY9yQjAFhfG/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>3</td>
+          <td>4</td>
           <td>May 29</td>
           <td><span class="badge badge-feed">FEED</span></td>
           <td class="caption-cell">🇺🇸 Staying undefeated in the UFC is rare 😳🔥 To...</td>
-          <td><strong>413</strong></td>
-          <td>35</td>
+          <td><strong>436</strong></td>
+          <td>37</td>
           <td>183</td>
           <td>20</td>
-          <td>184</td>
+          <td>194</td>
           <td><a href="https://www.instagram.com/p/DY78SBkGuJs/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>4</td>
+          <td>5</td>
           <td>May 28</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">🇺🇸 The UFC built the most powerful machine in co...</td>
-          <td><strong>1,925</strong></td>
-          <td>104</td>
-          <td>400</td>
+          <td><strong>1,958</strong></td>
+          <td>106</td>
+          <td>402</td>
           <td>100</td>
-          <td>1,193</td>
+          <td>1,218</td>
           <td><a href="https://www.instagram.com/reel/DY5Xj4YFKcN/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>5</td>
+          <td>6</td>
           <td>May 27</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">🇧🇷 Prospectos, veteranos e lutadores tentando mu...</td>
-          <td><strong>727</strong></td>
+          <td><strong>730</strong></td>
           <td>45</td>
           <td>151</td>
           <td>1</td>
-          <td>535</td>
+          <td>537</td>
           <td><a href="https://www.instagram.com/reel/DY2yssik0c7/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>6</td>
+          <td>7</td>
           <td>May 26</td>
           <td><span class="badge badge-feed">FEED</span></td>
           <td class="caption-cell">🇺🇸 Part 2 😳🔥 Because apparently 2026 still isn...</td>
@@ -681,68 +588,68 @@ From brutal knockouts...</td>
           <td><a href="https://www.instagram.com/p/DYzl7_DDhxk/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>7</td>
+          <td>8</td>
           <td>May 25</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">🇺🇸 The UFC gives visibility. The smartest fighte...</td>
-          <td><strong>1,187</strong></td>
+          <td><strong>1,194</strong></td>
           <td>80</td>
           <td>215</td>
           <td>67</td>
-          <td>791</td>
+          <td>797</td>
           <td><a href="https://www.instagram.com/reel/DYxpHZ2ANOZ/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>8</td>
+          <td>9</td>
           <td>May 25</td>
           <td><span class="badge badge-feed">FEED</span></td>
           <td class="caption-cell">🇧🇷 Figueiredo e Yadong entram em uma luta gigant...</td>
-          <td><strong>1,035</strong></td>
+          <td><strong>1,059</strong></td>
           <td>49</td>
           <td>83</td>
           <td>19</td>
-          <td>444</td>
+          <td>445</td>
           <td><a href="https://www.instagram.com/p/DYwsoZ6EXOD/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>9</td>
+          <td>10</td>
           <td>May 24</td>
           <td><span class="badge badge-feed">FEED</span></td>
           <td class="caption-cell">🇺🇸 Pure violence 😳🔥 These were some of the mos...</td>
-          <td><strong>4,673</strong></td>
+          <td><strong>4,679</strong></td>
           <td>48</td>
           <td>162</td>
           <td>7</td>
-          <td>1,882</td>
+          <td>1,885</td>
           <td><a href="https://www.instagram.com/p/DYsS-ZClDwn/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>10</td>
+          <td>11</td>
           <td>May 23</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">🇺🇸 “I created a monster.” 😳🇺🇸 
 Years ago, Isr...</td>
-          <td><strong>927</strong></td>
+          <td><strong>932</strong></td>
           <td>75</td>
           <td>378</td>
           <td>16</td>
-          <td>494</td>
+          <td>495</td>
           <td><a href="https://www.instagram.com/reel/DYsMGIBFCGk/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>11</td>
+          <td>12</td>
           <td>May 22</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">🇧🇷 Ilia encurta distância muito bem… mas o Prate...</td>
-          <td><strong>8,435</strong></td>
+          <td><strong>8,441</strong></td>
           <td>240</td>
           <td>631</td>
           <td>144</td>
-          <td>5,522</td>
+          <td>5,523</td>
           <td><a href="https://www.instagram.com/reel/DYqBDLADXt1/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>12</td>
+          <td>13</td>
           <td>May 21</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">🇺🇸 For the first time, attention was leaving the...</td>
@@ -754,7 +661,7 @@ Years ago, Isr...</td>
           <td><a href="https://www.instagram.com/reel/DYnVXO5iGsM/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>13</td>
+          <td>14</td>
           <td>May 20</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">🇺🇸 From legends like Jon Jones, Islam Makhachev ...</td>
@@ -766,7 +673,7 @@ Years ago, Isr...</td>
           <td><a href="https://www.instagram.com/reel/DYkxM5pDaR3/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>14</td>
+          <td>15</td>
           <td>May 19</td>
           <td><span class="badge badge-feed">FEED</span></td>
           <td class="caption-cell">🇺🇸 UFC rankings update week. With no event this ...</td>
@@ -778,7 +685,7 @@ Years ago, Isr...</td>
           <td><a href="https://www.instagram.com/p/DYiMVNEASLP/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>15</td>
+          <td>16</td>
           <td>May 18</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">🇧🇷Os rankings oficiais do UFC são votados por um...</td>
@@ -786,11 +693,11 @@ Years ago, Isr...</td>
           <td>115</td>
           <td>324</td>
           <td>157</td>
-          <td>1,765</td>
+          <td>1,768</td>
           <td><a href="https://www.instagram.com/reel/DYQRpjIh64W/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>16</td>
+          <td>17</td>
           <td>May 17</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">#ufc all #knockout s &amp; #submission s #melkcosta #A...</td>
@@ -802,7 +709,7 @@ Years ago, Isr...</td>
           <td><a href="https://www.instagram.com/reel/DYc3k6kB2jn/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>17</td>
+          <td>18</td>
           <td>May 16</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">🇧🇷 Arnold Allen tava confortável no trono… até o...</td>
@@ -814,19 +721,19 @@ Years ago, Isr...</td>
           <td><a href="https://www.instagram.com/reel/DYPivQ2htWW/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>18</td>
+          <td>19</td>
           <td>May 16</td>
           <td><span class="badge badge-feed">FEED</span></td>
           <td class="caption-cell">🇧🇷Arnold Allen chega com guerra atrás de guerra ...</td>
-          <td><strong>1,182</strong></td>
-          <td>69</td>
+          <td><strong>1,188</strong></td>
+          <td>70</td>
           <td>335</td>
           <td>0</td>
-          <td>413</td>
+          <td>414</td>
           <td><a href="https://www.instagram.com/p/DYZ19nCDhEi/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>19</td>
+          <td>20</td>
           <td>May 15</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">🇧🇷 Daniel Willycat Santos sabe o tamanho da guer...</td>
@@ -838,7 +745,7 @@ Years ago, Isr...</td>
           <td><a href="https://www.instagram.com/reel/DYYAC9aBgaL/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>20</td>
+          <td>21</td>
           <td>May 15</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">🇺🇸 Francis Ngannou is walking in with a crazy si...</td>
@@ -850,7 +757,7 @@ Years ago, Isr...</td>
           <td><a href="https://www.instagram.com/reel/DYYEfoXCI49/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>21</td>
+          <td>22</td>
           <td>May 15</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">🇧🇷 Melk Costa abriu o coração ao falar sobre o i...</td>
@@ -862,7 +769,7 @@ Years ago, Isr...</td>
           <td><a href="https://www.instagram.com/reel/DYXRJK-Bb8M/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>22</td>
+          <td>23</td>
           <td>May 14</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">🇧🇷 Philipe Lins, Junior dos Santos, Adriano Mora...</td>
@@ -874,7 +781,7 @@ Years ago, Isr...</td>
           <td><a href="https://www.instagram.com/reel/DYVUXR3Dj5G/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>23</td>
+          <td>24</td>
           <td>May 13</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">🇧🇷 O Brasil chega forte com Melk Costa, Daniel S...</td>
@@ -886,7 +793,7 @@ Years ago, Isr...</td>
           <td><a href="https://www.instagram.com/reel/DYSvm9qF4qR/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>24</td>
+          <td>25</td>
           <td>May 13</td>
           <td><span class="badge badge-feed">FEED</span></td>
           <td class="caption-cell">🇧🇷 Sean Strickland assume o topo dos médios, Jos...</td>
@@ -898,7 +805,7 @@ Years ago, Isr...</td>
           <td><a href="https://www.instagram.com/p/DYSAyseFWLI/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>25</td>
+          <td>26</td>
           <td>May 12</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">🇺🇸 Poatan looks like a final boss even in traini...</td>
@@ -910,11 +817,11 @@ Years ago, Isr...</td>
           <td><a href="https://www.instagram.com/reel/DYQQy6jhr-H/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>26</td>
+          <td>27</td>
           <td>May 11</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">🇧🇷 Tem gente ganhando dinheiro só comentando na ...</td>
-          <td><strong>3,727</strong></td>
+          <td><strong>3,728</strong></td>
           <td>99</td>
           <td>298</td>
           <td>141</td>
@@ -922,7 +829,7 @@ Years ago, Isr...</td>
           <td><a href="https://www.instagram.com/reel/DYPU-GzhSgi/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>27</td>
+          <td>28</td>
           <td>May 11</td>
           <td><span class="badge badge-feed">FEED</span></td>
           <td class="caption-cell">🇧🇷 Melk Costa encara o maior teste da carreira c...</td>
@@ -934,7 +841,7 @@ Years ago, Isr...</td>
           <td><a href="https://www.instagram.com/p/DYMpbgzFc-v/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>28</td>
+          <td>29</td>
           <td>May 10</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">💀 This card was pure violence. Knockouts, submiss...</td>
@@ -946,7 +853,7 @@ Years ago, Isr...</td>
           <td><a href="https://www.instagram.com/reel/DYKb8eauP4I/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>29</td>
+          <td>30</td>
           <td>May 9</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">🇧🇷 Chimaev falou… e o caos começou 😭🔥 Fight we...</td>
@@ -958,7 +865,7 @@ Years ago, Isr...</td>
           <td><a href="https://www.instagram.com/reel/DYII9sHjWiW/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>30</td>
+          <td>31</td>
           <td>May 9</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">🇧🇷 Waldo Cortes-Acosta já deixou claro o plano p...</td>
@@ -970,11 +877,11 @@ Years ago, Isr...</td>
           <td><a href="https://www.instagram.com/reel/DX7rXk1B1GX/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>31</td>
+          <td>32</td>
           <td>May 8</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">Josh Hokit x Ilia Topuria !!!! Show business!!!!! ...</td>
-          <td><strong>3,485</strong></td>
+          <td><strong>3,487</strong></td>
           <td>117</td>
           <td>376</td>
           <td>42</td>
@@ -982,19 +889,19 @@ Years ago, Isr...</td>
           <td><a href="https://www.instagram.com/reel/DYGOKC2hdxX/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>32</td>
+          <td>33</td>
           <td>May 8</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">🇧🇷 Chimaev e Strickland já começaram a guerra an...</td>
-          <td><strong>790</strong></td>
+          <td><strong>791</strong></td>
           <td>50</td>
           <td>451</td>
           <td>9</td>
-          <td>470</td>
+          <td>471</td>
           <td><a href="https://www.instagram.com/reel/DYCq0m8h8A_/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>33</td>
+          <td>34</td>
           <td>May 8</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">Prepare-se para uma noite pesada de lutas. O card ...</td>
@@ -1006,7 +913,7 @@ Years ago, Isr...</td>
           <td><a href="https://www.instagram.com/reel/DYFI1-Pmte5/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>34</td>
+          <td>35</td>
           <td>May 7</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">🇺🇸 Our take on Strickland vs Chimaev 👀🔥 More f...</td>
@@ -1018,7 +925,7 @@ Years ago, Isr...</td>
           <td><a href="https://www.instagram.com/reel/DYC_oXnj3Yf/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>35</td>
+          <td>36</td>
           <td>May 7</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">Sean Strickland respondeu aos comentários recentes...</td>
@@ -1026,11 +933,11 @@ Years ago, Isr...</td>
           <td>70</td>
           <td>325</td>
           <td>33</td>
-          <td>1,333</td>
+          <td>1,335</td>
           <td><a href="https://www.instagram.com/reel/DYCj8JLHU3v/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>36</td>
+          <td>37</td>
           <td>May 6</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">🇺🇸 Islam wants Prates… but is he avoiding Morale...</td>
@@ -1042,7 +949,7 @@ Years ago, Isr...</td>
           <td><a href="https://www.instagram.com/reel/DYA3wdihQQm/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>37</td>
+          <td>38</td>
           <td>May 6</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">Marco Tulio não está falando em esperar. Ele se vê...</td>
@@ -1050,11 +957,11 @@ Years ago, Isr...</td>
           <td>115</td>
           <td>638</td>
           <td>95</td>
-          <td>1,187</td>
+          <td>1,189</td>
           <td><a href="https://www.instagram.com/reel/DX__OHojl0U/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>38</td>
+          <td>39</td>
           <td>May 5</td>
           <td><span class="badge badge-feed">FEED</span></td>
           <td class="caption-cell">Os rankings mexeram… e não foi pouco. já aparece n...</td>
@@ -1066,7 +973,7 @@ Years ago, Isr...</td>
           <td><a href="https://www.instagram.com/p/DX-JM71n598/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>39</td>
+          <td>40</td>
           <td>May 5</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">José Ochoa sabe o que vem pela frente. Clayton Car...</td>
@@ -1078,11 +985,11 @@ Years ago, Isr...</td>
           <td><a href="https://www.instagram.com/reel/DX9hOmuBbm8/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>40</td>
+          <td>41</td>
           <td>May 4</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">Qual a melhor estratégia para Poatan contra Gane? ...</td>
-          <td><strong>9,016</strong></td>
+          <td><strong>9,018</strong></td>
           <td>347</td>
           <td>364</td>
           <td>27</td>
@@ -1090,7 +997,7 @@ Years ago, Isr...</td>
           <td><a href="https://www.instagram.com/reel/DX78RyxhqtX/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>41</td>
+          <td>42</td>
           <td>May 4</td>
           <td><span class="badge badge-feed">FEED</span></td>
           <td class="caption-cell">Card imperdível!  Chimaev, invicto, pronto para re...</td>
@@ -1102,19 +1009,19 @@ Years ago, Isr...</td>
           <td><a href="https://www.instagram.com/p/DX6n6EHFlNw/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>42</td>
+          <td>43</td>
           <td>May 3</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">Carlos Prates deixa claro a mentalidade. Não faz s...</td>
-          <td><strong>1,341</strong></td>
+          <td><strong>1,343</strong></td>
           <td>58</td>
           <td>233</td>
           <td>8</td>
-          <td>958</td>
+          <td>959</td>
           <td><a href="https://www.instagram.com/reel/DX46CtxgAfK/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>43</td>
+          <td>44</td>
           <td>May 3</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">9-0. 2-0 in the UFC. Another first-round finish. M...</td>
@@ -1126,7 +1033,7 @@ Years ago, Isr...</td>
           <td><a href="https://www.instagram.com/reel/DX43gxAhZBu/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>44</td>
+          <td>45</td>
           <td>May 3</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">Poatan &amp; Gane washington square park meet up
@@ -1139,7 +1046,7 @@ Years ago, Isr...</td>
           <td><a href="https://www.instagram.com/reel/DX32qbCuB8w/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>45</td>
+          <td>46</td>
           <td>May 2</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">UFC Carlos Prates x JDM - knockouts and subs. #mma...</td>
@@ -1151,7 +1058,7 @@ Years ago, Isr...</td>
           <td><a href="https://www.instagram.com/reel/DX17uTiOevY/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>46</td>
+          <td>47</td>
           <td>May 2</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">Carlos Prates x Jack Della Maddalena live tonight....</td>
@@ -1163,7 +1070,7 @@ Years ago, Isr...</td>
           <td><a href="https://www.instagram.com/reel/DX1CcDYOTOX/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>47</td>
+          <td>48</td>
           <td>May 1</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">Check out the list of Australian fighters on the m...</td>
@@ -1175,7 +1082,7 @@ Years ago, Isr...</td>
           <td><a href="https://www.instagram.com/reel/DXz87E2hEYn/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>48</td>
+          <td>49</td>
           <td>May 1</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">Mesmo depois de anos no mais alto nível do UFC, Be...</td>
@@ -1187,7 +1094,7 @@ Years ago, Isr...</td>
           <td><a href="https://www.instagram.com/reel/DX2ORFNvhMe/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>49</td>
+          <td>50</td>
           <td>May 1</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">Carlos Prates vem treinando pesado, chegando a trê...</td>
@@ -1199,7 +1106,7 @@ Years ago, Isr...</td>
           <td><a href="https://www.instagram.com/reel/DXzHNlYCr2W/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td>50</td>
+          <td>51</td>
           <td>May 1</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">Quilan Salkild discute sua luta iminente contra Be...</td>
@@ -1261,6 +1168,14 @@ Marc...</td>
         </tr>
         <tr>
           <td class="rank ">5</td>
+          <td class="engagement-val">126</td>
+          <td><span class="badge badge-reels">REELS</span></td>
+          <td class="caption-cell">🇺🇸 Topuria is a massive betting favorite. A bet of around ...</td>
+          <td>May 31</td>
+          <td><a href="https://www.instagram.com/reel/DZAydUDii-j/" target="_blank">View</a></td>
+        </tr>
+        <tr>
+          <td class="rank ">6</td>
           <td class="engagement-val">100</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">🇺🇸 The UFC built the most powerful machine in combat sport...</td>
@@ -1268,7 +1183,7 @@ Marc...</td>
           <td><a href="https://www.instagram.com/reel/DY5Xj4YFKcN/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td class="rank ">6</td>
+          <td class="rank ">7</td>
           <td class="engagement-val">95</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">Marco Tulio não está falando em esperar. Ele se vê tomando e...</td>
@@ -1276,7 +1191,7 @@ Marc...</td>
           <td><a href="https://www.instagram.com/reel/DX__OHojl0U/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td class="rank ">7</td>
+          <td class="rank ">8</td>
           <td class="engagement-val">91</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">🇺🇸 From legends like Jon Jones, Islam Makhachev and George...</td>
@@ -1284,7 +1199,7 @@ Marc...</td>
           <td><a href="https://www.instagram.com/reel/DYkxM5pDaR3/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td class="rank ">8</td>
+          <td class="rank ">9</td>
           <td class="engagement-val">91</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">🇺🇸 Francis Ngannou is walking in with a crazy size advanta...</td>
@@ -1292,20 +1207,12 @@ Marc...</td>
           <td><a href="https://www.instagram.com/reel/DYYEfoXCI49/" target="_blank">View</a></td>
         </tr>
         <tr>
-          <td class="rank ">9</td>
+          <td class="rank ">10</td>
           <td class="engagement-val">84</td>
           <td><span class="badge badge-reels">REELS</span></td>
           <td class="caption-cell">🇺🇸 Our take on Strickland vs Chimaev 👀🔥 More fight break...</td>
           <td>May 7</td>
           <td><a href="https://www.instagram.com/reel/DYC_oXnj3Yf/" target="_blank">View</a></td>
-        </tr>
-        <tr>
-          <td class="rank ">10</td>
-          <td class="engagement-val">79</td>
-          <td><span class="badge badge-reels">REELS</span></td>
-          <td class="caption-cell">🇧🇷 Melk Costa abriu o coração ao falar sobre o irmão mais ...</td>
-          <td>May 15</td>
-          <td><a href="https://www.instagram.com/reel/DYXRJK-Bb8M/" target="_blank">View</a></td>
         </tr>
       </tbody>
     </table>
@@ -1325,9 +1232,9 @@ Marc...</td>
         <tr>
           <td class="rank rank-1">1</td>
           <td><strong>@peacegrappler</strong></td>
-          <td>103</td>
-          <td>6,517</td>
-          <td class="engagement-val">6,620</td>
+          <td>105</td>
+          <td>6,614</td>
+          <td class="engagement-val">6,719</td>
           <td style="max-width:200px;white-space:normal;font-size:11px;color:var(--muted);">
             359x on "🇺🇸 Islam wants Prates… but i..."<br>282x on "🇧🇷 Ilia encurta distância mu..."<br>268x on "Marco Tulio não está falando e..."
           </td>
@@ -1345,9 +1252,9 @@ Marc...</td>
         <tr>
           <td class="rank rank-3">3</td>
           <td><strong>@pedr00jj</strong></td>
-          <td>1,526</td>
+          <td>1,577</td>
           <td>1</td>
-          <td class="engagement-val">1,527</td>
+          <td class="engagement-val">1,578</td>
           <td style="max-width:200px;white-space:normal;font-size:11px;color:var(--muted);">
             60x on "🇧🇷 Philipe Lins, Junior dos ..."<br>54x on "🇧🇷 Melk Costa abriu o coraçã..."<br>54x on "🇧🇷 O Brasil chega forte com ..."
           </td>
@@ -1355,9 +1262,9 @@ Marc...</td>
         <tr>
           <td class="rank ">4</td>
           <td><strong>@enzocardoso.bjj</strong></td>
-          <td>1,289</td>
+          <td>1,297</td>
           <td>42</td>
-          <td class="engagement-val">1,331</td>
+          <td class="engagement-val">1,339</td>
           <td style="max-width:200px;white-space:normal;font-size:11px;color:var(--muted);">
             41x on "🇧🇷 Ilia encurta distância mu..."<br>35x on "Qual a melhor estratégia para ..."<br>34x on "🇧🇷 Arnold Allen tava confort..."
           </td>
@@ -1375,9 +1282,9 @@ Marc...</td>
         <tr>
           <td class="rank ">6</td>
           <td><strong>@quemuel_ottoni</strong></td>
-          <td>52</td>
-          <td>335</td>
-          <td class="engagement-val">387</td>
+          <td>53</td>
+          <td>337</td>
+          <td class="engagement-val">390</td>
           <td style="max-width:200px;white-space:normal;font-size:11px;color:var(--muted);">
             84x on "Qual a melhor estratégia para ..."<br>67x on "🇺🇸 Islam wants Prates… but i..."<br>51x on "🇧🇷 Ilia encurta distância mu..."
           </td>
@@ -1415,9 +1322,9 @@ Marc...</td>
         <tr>
           <td class="rank ">10</td>
           <td><strong>@combintel</strong></td>
-          <td>171</td>
+          <td>174</td>
           <td>6</td>
-          <td class="engagement-val">177</td>
+          <td class="engagement-val">180</td>
           <td style="max-width:200px;white-space:normal;font-size:11px;color:var(--muted);">
             16x on "Dois strikers de alto nível vi..."<br>14x on "Carlos Prates deixa claro a me..."<br>13x on "Cris Nogueira, head coach da V..."
           </td>
@@ -1425,9 +1332,9 @@ Marc...</td>
         <tr>
           <td class="rank ">11</td>
           <td><strong>@johnmma9</strong></td>
-          <td>99</td>
+          <td>102</td>
           <td>9</td>
-          <td class="engagement-val">108</td>
+          <td class="engagement-val">111</td>
           <td style="max-width:200px;white-space:normal;font-size:11px;color:var(--muted);">
             16x on "🇺🇸 Our take on Strickland vs..."<br>10x on "Josh Hokit x Ilia Topuria !!!!..."<br>10x on "🇧🇷 Chimaev e Strickland já c..."
           </td>
@@ -1435,9 +1342,9 @@ Marc...</td>
         <tr>
           <td class="rank ">12</td>
           <td><strong>@masonharper_mma</strong></td>
-          <td>83</td>
+          <td>86</td>
           <td>5</td>
-          <td class="engagement-val">88</td>
+          <td class="engagement-val">91</td>
           <td style="max-width:200px;white-space:normal;font-size:11px;color:var(--muted);">
             15x on "🇧🇷 Chimaev e Strickland já c..."<br>8x on "🇺🇸 Our take on Strickland vs..."<br>7x on "🇧🇷Os rankings oficiais do UF..."
           </td>
@@ -1446,8 +1353,8 @@ Marc...</td>
           <td class="rank ">13</td>
           <td><strong>@decio_bjj</strong></td>
           <td>49</td>
-          <td>31</td>
-          <td class="engagement-val">80</td>
+          <td>32</td>
+          <td class="engagement-val">81</td>
           <td style="max-width:200px;white-space:normal;font-size:11px;color:var(--muted);">
             7x on "Qual a melhor estratégia para ..."<br>5x on "🇺🇸 Part 2 😳🔥 Because appar..."<br>4x on "🇺🇸 UFC rankings update week...."
           </td>
@@ -1455,11 +1362,11 @@ Marc...</td>
         <tr>
           <td class="rank ">14</td>
           <td><strong>@malu832757</strong></td>
-          <td>60</td>
-          <td>10</td>
-          <td class="engagement-val">70</td>
+          <td>65</td>
+          <td>11</td>
+          <td class="engagement-val">76</td>
           <td style="max-width:200px;white-space:normal;font-size:11px;color:var(--muted);">
-            7x on "🇺🇸 The UFC gives visibility...."<br>6x on "🇺🇸 Pure violence 😳🔥 These ..."<br>6x on "🇧🇷 Ilia encurta distância mu..."
+            7x on "🇺🇸 The UFC gives visibility...."<br>6x on "🇺🇸 Topuria is a massive bett..."<br>6x on "🇺🇸 Pure violence 😳🔥 These ..."
           </td>
         </tr>
         <tr>
@@ -1474,6 +1381,16 @@ Marc...</td>
         </tr>
         <tr>
           <td class="rank ">16</td>
+          <td><strong>@sirleneferreiradiasdias</strong></td>
+          <td>39</td>
+          <td>1</td>
+          <td class="engagement-val">40</td>
+          <td style="max-width:200px;white-space:normal;font-size:11px;color:var(--muted);">
+            4x on "🇧🇷 Tem gente ganhando dinhei..."<br>4x on "🇺🇸 Islam wants Prates… but i..."<br>4x on "Marco Tulio não está falando e..."
+          </td>
+        </tr>
+        <tr>
+          <td class="rank ">17</td>
           <td><strong>@karen.ottoni</strong></td>
           <td>4</td>
           <td>35</td>
@@ -1483,23 +1400,13 @@ Marc...</td>
           </td>
         </tr>
         <tr>
-          <td class="rank ">17</td>
+          <td class="rank ">18</td>
           <td><strong>@matheuscoyoteoficial</strong></td>
           <td>33</td>
           <td>5</td>
           <td class="engagement-val">38</td>
           <td style="max-width:200px;white-space:normal;font-size:11px;color:var(--muted);">
             3x on "🇧🇷 Sean Strickland assume o ..."<br>3x on "🇺🇸 Poatan looks like a final..."<br>3x on "💀 This card was pure violence..."
-          </td>
-        </tr>
-        <tr>
-          <td class="rank ">18</td>
-          <td><strong>@sirleneferreiradiasdias</strong></td>
-          <td>36</td>
-          <td>1</td>
-          <td class="engagement-val">37</td>
-          <td style="max-width:200px;white-space:normal;font-size:11px;color:var(--muted);">
-            4x on "🇧🇷 Tem gente ganhando dinhei..."<br>4x on "🇺🇸 Islam wants Prates… but i..."<br>4x on "Marco Tulio não está falando e..."
           </td>
         </tr>
         <tr>
@@ -1529,6 +1436,14 @@ Marc...</td>
   <h2>Commenter Breakdown: Last 5 Posts</h2>
   <div class="section-note">Who commented on each of the 5 most recent posts</div>
   
+  <div class="commenter-block">
+    <div class="cb-header">May 31 &mdash; 🇺🇸 Topuria is a massive betting favorite. A bet of around $750 on Il...</div>
+    <div class="cb-sub">10 unique commenters</div>
+    <div class="cb-posts">
+      <span>@peacegrappler</span> (99) &bull; <span>@pedr00jj</span> (51) &bull; <span>@enzocardoso.bjj</span> (8) &bull; <span>@malu832757</span> (6) &bull; <span>@mmmarc20</span> (4) &bull; <span>@italothearcher</span> (4) &bull; <span>@sirleneferreiradiasdias</span> (3) &bull; <span>@quemuel_ottoni</span> (3)
+      <br><span style="color:var(--muted);">... and 2 more</span>
+    </div>
+  </div>
   <div class="commenter-block">
     <div class="cb-header">May 30 &mdash; 🇺🇸 UFC Macau delivered 🔥
 
@@ -1563,14 +1478,6 @@ From brutal knockouts to slick submission...</div>
       <br><span style="color:var(--muted);">... and 2 more</span>
     </div>
   </div>
-  <div class="commenter-block">
-    <div class="cb-header">May 27 &mdash; 🇧🇷 Prospectos, veteranos e lutadores tentando mudar suas carreiras e...</div>
-    <div class="cb-sub">10 unique commenters</div>
-    <div class="cb-posts">
-      <span>@peacegrappler</span> (74) &bull; <span>@pedr00jj</span> (50) &bull; <span>@malu832757</span> (5) &bull; <span>@enzocardoso.bjj</span> (5) &bull; <span>@johnmma9</span> (2) &bull; <span>@washington_cassisno</span> (1) &bull; <span>@victus_torquatus00</span> (1) &bull; <span>@quemuel_ottoni</span> (1)
-      <br><span style="color:var(--muted);">... and 2 more</span>
-    </div>
-  </div>
 
 </div>
 
@@ -1584,8 +1491,8 @@ From brutal knockouts to slick submission...</div>
     <h3 style="margin-top:0">Algorithm Status</h3>
     <div style="font-size:18px;font-weight:700;color:#f87171;margin:8px 0">LOW - Recent posts underperforming</div>
     <div style="font-size:12px;color:#8b8fa3">
-      Recent 5 posts: 4,574 views &bull;
-      Previous 5 posts: 12,166 views
+      Recent 5 posts: 5,080 views &bull;
+      Previous 5 posts: 12,006 views
     </div>
   </div>
 
@@ -1601,7 +1508,7 @@ From brutal knockouts to slick submission...</div>
     <div class="post-caption">🇧🇷 Ilia encurta distância muito bem… mas o Prates tem tamanho, cotovelo, chute de panturrilha e ainda é faixa-preta de...</div>
     <div class="post-metrics">
       <div class="pm"><div class="pm-val">871</div><div class="pm-label">Engagement</div></div>
-      <div class="pm"><div class="pm-val">8,435</div><div class="pm-label">Views</div></div>
+      <div class="pm"><div class="pm-val">8,441</div><div class="pm-label">Views</div></div>
       <div class="pm"><div class="pm-val">144</div><div class="pm-label">Shares</div></div>
     </div>
   </div>
@@ -1627,7 +1534,7 @@ From brutal knockouts to slick submission...</div>
     <div class="post-caption">Qual a melhor estratégia para Poatan contra Gane? Xicao participando das preparacoes! #mma #ufc #poatan #chama</div>
     <div class="post-metrics">
       <div class="pm"><div class="pm-val">711</div><div class="pm-label">Engagement</div></div>
-      <div class="pm"><div class="pm-val">9,016</div><div class="pm-label">Views</div></div>
+      <div class="pm"><div class="pm-val">9,018</div><div class="pm-label">Views</div></div>
       <div class="pm"><div class="pm-val">27</div><div class="pm-label">Shares</div></div>
     </div>
   </div>
@@ -1653,7 +1560,7 @@ From brutal knockouts to slick submission...</div>
     <div class="post-caption">🇺🇸 The UFC built the most powerful machine in combat sports. Fighters chase money everywhere… but they still chase the...</div>
     <div class="post-metrics">
       <div class="pm"><div class="pm-val">503</div><div class="pm-label">Engagement</div></div>
-      <div class="pm"><div class="pm-val">1,925</div><div class="pm-label">Views</div></div>
+      <div class="pm"><div class="pm-val">1,958</div><div class="pm-label">Views</div></div>
       <div class="pm"><div class="pm-val">100</div><div class="pm-label">Shares</div></div>
     </div>
   </div>
@@ -1751,7 +1658,7 @@ From brutal knockouts to slick submission...</div>
 
 <div class="footer" style="max-width:1200px;margin:0 auto;padding:20px 24px;">
   <p>Report generated by PeaceGrappler Automation for @peacegrappler</p>
-  <p>Data from Instagram Meta Graph API &bull; Sunday, May 31, 2026 at 1:54 PM</p>
+  <p>Data from Instagram Meta Graph API &bull; Sunday, May 31, 2026 at 6:45 PM</p>
   <p>
     <a href="https://paxlucta.github.io/peace-grappler/index.html">All Reports</a> &bull;
     <a href="https://paxlucta.github.io/peace-grappler/engagement-report.html">Full Interactive Report</a> &bull;
