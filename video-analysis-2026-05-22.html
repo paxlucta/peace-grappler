@@ -1,43 +1,33 @@
 <!DOCTYPE html><html lang="en"><head>
 <meta charset="UTF-8"><title>Video Analysis 2026-05-22</title>
+<link rel="stylesheet" href="styles.css">
 <style>
-:root{--bg:#0f1117;--card:#1a1d27;--border:#2a2d3a;--text:#e1e4ed;--muted:#8b8fa3;
-  --accent:#6366f1;--accent2:#818cf8;--green:#34d399;--yellow:#f59e0b;--red:#f87171;}
-*{box-sizing:border-box;margin:0;padding:0;}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
-  background:var(--bg);color:var(--text);line-height:1.6;padding:24px;}
+/* video-analysis daily report tweaks */
+body{padding:24px;}
 .wrap{max-width:900px;margin:0 auto;}
-h1{font-size:28px;color:var(--accent2);margin-bottom:4px;}
+h1{font-size:28px;color:var(--text);margin-bottom:4px;}
 .sub{color:var(--muted);font-size:13px;margin-bottom:32px;}
-h2{font-size:18px;color:var(--accent2);margin:32px 0 14px;border-bottom:1px solid var(--border);padding-bottom:8px;}
-h3{font-size:15px;color:var(--text);margin-bottom:8px;}
+h2{font-size:18px;color:var(--text);margin:32px 0 14px;border-bottom:1px solid var(--border);padding-bottom:8px;text-transform:none;letter-spacing:0;}
+h3{font-size:15px;color:var(--text);margin-bottom:8px;text-transform:none;letter-spacing:0;}
 .kpi-row{display:table;width:100%;border-collapse:separate;border-spacing:12px;}
 .kpi{display:table-cell;background:var(--card);border:1px solid var(--border);
   border-radius:10px;padding:16px 20px;text-align:center;width:16%;}
-.kpi .val{font-size:24px;font-weight:700;color:var(--accent2);}
+.kpi .val{font-size:24px;font-weight:700;color:var(--accent);}
 .kpi .lbl{font-size:11px;color:var(--muted);margin-top:2px;}
-table{width:100%;border-collapse:collapse;font-size:13px;}
-th{background:var(--card);color:var(--muted);font-weight:600;padding:10px 12px;
-   text-align:left;border-bottom:2px solid var(--border);}
-td{padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:top;}
-tr:last-child td{border-bottom:none;}
-.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:700;}
-.top{background:#064e3b;color:var(--green);}
-.avg{background:#451a03;color:var(--yellow);}
-.low{background:#450a0a;color:var(--red);}
+.badge.top{background:#d1fae5;color:#047857;}
+.badge.avg{background:#fef3c7;color:#92400e;}
+.badge.low{background:#fee2e2;color:#b91c1c;}
 .score{font-size:18px;font-weight:700;}
-.bar-wrap{background:#1e2130;border-radius:4px;height:6px;margin-top:4px;}
+.bar-wrap{background:#f3f4f6;border-radius:4px;height:6px;margin-top:4px;}
 .bar{height:6px;border-radius:4px;}
 .cap{color:var(--muted);font-size:12px;max-width:280px;line-height:1.4;}
-.cap a{color:var(--accent2);text-decoration:none;}
+.cap a{color:var(--accent);text-decoration:none;}
 .insight-list{list-style:none;}
 .insight-list li{padding:10px 14px;border-left:3px solid var(--accent);
-  background:var(--card);margin-bottom:8px;border-radius:0 8px 8px 0;font-size:14px;}
+  background:var(--card);margin-bottom:8px;border-radius:0 8px 8px 0;font-size:14px;border-top:1px solid var(--border);border-right:1px solid var(--border);border-bottom:1px solid var(--border);}
 .insight-list.avoid li{border-left-color:var(--red);}
 .insight-list.do li{border-left-color:var(--green);}
-.pct{font-weight:700;color:var(--accent2);}
-.footer{margin-top:48px;text-align:center;color:var(--muted);font-size:11px;
-  border-top:1px solid var(--border);padding-top:20px;}
+.pct{font-weight:700;color:var(--accent);}
 .no-new{background:var(--card);border:1px solid var(--border);border-radius:10px;
   padding:32px;text-align:center;color:var(--muted);}
 .reel-card{background:var(--card);border:1px solid var(--border);border-radius:12px;
@@ -50,40 +40,40 @@ tr:last-child td{border-bottom:none;}
 .stat{color:var(--muted);}
 .stat b{color:var(--text);}
 .ai-section{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;}
-.ai-col{background:#0f1117;border-radius:8px;padding:12px 14px;}
-.ai-col h4{font-size:12px;font-weight:700;letter-spacing:.05em;margin-bottom:8px;}
-.ai-col.good h4{color:#34d399;}
-.ai-col.bad  h4{color:#f87171;}
+.ai-col{background:var(--page);border:1px solid var(--border);border-radius:8px;padding:12px 14px;}
+.ai-col h4{font-size:12px;font-weight:700;letter-spacing:.05em;margin-bottom:8px;text-transform:uppercase;}
+.ai-col.good h4{color:var(--green);}
+.ai-col.bad  h4{color:var(--red);}
 .ai-col ul{list-style:none;padding:0;}
 .ai-col li{font-size:12px;line-height:1.5;padding:3px 0;border-bottom:1px solid var(--border);}
 .ai-col li:last-child{border-bottom:none;}
-.ai-col.good li::before{content:"✓ ";color:#34d399;font-weight:700;}
-.ai-col.bad  li::before{content:"✗ ";color:#f87171;font-weight:700;}
-.top-tip{font-size:12px;color:#f59e0b;margin-top:10px;padding:8px 12px;
-  background:#1c1500;border-radius:6px;border-left:3px solid #f59e0b;}
-.top-tip b{color:#fbbf24;}
+.ai-col.good li::before{content:"✓ ";color:var(--green);font-weight:700;}
+.ai-col.bad  li::before{content:"✗ ";color:var(--red);font-weight:700;}
+.top-tip{font-size:12px;color:#92400e;margin-top:10px;padding:8px 12px;
+  background:#fef3c7;border-radius:6px;border-left:3px solid var(--orange);}
+.top-tip b{color:#78350f;}
 </style>
 </head><body>
 <div class="wrap">
 <h1>Instagram Video Analysis</h1>
-<div class="sub">Reels from the last 7 days with metrics &mdash; Generated May 22, 2026 11:00 PM</div>
+<div class="sub">Reels from the last 7 days with metrics &mdash; Generated May 22, 2026 12:00 PM</div>
 
 <h2>New Content Summary (8 reels)</h2>
 <table class="kpi-row">
 <tr>
-<td class="kpi"><div class="val">4.9k <span style="color:#34d399;font-size:11px">▲34%</span></div><div class="lbl">Avg Views</div></td>
-<td class="kpi"><div class="val">3.0k <span style="color:#34d399;font-size:11px">▲26%</span></div><div class="lbl">Avg Reach</div></td>
+<td class="kpi"><div class="val">5.1k <span style="color:#34d399;font-size:11px">▲94%</span></div><div class="lbl">Avg Views</div></td>
+<td class="kpi"><div class="val">3.2k <span style="color:#34d399;font-size:11px">▲85%</span></div><div class="lbl">Avg Reach</div></td>
 <td class="kpi"><div class="val">56</div><div class="lbl">Avg Shares</div></td>
-<td class="kpi"><div class="val">2</div><div class="lbl">Avg Saves</div></td>
-<td class="kpi"><div class="val">12.2s <span style="color:#34d399;font-size:11px">▲53%</span></div><div class="lbl">Avg Watch</div></td>
-<td class="kpi"><div class="val">67.17%</div><div class="lbl">Eng Rate</div></td>
+<td class="kpi"><div class="val">3</div><div class="lbl">Avg Saves</div></td>
+<td class="kpi"><div class="val">11.6s <span style="color:#f87171;font-size:11px">▼19%</span></div><div class="lbl">Avg Watch</div></td>
+<td class="kpi"><div class="val">56.48%</div><div class="lbl">Eng Rate</div></td>
 </tr>
 </table>
 <h2>Per-Reel Breakdown (8 reels)</h2>
 <div class="reel-card">
   <div class="reel-header">
     <div class="reel-score-block">
-      <span class="score" style="color:#34d399">87</span><br>
+      <span class="score" style="color:#34d399">90</span><br>
       <span class="badge top">🔥 Top Performer</span>
     </div>
     <div class="reel-meta">
@@ -94,14 +84,14 @@ tr:last-child td{border-bottom:none;}
     </div>
   </div>
   <div class="reel-stats">
-    <span class="stat">👁 Views <b>3.0k</b><div class="bar-wrap"><div class="bar" style="width:40%;background:#f87171"></div></div></span>
-    <span class="stat">📡 Reach <b>1.3k</b><div class="bar-wrap"><div class="bar" style="width:27%;background:#f87171"></div></div></span>
+    <span class="stat">👁 Views <b>3.5k</b><div class="bar-wrap"><div class="bar" style="width:65%;background:#34d399"></div></div></span>
+    <span class="stat">📡 Reach <b>1.8k</b><div class="bar-wrap"><div class="bar" style="width:51%;background:#34d399"></div></div></span>
     <span class="stat" style="color:#34d399">🔁 Shares <b>157</b></span>
-    <span class="stat">🔖 Saves <b>5</b></span>
-    <span class="stat">❤️ Likes <b>104</b></span>
-    <span class="stat">💬 Comments <b>320</b></span>
-    <span class="stat" style="color:#34d399">⏱ Watch <b>27.1s</b></span>
-    <span class="stat">💥 Eng <b style="color:#34d399">44.84%</b></span>
+    <span class="stat">🔖 Saves <b>6</b></span>
+    <span class="stat">❤️ Likes <b>115</b></span>
+    <span class="stat">💬 Comments <b>324</b></span>
+    <span class="stat" style="color:#34d399">⏱ Watch <b>18.1s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">34.05%</b></span>
   </div>
   <div class="ai-section">
     <div class="ai-col good">
@@ -118,42 +108,7 @@ tr:last-child td{border-bottom:none;}
 <div class="reel-card">
   <div class="reel-header">
     <div class="reel-score-block">
-      <span class="score" style="color:#34d399">81</span><br>
-      <span class="badge top">🔥 Top Performer</span>
-    </div>
-    <div class="reel-meta">
-      <a href="https://www.instagram.com/reel/DYXRJK-Bb8M/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
-        🇧🇷 Melk Costa abriu o coração ao falar sobre o irmão mais velho, a pessoa que mais acreditou nele antes de falecer em 20…
-      </a>
-      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-05-15</div>
-    </div>
-  </div>
-  <div class="reel-stats">
-    <span class="stat">👁 Views <b>10.7k</b><div class="bar-wrap"><div class="bar" style="width:100%;background:#34d399"></div></div></span>
-    <span class="stat">📡 Reach <b>756</b><div class="bar-wrap"><div class="bar" style="width:15%;background:#f87171"></div></div></span>
-    <span class="stat" style="color:#34d399">🔁 Shares <b>79</b></span>
-    <span class="stat">🔖 Saves <b>2</b></span>
-    <span class="stat">❤️ Likes <b>74</b></span>
-    <span class="stat">💬 Comments <b>400</b></span>
-    <span class="stat" style="color:#34d399">⏱ Watch <b>15.9s</b></span>
-    <span class="stat">💥 Eng <b style="color:#34d399">73.41%</b></span>
-  </div>
-  <div class="ai-section">
-    <div class="ai-col good">
-      <h4>WHAT WORKED</h4>
-      <ul><li>No observations</li></ul>
-    </div>
-    <div class="ai-col bad">
-      <h4>WHAT TO FIX</h4>
-      <ul><li>No observations</li></ul>
-    </div>
-  </div>
-  
-</div>
-<div class="reel-card">
-  <div class="reel-header">
-    <div class="reel-score-block">
-      <span class="score" style="color:#34d399">78</span><br>
+      <span class="score" style="color:#34d399">74</span><br>
       <span class="badge top">🔥 Top Performer</span>
     </div>
     <div class="reel-meta">
@@ -164,14 +119,14 @@ tr:last-child td{border-bottom:none;}
     </div>
   </div>
   <div class="reel-stats">
-    <span class="stat">👁 Views <b>2.0k</b><div class="bar-wrap"><div class="bar" style="width:27%;background:#f87171"></div></div></span>
-    <span class="stat">📡 Reach <b>1.4k</b><div class="bar-wrap"><div class="bar" style="width:29%;background:#f87171"></div></div></span>
-    <span class="stat" style="color:#34d399">🔁 Shares <b>90</b></span>
+    <span class="stat">👁 Views <b>2.1k</b><div class="bar-wrap"><div class="bar" style="width:39%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>1.5k</b><div class="bar-wrap"><div class="bar" style="width:42%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:#34d399">🔁 Shares <b>91</b></span>
     <span class="stat">🔖 Saves <b>4</b></span>
-    <span class="stat">❤️ Likes <b>70</b></span>
-    <span class="stat">💬 Comments <b>493</b></span>
-    <span class="stat" style="color:#34d399">⏱ Watch <b>12.1s</b></span>
-    <span class="stat">💥 Eng <b style="color:#34d399">45.88%</b></span>
+    <span class="stat">❤️ Likes <b>73</b></span>
+    <span class="stat">💬 Comments <b>495</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>7.3s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">45.35%</b></span>
   </div>
   <div class="ai-section">
     <div class="ai-col good">
@@ -188,8 +143,43 @@ tr:last-child td{border-bottom:none;}
 <div class="reel-card">
   <div class="reel-header">
     <div class="reel-score-block">
-      <span class="score" style="color:#f59e0b">60</span><br>
-      <span class="badge avg">📊 Average</span>
+      <span class="score" style="color:#34d399">69</span><br>
+      <span class="badge top">🔥 Top Performer</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DYXRJK-Bb8M/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        🇧🇷 Melk Costa abriu o coração ao falar sobre o irmão mais velho, a pessoa que mais acreditou nele antes de falecer em 20…
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-05-15</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>10.8k</b><div class="bar-wrap"><div class="bar" style="width:100%;background:#34d399"></div></div></span>
+    <span class="stat">📡 Reach <b>785</b><div class="bar-wrap"><div class="bar" style="width:23%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:#34d399">🔁 Shares <b>79</b></span>
+    <span class="stat">🔖 Saves <b>2</b></span>
+    <span class="stat">❤️ Likes <b>77</b></span>
+    <span class="stat">💬 Comments <b>402</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>10.4s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">71.34%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+  </div>
+  
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#34d399">67</span><br>
+      <span class="badge top">🔥 Top Performer</span>
     </div>
     <div class="reel-meta">
       <a href="https://www.instagram.com/reel/DYkxM5pDaR3/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
@@ -199,14 +189,14 @@ tr:last-child td{border-bottom:none;}
     </div>
   </div>
   <div class="reel-stats">
-    <span class="stat">👁 Views <b>1.0k</b><div class="bar-wrap"><div class="bar" style="width:14%;background:#f87171"></div></div></span>
-    <span class="stat">📡 Reach <b>764</b><div class="bar-wrap"><div class="bar" style="width:15%;background:#f87171"></div></div></span>
-    <span class="stat" style="color:#34d399">🔁 Shares <b>89</b></span>
-    <span class="stat">🔖 Saves <b>1</b></span>
-    <span class="stat">❤️ Likes <b>61</b></span>
+    <span class="stat">👁 Views <b>1.3k</b><div class="bar-wrap"><div class="bar" style="width:25%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>967</b><div class="bar-wrap"><div class="bar" style="width:28%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:#34d399">🔁 Shares <b>91</b></span>
+    <span class="stat">🔖 Saves <b>3</b></span>
+    <span class="stat">❤️ Likes <b>83</b></span>
     <span class="stat">💬 Comments <b>362</b></span>
-    <span class="stat" style="color:#34d399">⏱ Watch <b>10.0s</b></span>
-    <span class="stat">💥 Eng <b style="color:#34d399">67.15%</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>10.4s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">55.74%</b></span>
   </div>
   <div class="ai-section">
     <div class="ai-col good">
@@ -223,42 +213,7 @@ tr:last-child td{border-bottom:none;}
 <div class="reel-card">
   <div class="reel-header">
     <div class="reel-score-block">
-      <span class="score" style="color:#f59e0b">54</span><br>
-      <span class="badge avg">📊 Average</span>
-    </div>
-    <div class="reel-meta">
-      <a href="https://www.instagram.com/reel/DYPivQ2htWW/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
-        🇧🇷 Arnold Allen tava confortável no trono… até o Melk Costa aparecer destruindo tudo no caminho 😭🐶 “Muita fala pra pouca…
-      </a>
-      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-05-16</div>
-    </div>
-  </div>
-  <div class="reel-stats">
-    <span class="stat">👁 Views <b>18.5k</b><div class="bar-wrap"><div class="bar" style="width:100%;background:#34d399"></div></div></span>
-    <span class="stat">📡 Reach <b>16.8k</b><div class="bar-wrap"><div class="bar" style="width:100%;background:#34d399"></div></div></span>
-    <span class="stat" style="color:var(--text)">🔁 Shares <b>9</b></span>
-    <span class="stat">🔖 Saves <b>2</b></span>
-    <span class="stat">❤️ Likes <b>41</b></span>
-    <span class="stat">💬 Comments <b>344</b></span>
-    <span class="stat" style="color:#f87171">⏱ Watch <b>5.0s</b></span>
-    <span class="stat">💥 Eng <b style="color:var(--muted)">2.36%</b></span>
-  </div>
-  <div class="ai-section">
-    <div class="ai-col good">
-      <h4>WHAT WORKED</h4>
-      <ul><li>No observations</li></ul>
-    </div>
-    <div class="ai-col bad">
-      <h4>WHAT TO FIX</h4>
-      <ul><li>No observations</li></ul>
-    </div>
-  </div>
-  
-</div>
-<div class="reel-card">
-  <div class="reel-header">
-    <div class="reel-score-block">
-      <span class="score" style="color:#f59e0b">47</span><br>
+      <span class="score" style="color:#f59e0b">44</span><br>
       <span class="badge avg">📊 Average</span>
     </div>
     <div class="reel-meta">
@@ -269,14 +224,14 @@ tr:last-child td{border-bottom:none;}
     </div>
   </div>
   <div class="reel-stats">
-    <span class="stat">👁 Views <b>3.4k</b><div class="bar-wrap"><div class="bar" style="width:45%;background:#f87171"></div></div></span>
-    <span class="stat">📡 Reach <b>2.7k</b><div class="bar-wrap"><div class="bar" style="width:55%;background:#34d399"></div></div></span>
+    <span class="stat">👁 Views <b>3.4k</b><div class="bar-wrap"><div class="bar" style="width:65%;background:#34d399"></div></div></span>
+    <span class="stat">📡 Reach <b>2.7k</b><div class="bar-wrap"><div class="bar" style="width:80%;background:#34d399"></div></div></span>
     <span class="stat" style="color:var(--text)">🔁 Shares <b>2</b></span>
     <span class="stat">🔖 Saves <b>2</b></span>
-    <span class="stat">❤️ Likes <b>66</b></span>
+    <span class="stat">❤️ Likes <b>69</b></span>
     <span class="stat">💬 Comments <b>173</b></span>
-    <span class="stat" style="color:#34d399">⏱ Watch <b>11.1s</b></span>
-    <span class="stat">💥 Eng <b style="color:#34d399">9.07%</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>4.5s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">9.01%</b></span>
   </div>
   <div class="ai-section">
     <div class="ai-col good">
@@ -293,8 +248,78 @@ tr:last-child td{border-bottom:none;}
 <div class="reel-card">
   <div class="reel-header">
     <div class="reel-score-block">
-      <span class="score" style="color:#f59e0b">45</span><br>
+      <span class="score" style="color:#f59e0b">43</span><br>
       <span class="badge avg">📊 Average</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DYPivQ2htWW/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        🇧🇷 Arnold Allen tava confortável no trono… até o Melk Costa aparecer destruindo tudo no caminho 😭🐶 “Muita fala pra pouca…
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-05-16</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>18.6k</b><div class="bar-wrap"><div class="bar" style="width:100%;background:#34d399"></div></div></span>
+    <span class="stat">📡 Reach <b>16.8k</b><div class="bar-wrap"><div class="bar" style="width:100%;background:#34d399"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>9</b></span>
+    <span class="stat">🔖 Saves <b>2</b></span>
+    <span class="stat">❤️ Likes <b>46</b></span>
+    <span class="stat">💬 Comments <b>344</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>2.5s</b></span>
+    <span class="stat">💥 Eng <b style="color:var(--muted)">2.39%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+  </div>
+  
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f87171">35</span><br>
+      <span class="badge low">⚠️ Needs Work</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DYc3k6kB2jn/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        #ufc all #knockout s & #submission s #melkcosta #ArnoldAllen
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-05-17</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>397</b><div class="bar-wrap"><div class="bar" style="width:7%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>261</b><div class="bar-wrap"><div class="bar" style="width:7%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>3</b></span>
+    <span class="stat">🔖 Saves <b>1</b></span>
+    <span class="stat">❤️ Likes <b>33</b></span>
+    <span class="stat">💬 Comments <b>365</b></span>
+    <span class="stat" style="color:#34d399">⏱ Watch <b>29.6s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">154.02%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+  </div>
+  
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f87171">32</span><br>
+      <span class="badge low">⚠️ Needs Work</span>
     </div>
     <div class="reel-meta">
       <a href="https://www.instagram.com/reel/DYnVXO5iGsM/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
@@ -304,14 +329,14 @@ tr:last-child td{border-bottom:none;}
     </div>
   </div>
   <div class="reel-stats">
-    <span class="stat">👁 Views <b>507</b><div class="bar-wrap"><div class="bar" style="width:6%;background:#f87171"></div></div></span>
-    <span class="stat">📡 Reach <b>322</b><div class="bar-wrap"><div class="bar" style="width:6%;background:#f87171"></div></div></span>
-    <span class="stat" style="color:#34d399">🔁 Shares <b>15</b></span>
+    <span class="stat">👁 Views <b>835</b><div class="bar-wrap"><div class="bar" style="width:15%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>508</b><div class="bar-wrap"><div class="bar" style="width:14%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>15</b></span>
     <span class="stat">🔖 Saves <b>1</b></span>
-    <span class="stat">❤️ Likes <b>42</b></span>
-    <span class="stat">💬 Comments <b>315</b></span>
-    <span class="stat" style="color:#34d399">⏱ Watch <b>9.3s</b></span>
-    <span class="stat">💥 Eng <b style="color:#34d399">115.84%</b></span>
+    <span class="stat">❤️ Likes <b>59</b></span>
+    <span class="stat">💬 Comments <b>331</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>9.9s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">79.92%</b></span>
   </div>
   <div class="ai-section">
     <div class="ai-col good">
@@ -324,42 +349,12 @@ tr:last-child td{border-bottom:none;}
     </div>
   </div>
   
-</div>
-<div class="reel-card">
-  <div class="reel-header">
-    <div class="reel-score-block">
-      <span class="score" style="color:#f87171">29</span><br>
-      <span class="badge low">⚠️ Needs Work</span>
-    </div>
-    <div class="reel-meta">
-      <a href="https://www.instagram.com/reel/DYc3k6kB2jn/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
-        #ufc all #knockout s & #submission s #melkcosta #x ArnoldAllen
-      </a>
-      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-05-17</div>
-    </div>
-  </div>
-  <div class="reel-stats">
-    <span class="stat">👁 Views <b>339</b><div class="bar-wrap"><div class="bar" style="width:4%;background:#f87171"></div></div></span>
-    <span class="stat">📡 Reach <b>222</b><div class="bar-wrap"><div class="bar" style="width:4%;background:#f87171"></div></div></span>
-    <span class="stat" style="color:var(--text)">🔁 Shares <b>3</b></span>
-    <span class="stat">🔖 Saves <b>1</b></span>
-    <span class="stat">❤️ Likes <b>28</b></span>
-    <span class="stat">💬 Comments <b>365</b></span>
-    <span class="stat" style="color:#f87171">⏱ Watch <b>7.0s</b></span>
-    <span class="stat">💥 Eng <b style="color:#34d399">178.83%</b></span>
-  </div>
-  <div class="ai-section">
-    <div class="ai-col good">
-      <h4>WHAT WORKED</h4>
-      <ul><li>No observations</li></ul>
-    </div>
-    <div class="ai-col bad">
-      <h4>WHAT TO FIX</h4>
-      <ul><li>No observations</li></ul>
-    </div>
-  </div>
-  
-</div><h2>What to Keep Doing</h2><p style="color:var(--muted);font-size:13px;">Not enough data yet — patterns will appear after more reels are posted and analyzed.</p><ul class="insight-list do" style="margin-top:8px"><li><b>Watch time in top performers is 1.9× higher</b> — the hook and pacing in your best reels work. Top: 13.0s avg vs bottom: 6.9s avg.</li></ul><ul class="insight-list do" style="margin-top:8px"><li><b>Top reels get 15.8× more shares per viewer</b> — your best content triggers sharing instincts. Keep creating that type.</li></ul><h2>What to Stop / Fix</h2><p style="color:var(--muted);font-size:13px;">No strong negative patterns detected yet.</p>
+</div><h2>What to Keep Doing</h2><ul class="insight-list do"><li><b>Long captions (>350 chars)</b> — present in <span class="pct">58%</span> of top reels vs 33% of weak reels. Keep it up.</li></ul><ul class="insight-list do" style="margin-top:8px"><li><b>Watch time in top performers is 4.3× higher</b> — the hook and pacing in your best reels work. Top: 24.3s avg vs bottom: 5.6s avg.</li></ul><ul class="insight-list do" style="margin-top:8px"><li><b>Top reels get 6.3× more shares per viewer</b> — your best content triggers sharing instincts. Keep creating that type.</li></ul><h2>What to Stop / Fix</h2><ul class="insight-list avoid"><li><b>Medium captions (150–350 chars)</b> — present in <span class="pct">50%</span> of weak reels vs 25% of top reels. Reconsider this approach.</li></ul>
+<ul class="insight-list avoid" style="margin-top:8px">
+  <li><b>3 reels had watch time well below average (&lt;60% of 14.3s)</b> —
+  viewers are dropping off early. The first 2–3 seconds likely aren't grabbing attention.
+  Try opening with a bold statement, action shot, or question before anything else.</li>
+</ul>
 <ul class="insight-list avoid" style="margin-top:8px">
   <li><b>1 reel had above-average reach but low engagement (&lt;3%)</b> —
   you're reaching new people but they're not interacting.
@@ -369,15 +364,15 @@ tr:last-child td{border-bottom:none;}
 <table style="width:auto">
 <thead><tr><th>Metric</th><th>90-Day Average</th><th>Top Quartile (P75)</th></tr></thead>
 <tbody>
-<tr><td>Views</td><td>3.7k</td><td>3.4k</td></tr>
-<tr><td>Reach</td><td>2.4k</td><td>2.4k</td></tr>
-<tr><td>Shares</td><td>12</td><td>7</td></tr>
-<tr><td>Saves</td><td>2</td><td>3</td></tr>
-<tr><td>Avg Watch Time</td><td>7.9s</td><td>11.2s</td></tr>
+<tr><td>Views</td><td>2.6k</td><td>3.3k</td></tr>
+<tr><td>Reach</td><td>1.7k</td><td>1.8k</td></tr>
+<tr><td>Shares</td><td>45</td><td>84</td></tr>
+<tr><td>Saves</td><td>2</td><td>4</td></tr>
+<tr><td>Avg Watch Time</td><td>14.3s</td><td>12.4s</td></tr>
 </tbody>
 </table>
 
 <div class="footer">
-  PeaceGrappler Video Analysis &mdash; 2026-05-22 23:00 &mdash; Data from Instagram Graph API
+  PeaceGrappler Video Analysis &mdash; 2026-05-22 12:00 &mdash; Data from Instagram Graph API
 </div>
 </div></body></html>

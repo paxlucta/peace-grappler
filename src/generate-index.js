@@ -100,60 +100,15 @@ function pageShell(title, bodyHtml, generatedAt) {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${title}</title>
+<link rel="stylesheet" href="styles.css">
 <style>
-  :root {
-    --bg: #0f1117; --card: #1a1d27; --border: #2a2d3a;
-    --text: #e1e4ed; --muted: #8b8fa3;
-    --accent: #6366f1; --accent2: #818cf8; --green: #34d399;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; padding: 24px; }
-  .container { max-width: 800px; margin: 0 auto; }
-  h1 { font-size: 32px; margin-bottom: 8px; color: var(--accent2); }
-  .subtitle { color: var(--muted); font-size: 14px; margin-bottom: 32px; }
-  h2 { font-size: 20px; margin: 32px 0 16px; color: var(--accent2); }
-  .section { margin-bottom: 32px; }
-  .section-header { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
-  .section-header h2 { margin: 0; }
-  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 12px; }
-  .card h3 { font-size: 16px; margin-bottom: 8px; }
-  .card p { color: var(--muted); font-size: 14px; margin-bottom: 12px; }
-  .links { display: flex; gap: 12px; flex-wrap: wrap; }
-  .link { display: inline-block; padding: 8px 16px; background: var(--accent); color: white; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600; transition: opacity 0.2s; }
-  .link:hover { opacity: 0.85; }
-  .link-secondary { background: transparent; border: 1px solid var(--border); color: var(--accent2); }
-  .link-secondary:hover { background: var(--card); }
-  .nav-back { display: inline-block; color: var(--accent2); text-decoration: none; font-size: 13px; font-weight: 600; margin-bottom: 12px; }
-  .nav-back:hover { text-decoration: underline; }
-  .month-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
-  .month-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
-  .month-card h3 { font-size: 16px; margin-bottom: 10px; color: var(--text); }
-  .month-card .links { flex-direction: column; gap: 6px; }
-  .month-card .link { text-align: center; font-size: 13px; padding: 6px 12px; }
-  .footer { text-align: center; margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
-  .va-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 12px 16px; margin-bottom: 8px; }
-  .va-header { display: grid; grid-template-columns: 110px auto 1fr auto auto auto auto; align-items: center; gap: 14px; }
-  .va-date { font-size: 14px; font-weight: 600; color: var(--text); }
-  .va-stat { color: var(--muted); font-size: 13px; white-space: nowrap; }
-  .va-stat strong { color: var(--text); font-weight: 600; margin-right: 4px; }
-  .va-toggle { background: transparent; border: 1px solid var(--border); color: var(--accent2); border-radius: 8px; padding: 5px 12px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; }
-  .va-toggle:hover { background: rgba(99,102,241,0.1); }
-  .va-table-wrap { display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
-  .va-card.open .va-table-wrap { display: block; }
-  .va-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  .va-table th { color: var(--muted); font-weight: 600; padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--border); }
-  .va-table td { padding: 7px 10px; border-bottom: 1px solid #1e2130; vertical-align: middle; }
-  .va-table tr:last-child td { border-bottom: none; }
-  .va-caption { color: var(--text); max-width: 340px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .va-score { font-weight: 700; font-size: 15px; }
-  @media (max-width: 700px) {
-    .va-header { grid-template-columns: 1fr 1fr; gap: 8px; }
-    .va-spacer { display: none; }
-  }
+  /* index-specific tweaks */
+  h1 { font-size: 32px; color: var(--text); }
+  h2 { font-size: 20px; color: var(--text); margin: 32px 0 16px; }
 </style>
 </head>
 <body>
-<div class="container">
+<div class="container-narrow">
 ${bodyHtml}
 <div class="footer">
   <p>PeaceGrappler Analytics &mdash; Data from Instagram Graph API</p>

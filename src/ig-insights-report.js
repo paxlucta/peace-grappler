@@ -523,7 +523,7 @@ const html = `<!DOCTYPE html>
   h2 { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
   .section-desc { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
 
-  .grid { display: grid; gap: 12px; }
+  .grid { display: grid; gap: 12px; margin-bottom: 16px; }
   .grid-4 { grid-template-columns: repeat(4, 1fr); }
   .grid-2 { grid-template-columns: repeat(2, 1fr); }
   .grid-3 { grid-template-columns: repeat(3, 1fr); }

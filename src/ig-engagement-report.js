@@ -490,109 +490,35 @@ function generateReport(config = {}) {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Peace Grappler - ${esc(reportTitle)}</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"><\/script>
+<link rel="stylesheet" href="styles.css">
 <style>
-  :root {
-    --bg: #0f1117;
-    --card: #1a1d27;
-    --border: #2a2d3a;
-    --text: #e1e4ed;
-    --muted: #8b8fa3;
-    --accent: #6366f1;
-    --accent2: #818cf8;
-    --green: #34d399;
-    --orange: #fb923c;
-    --red: #f87171;
-    --pink: #f472b6;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: var(--bg); color: var(--text);
-    line-height: 1.6; padding: 0; margin: 0;
-  }
-  .page-header {
-    padding: 24px 24px 0;
-    max-width: 1400px; margin: 0 auto;
-  }
-  .page-content {
-    padding: 0 24px 24px;
-    max-width: 1400px; margin: 0 auto;
-  }
+  /* engagement-report tweaks */
+  .page-header { max-width: 1400px; }
+  .page-content { max-width: 1400px; }
   h1 { font-size: 28px; margin-bottom: 4px; }
-  h2 { font-size: 20px; margin: 32px 0 16px; color: var(--accent2); }
+  h2 { font-size: 20px; margin: 32px 0 16px; }
   h2:first-child { margin-top: 8px; }
-  h3 { font-size: 16px; margin: 24px 0 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
-  .subtitle { color: var(--muted); font-size: 14px; margin-bottom: 16px; }
 
-  /* Top navigation tabs */
-  .nav-tabs {
-    display: flex; gap: 0;
-    border-bottom: 2px solid var(--border);
-    margin-bottom: 24px;
-  }
-  .nav-tab {
-    padding: 12px 24px; cursor: pointer;
-    color: var(--muted); font-size: 15px; font-weight: 600;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -2px; transition: all 0.2s;
-    user-select: none;
-  }
-  .nav-tab:hover { color: var(--text); }
-  .nav-tab.active { color: var(--accent2); border-bottom-color: var(--accent2); }
-  .page-panel { display: none; }
-  .page-panel.active { display: block; }
-
-  .site-nav { display: flex; align-items: center; gap: 16px; padding: 12px 0; margin-bottom: 12px; border-bottom: 1px solid var(--border); }
-  .site-nav a { color: var(--accent2); text-decoration: none; font-size: 13px; font-weight: 600; }
-  .site-nav a:hover { opacity: 0.8; }
-  .site-nav-label { color: var(--muted); font-size: 13px; }
-
+  /* engagement-report unique components */
   .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
-  .stat-card {
-    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
-    padding: 20px; text-align: center;
-  }
-  .stat-card .value { font-size: 32px; font-weight: 700; color: var(--accent2); }
+  .stat-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; text-align: center; }
+  .stat-card .value { font-size: 32px; font-weight: 700; color: var(--accent); }
   .stat-card .label { font-size: 13px; color: var(--muted); margin-top: 4px; }
-  .card {
-    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
-    padding: 24px; margin-bottom: 24px;
-  }
   .chart-container { position: relative; height: 300px; margin: 16px 0; }
   .chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px; }
   .chart-row .card { margin-bottom: 0; }
   @media (max-width: 768px) { .chart-row { grid-template-columns: 1fr; } }
 
-  /* Sortable tables */
-  table { width: 100%; border-collapse: collapse; font-size: 14px; }
-  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); }
-  th {
-    color: var(--muted); font-weight: 600; font-size: 12px;
-    text-transform: uppercase; letter-spacing: 0.5px;
-    cursor: pointer; user-select: none; white-space: nowrap;
-  }
+  /* Sortable table extras */
+  th { cursor: pointer; user-select: none; white-space: nowrap; }
   th:hover { color: var(--text); }
   th .sort-arrow { margin-left: 4px; font-size: 10px; opacity: 0.4; }
-  th.sorted .sort-arrow { opacity: 1; color: var(--accent2); }
+  th.sorted .sort-arrow { opacity: 1; color: var(--accent); }
   th.no-sort { cursor: default; }
   th.no-sort:hover { color: var(--muted); }
-  tr:hover { background: rgba(99,102,241,0.05); }
 
-  .rank { font-weight: 700; color: var(--accent2); min-width: 36px; display: inline-block; }
-  .rank-1 { color: #fbbf24; }
-  .rank-2 { color: #d1d5db; }
-  .rank-3 { color: #cd7f32; }
   .score { font-weight: 700; color: var(--green); }
-  .badge {
-    display: inline-block; padding: 2px 8px; border-radius: 6px;
-    font-size: 11px; font-weight: 600; text-transform: uppercase;
-  }
-  .badge-feed { background: #6366f133; color: var(--accent2); }
-  .badge-reels { background: #f472b633; color: var(--pink); }
-  .badge-carousel { background: #fb923c33; color: var(--orange); }
   .caption { color: var(--muted); font-size: 13px; max-width: 300px; }
-  a { color: var(--accent2); text-decoration: none; }
-  a:hover { text-decoration: underline; }
   .breakdown { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 8px; }
   .breakdown-item { font-size: 13px; }
   .breakdown-item .bval { font-weight: 600; color: var(--text); }
@@ -600,13 +526,8 @@ function generateReport(config = {}) {
 
   /* Sub-tabs (for ranking periods) */
   .sub-tabs { display: flex; gap: 0; margin-bottom: 0; }
-  .sub-tab {
-    padding: 10px 20px; cursor: pointer; border: 1px solid var(--border);
-    background: var(--bg); color: var(--muted); font-size: 14px; font-weight: 600;
-    border-bottom: none; border-radius: 8px 8px 0 0; margin-right: -1px;
-    user-select: none;
-  }
-  .sub-tab.active { background: var(--card); color: var(--accent2); }
+  .sub-tab { padding: 10px 20px; cursor: pointer; border: 1px solid var(--border); background: var(--page); color: var(--muted); font-size: 14px; font-weight: 600; border-bottom: none; border-radius: 8px 8px 0 0; margin-right: -1px; user-select: none; }
+  .sub-tab.active { background: var(--card); color: var(--accent); }
   .sub-content { display: none; }
   .sub-content.active { display: block; }
 
@@ -1128,25 +1049,17 @@ function generateRankingsHtml(rankAllTime, rankPeriod, generatedAt, rankingsPath
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Community Engagement Rankings</title>
+<link rel="stylesheet" href="styles.css">
 <style>
-  :root { --bg: #0f1117; --card: #1a1d27; --border: #2a2d3a; --text: #e1e4ed; --muted: #8b8fa3; --accent: #6366f1; --accent2: #818cf8; --green: #34d399; --orange: #fb923c; }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); padding: 24px; }
+  /* engagement-rankings tweaks */
+  body { padding: 24px; }
   h1 { font-size: 28px; margin-bottom: 24px; }
-  .site-nav { display: flex; align-items: center; gap: 16px; padding: 0 0 12px; margin-bottom: 16px; border-bottom: 1px solid var(--border); }
-  .site-nav a { color: var(--accent2); text-decoration: none; font-size: 13px; font-weight: 600; }
-  .site-nav a:hover { opacity: 0.8; }
-  .site-nav-label { color: var(--muted); font-size: 13px; }
   .tabs { display: flex; gap: 0; margin-bottom: 0; }
-  .tab { padding: 10px 20px; cursor: pointer; border: 1px solid var(--border); background: var(--bg); color: var(--muted); font-size: 14px; font-weight: 600; border-bottom: none; border-radius: 8px 8px 0 0; margin-right: -1px; user-select: none; }
-  .tab.active { background: var(--card); color: var(--accent2); }
+  .tab { padding: 10px 20px; cursor: pointer; border: 1px solid var(--border); background: var(--page); color: var(--muted); font-size: 14px; font-weight: 600; border-bottom: none; border-radius: 8px 8px 0 0; margin-right: -1px; user-select: none; }
+  .tab.active { background: var(--card); color: var(--accent); }
   .panel { display: none; background: var(--card); border: 1px solid var(--border); border-radius: 0 12px 12px 12px; padding: 24px; }
   .panel.active { display: block; }
-  table { width: 100%; border-collapse: collapse; font-size: 14px; }
-  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); }
-  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
-  tr:hover { background: rgba(99,102,241,0.05); }
-  td:first-child { font-weight: 700; color: var(--accent2); }
+  td:first-child { font-weight: 700; color: var(--accent); }
 </style>
 </head>
 <body>

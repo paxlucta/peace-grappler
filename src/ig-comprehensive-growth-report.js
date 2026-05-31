@@ -482,100 +482,12 @@ function generateReport() {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PeaceGrappler - ${reportType} Report</title>
+<link rel="stylesheet" href="styles.css">
 <style>
-  :root {
-    --bg: #0f1117; --card: #1a1d27; --border: #2a2d3a;
-    --text: #e1e4ed; --muted: #8b8fa3;
-    --accent: #6366f1; --accent2: #818cf8;
-    --green: #34d399; --red: #f87171; --orange: #fb923c; --pink: #f472b6;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
-
-  .page-header { padding: 24px 24px 0; max-width: 1200px; margin: 0 auto; }
-  .page-content { padding: 0 24px 24px; max-width: 1200px; margin: 0 auto; }
-
+  /* comprehensive-growth-report tweaks */
   h1 { font-size: 28px; margin-bottom: 4px; }
-  h2 { font-size: 20px; margin: 28px 0 16px; color: var(--accent2); }
+  h2 { font-size: 20px; margin: 28px 0 16px; }
   h2:first-child { margin-top: 8px; }
-  h3 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; font-weight: 600; margin: 20px 0 10px; }
-  .subtitle { color: var(--muted); font-size: 14px; margin-bottom: 4px; }
-  .report-badge { display: inline-block; background: var(--accent); color: white; padding: 3px 10px; border-radius: 10px; font-size: 12px; font-weight: 600; margin-bottom: 16px; }
-  .section-note { font-size: 12px; color: var(--muted); font-style: italic; margin-bottom: 16px; }
-
-  /* Nav tabs */
-  .nav-tabs { display: flex; gap: 0; border-bottom: 2px solid var(--border); margin-bottom: 24px; overflow-x: auto; }
-  .nav-tab { padding: 12px 20px; cursor: pointer; color: var(--muted); font-size: 14px; font-weight: 600; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all 0.2s; white-space: nowrap; user-select: none; }
-  .nav-tab:hover { color: var(--text); }
-  .nav-tab.active { color: var(--accent2); border-bottom-color: var(--accent2); }
-  .page-panel { display: none; }
-  .page-panel.active { display: block; }
-
-  .site-nav { display: flex; align-items: center; gap: 16px; padding: 12px 0; margin-bottom: 12px; border-bottom: 1px solid var(--border); }
-  .site-nav a { color: var(--accent2); text-decoration: none; font-size: 13px; font-weight: 600; }
-  .site-nav a:hover { opacity: 0.8; }
-  .site-nav-label { color: var(--muted); font-size: 13px; }
-
-  /* Cards & grids */
-  .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
-  .metric-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; text-align: center; }
-  .metric-card .value { font-size: 28px; font-weight: 700; color: var(--accent2); }
-  .metric-card .label { font-size: 12px; color: var(--muted); margin-top: 4px; }
-  .growth-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; }
-  .growth-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; text-align: center; }
-  .growth-card .period { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
-  .growth-card .growth-value { font-size: 24px; font-weight: 700; margin: 4px 0; }
-  .growth-card .sub { font-size: 11px; color: var(--muted); }
-  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 20px; }
-
-  /* Tables */
-  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 20px; }
-  th { background: var(--card); color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; padding: 10px 8px; text-align: left; border-bottom: 2px solid var(--border); }
-  td { padding: 8px; border-bottom: 1px solid #1e2130; vertical-align: top; }
-  tr:hover { background: rgba(99,102,241,0.05); }
-
-  /* Common elements */
-  .rank { font-weight: 700; color: var(--accent2); }
-  .rank-1 { color: #fbbf24; }
-  .rank-2 { color: #d1d5db; }
-  .rank-3 { color: #cd7f32; }
-  .engagement-val { font-weight: 700; color: var(--green); }
-  .positive { color: var(--green); }
-  .negative { color: var(--red); }
-  .neutral { color: var(--muted); }
-  .caption-cell { color: var(--muted); max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; text-transform: uppercase; }
-  .badge-feed { background: #6366f133; color: var(--accent2); }
-  .badge-reels { background: #f472b633; color: var(--pink); }
-  .badge-carousel { background: #fb923c33; color: var(--orange); }
-  a { color: var(--accent2); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-
-  /* Post cards */
-  .post-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 12px; }
-  .post-card .post-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-  .post-card .post-caption { color: var(--muted); font-size: 13px; margin-bottom: 10px; }
-  .post-card .post-metrics { display: flex; gap: 16px; flex-wrap: wrap; }
-  .post-card .pm { text-align: center; }
-  .post-card .pm .pm-val { font-size: 18px; font-weight: 700; color: var(--text); }
-  .post-card .pm .pm-label { font-size: 11px; color: var(--muted); }
-
-  /* Commenter blocks */
-  .commenter-block { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 12px; }
-  .commenter-block .cb-header { font-weight: 600; color: var(--accent2); margin-bottom: 6px; }
-  .commenter-block .cb-sub { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
-  .commenter-block .cb-posts { font-size: 12px; color: var(--muted); }
-  .commenter-block .cb-posts span { color: var(--text); }
-
-  .footer { text-align: center; margin-top: 40px; padding: 20px 0; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
-  .footer a { color: var(--accent2); }
-
-  @media (max-width: 600px) {
-    .metrics-grid { grid-template-columns: repeat(2, 1fr); }
-    .growth-row { grid-template-columns: 1fr; }
-    .post-card .post-metrics { gap: 10px; }
-    .nav-tab { padding: 10px 14px; font-size: 13px; }
-  }
 </style>
 </head>
 <body>

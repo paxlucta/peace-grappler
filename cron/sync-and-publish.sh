@@ -80,6 +80,7 @@ python3 src/ig-video-analysis.py
 # Stage report artifacts at repo root (where GitHub Pages serves from).
 echo "Staging report files at repo root..."
 ARTIFACTS=(
+  "output/styles.css"
   "output/engagement-report.html"
   "output/engagement-rankings.html"
   "output/Engagement Rankings.xlsx"
