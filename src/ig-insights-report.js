@@ -198,24 +198,23 @@ const newFollowersTotal = followerTrend.reduce((a, b) => a + b.value, 0);
 // Demographics (latest follower_demographics snapshot)
 // ============================================================
 
-const demoSnap = db
-  .prepare(
-    `SELECT MAX(fetched_at) AS f FROM ig_audience_demographics
-     WHERE metric = 'follower_demographics' AND timeframe = 'last_30_days'`
-  )
-  .get();
-
+// Each dimension (city, country, age, gender) is written in a separate API call,
+// so they end up with different fetched_at timestamps even within one sync run.
+// Pick the latest fetched_at per dimension rather than a single global MAX.
 function demoRows(dim) {
-  if (!demoSnap?.f) return [];
   return db
     .prepare(
       `SELECT dimension_value, value FROM ig_audience_demographics
        WHERE account_id = ? AND metric = 'follower_demographics'
          AND timeframe = 'last_30_days' AND dimension = ?
-         AND fetched_at = ?
+         AND fetched_at = (
+           SELECT MAX(fetched_at) FROM ig_audience_demographics
+           WHERE account_id = ? AND metric = 'follower_demographics'
+             AND timeframe = 'last_30_days' AND dimension = ?
+         )
        ORDER BY value DESC`
     )
-    .all(ACCOUNT_ID, dim, demoSnap.f);
+    .all(ACCOUNT_ID, dim, ACCOUNT_ID, dim);
 }
 
 const genderRows = demoRows("gender");
@@ -625,11 +624,15 @@ const html = `<!DOCTYPE html>
   <div class="chart-card">
     <h2>Follower Growth Trend</h2>
     <div class="section-desc">Track followers gained.</div>
+    ${followerTrend.length >= 1 ? `
     <div class="chart-wrap"><canvas id="ch_followers"></canvas></div>
     <div class="legend-row">
       <div></div>
       <div><span class="legend-item"><span class="legend-dot" style="background:var(--accent)"></span>New Followers (${newFollowersTotal})</span></div>
-    </div>
+    </div>` : `
+    <div class="section-desc" style="padding: 24px 0; text-align: center; color: var(--muted, #888);">
+      Need at least 2 daily snapshots to chart growth. Have ${snapshotRows.length} snapshot${snapshotRows.length === 1 ? "" : "s"} so far — chart will populate after the next daily sync.
+    </div>`}
   </div>
 
   <div class="chart-card">

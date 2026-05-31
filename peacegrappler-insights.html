@@ -169,10 +169,9 @@
   <div class="chart-card">
     <h2>Follower Growth Trend</h2>
     <div class="section-desc">Track followers gained.</div>
-    <div class="chart-wrap"><canvas id="ch_followers"></canvas></div>
-    <div class="legend-row">
-      <div></div>
-      <div><span class="legend-item"><span class="legend-dot" style="background:var(--accent)"></span>New Followers (0)</span></div>
+    
+    <div class="section-desc" style="padding: 24px 0; text-align: center; color: var(--muted, #888);">
+      Need at least 2 daily snapshots to chart growth. Have 1 snapshot so far — chart will populate after the next daily sync.
     </div>
   </div>
 
@@ -241,12 +240,76 @@
     <div class="card">
       <h2>Top Cities By Followers</h2>
       <div class="section-desc">Geographical distribution of your followers.</div>
-      
+      <div class="bar-row">
+        <span class="label">São Paulo, São Paulo (state)</span>
+        <span class="bar"><span style="width:100%"></span></span>
+        <span class="val">207</span>
+      </div><div class="bar-row">
+        <span class="label">Betim, Minas Gerais</span>
+        <span class="bar"><span style="width:34.29951690821256%"></span></span>
+        <span class="val">71</span>
+      </div><div class="bar-row">
+        <span class="label">Guarulhos, São Paulo (state)</span>
+        <span class="bar"><span style="width:33.81642512077295%"></span></span>
+        <span class="val">70</span>
+      </div><div class="bar-row">
+        <span class="label">Santo André, São Paulo (state)</span>
+        <span class="bar"><span style="width:28.985507246376812%"></span></span>
+        <span class="val">60</span>
+      </div><div class="bar-row">
+        <span class="label">Natal, Rio Grande do Norte</span>
+        <span class="bar"><span style="width:28.502415458937197%"></span></span>
+        <span class="val">59</span>
+      </div><div class="bar-row">
+        <span class="label">São Bernardo do Campo, São Paulo…</span>
+        <span class="bar"><span style="width:24.637681159420293%"></span></span>
+        <span class="val">51</span>
+      </div><div class="bar-row">
+        <span class="label">São Caetano do Sul, São Paulo (s…</span>
+        <span class="bar"><span style="width:22.705314009661837%"></span></span>
+        <span class="val">47</span>
+      </div><div class="bar-row">
+        <span class="label">Rio de Janeiro, Rio de Janeiro (…</span>
+        <span class="bar"><span style="width:15.942028985507244%"></span></span>
+        <span class="val">33</span>
+      </div>
     </div>
     <div class="card">
       <h2>Top Countries By Followers</h2>
       <div class="section-desc">Geographical distribution of your followers.</div>
-      
+      <div class="bar-row">
+        <span class="label">BR</span>
+        <span class="bar"><span style="width:100%"></span></span>
+        <span class="val">1,283</span>
+      </div><div class="bar-row">
+        <span class="label">US</span>
+        <span class="bar"><span style="width:10.288386593920498%"></span></span>
+        <span class="val">132</span>
+      </div><div class="bar-row">
+        <span class="label">CA</span>
+        <span class="bar"><span style="width:1.6367887763055338%"></span></span>
+        <span class="val">21</span>
+      </div><div class="bar-row">
+        <span class="label">MX</span>
+        <span class="bar"><span style="width:0.779423226812159%"></span></span>
+        <span class="val">10</span>
+      </div><div class="bar-row">
+        <span class="label">AR</span>
+        <span class="bar"><span style="width:0.5455962587685114%"></span></span>
+        <span class="val">7</span>
+      </div><div class="bar-row">
+        <span class="label">PT</span>
+        <span class="bar"><span style="width:0.3897116134060795%"></span></span>
+        <span class="val">5</span>
+      </div><div class="bar-row">
+        <span class="label">AU</span>
+        <span class="bar"><span style="width:0.3117692907248636%"></span></span>
+        <span class="val">4</span>
+      </div><div class="bar-row">
+        <span class="label">ES</span>
+        <span class="bar"><span style="width:0.3117692907248636%"></span></span>
+        <span class="val">4</span>
+      </div>
     </div>
   </div>
 
@@ -1215,7 +1278,7 @@ From br… <a href="https://www.instagram.com/reel/DY-gg3CCTSO/" target="_blank"
   </div>
 
   <div style="text-align:center;color:var(--muted);font-size:11px;margin-top:32px">
-    Generated May 31, 2026, 4:57 PM · Data source: peacegrappler.db
+    Generated May 31, 2026, 6:10 PM · Data source: peacegrappler.db
   </div>
 
 </div>
@@ -1225,7 +1288,7 @@ const FOLLOWER_TREND = [];
 const REACH_BREAKDOWN = {"AD":108369,"CAROUSEL_CONTAINER":5139,"POST":3072,"REEL":51505,"STORY":1723};
 const VIEWS_BREAKDOWN = {"AD":159508,"CAROUSEL_CONTAINER":10929,"POST":8865,"REEL":351325,"STORY":11175};
 const INT_BREAKDOWN = {"AD":4992,"POST":3467,"REEL":59360,"STORY":104};
-const AGE_DIST = [{"bucket":"13-17","male":0,"female":0,"unknown":0},{"bucket":"18-24","male":0,"female":0,"unknown":0},{"bucket":"25-34","male":0,"female":0,"unknown":0},{"bucket":"35-44","male":0,"female":0,"unknown":0},{"bucket":"45-54","male":0,"female":0,"unknown":0},{"bucket":"55-64","male":0,"female":0,"unknown":0},{"bucket":"65+","male":0,"female":0,"unknown":0}];
+const AGE_DIST = [{"bucket":"13-17","male":21,"female":5,"unknown":4},{"bucket":"18-24","male":160,"female":35,"unknown":28},{"bucket":"25-34","male":417,"female":90,"unknown":74},{"bucket":"35-44","male":324,"female":70,"unknown":57},{"bucket":"45-54","male":119,"female":26,"unknown":21},{"bucket":"55-64","male":34,"female":7,"unknown":6},{"bucket":"65+","male":7,"female":2,"unknown":1}];
 const GENDER_TOTALS = {"Male":1081,"Female":234,"Unspecified":192};
 const POST_REACH = [{"date":"2026-05-02","value":0},{"date":"2026-05-03","value":0},{"date":"2026-05-04","value":223},{"date":"2026-05-05","value":227},{"date":"2026-05-06","value":0},{"date":"2026-05-07","value":0},{"date":"2026-05-08","value":0},{"date":"2026-05-09","value":0},{"date":"2026-05-10","value":0},{"date":"2026-05-11","value":2470},{"date":"2026-05-12","value":0},{"date":"2026-05-13","value":194},{"date":"2026-05-14","value":0},{"date":"2026-05-15","value":0},{"date":"2026-05-16","value":413},{"date":"2026-05-17","value":0},{"date":"2026-05-18","value":0},{"date":"2026-05-19","value":160},{"date":"2026-05-20","value":0},{"date":"2026-05-21","value":0},{"date":"2026-05-22","value":0},{"date":"2026-05-23","value":0},{"date":"2026-05-24","value":1885},{"date":"2026-05-25","value":445},{"date":"2026-05-26","value":2867},{"date":"2026-05-27","value":0},{"date":"2026-05-28","value":0},{"date":"2026-05-29","value":194},{"date":"2026-05-30","value":149},{"date":"2026-05-31","value":0}];
 const POST_VIEWS = [{"date":"2026-05-02","value":0},{"date":"2026-05-03","value":0},{"date":"2026-05-04","value":700},{"date":"2026-05-05","value":537},{"date":"2026-05-06","value":0},{"date":"2026-05-07","value":0},{"date":"2026-05-08","value":0},{"date":"2026-05-09","value":0},{"date":"2026-05-10","value":0},{"date":"2026-05-11","value":4783},{"date":"2026-05-12","value":0},{"date":"2026-05-13","value":523},{"date":"2026-05-14","value":0},{"date":"2026-05-15","value":0},{"date":"2026-05-16","value":1182},{"date":"2026-05-17","value":0},{"date":"2026-05-18","value":0},{"date":"2026-05-19","value":442},{"date":"2026-05-20","value":0},{"date":"2026-05-21","value":0},{"date":"2026-05-22","value":0},{"date":"2026-05-23","value":0},{"date":"2026-05-24","value":4675},{"date":"2026-05-25","value":1059},{"date":"2026-05-26","value":4344},{"date":"2026-05-27","value":0},{"date":"2026-05-28","value":0},{"date":"2026-05-29","value":436},{"date":"2026-05-30","value":419},{"date":"2026-05-31","value":0}];
