@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "generated": "2026-04-22T22:01:19.067223",
+  "video_path": "/Users/paxlucta/.openclaw/workspace/peace-grappler/output/generated/2026-04-22/hl-23-6.mp4",
+  "timeline": [
+    {
+      "type": "music",
+      "name": "metalicious",
+      "volume": 5
+    },
+    {
+      "type": "clip",
+      "video_file": "/Users/paxlucta/.openclaw/workspace/peace-grappler/raw-videos/mex_videos/1ItdWa0hAw9iS7sliuagdTJINlJKXBkFf_C8345clean.mov",
+      "start": 23.3,
+      "end": 27.86
+    },
+    {
+      "type": "transition",
+      "name": "fadeblack"
+    },
+    {
+      "type": "clip",
+      "video_file": "/Users/paxlucta/.openclaw/workspace/peace-grappler/raw-videos/mex_videos/1o1CuKzsZbFYfYuW9Zsg0X8kYUz-WZZP4_C8343clean.mov",
+      "start": 14.99,
+      "end": 19.82
+    },
+    {
+      "type": "transition",
+      "name": "wipeleft"
+    },
+    {
+      "type": "music",
+      "name": "eyesplit",
+      "volume": 5
+    },
+    {
+      "type": "clip",
+      "video_file": "/Users/paxlucta/.openclaw/workspace/peace-grappler/raw-videos/mex_videos/1ItdWa0hAw9iS7sliuagdTJINlJKXBkFf_C8345clean.mov",
+      "start": 27.86,
+      "end": 32.42
+    },
+    {
+      "type": "transition",
+      "name": "wipedown"
+    },
+    {
+      "type": "clip",
+      "video_file": "/Users/paxlucta/.openclaw/workspace/peace-grappler/raw-videos/mex_videos/1ItdWa0hAw9iS7sliuagdTJINlJKXBkFf_C8345clean.mov",
+      "start": 32.42,
+      "end": 36.98
+    },
+    {
+      "type": "transition",
+      "name": "slideright"
+    },
+    {
+      "type": "clip",
+      "video_file": "/Users/paxlucta/.openclaw/workspace/peace-grappler/raw-videos/mex_videos/1o1CuKzsZbFYfYuW9Zsg0X8kYUz-WZZP4_C8343clean.mov",
+      "start": 39.14,
+      "end": 43.96
+    }
+  ]
+}

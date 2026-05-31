@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "generated": "2026-04-22T23:33:01.852362",
+  "video_path": "/Users/paxlucta/.openclaw/workspace/peace-grappler/output/generated/2026-04-22/hl-20-10.mp4",
+  "timeline": [
+    {
+      "type": "music",
+      "name": "the-gatekeepers",
+      "volume": 3
+    },
+    {
+      "type": "clip",
+      "video_file": "/Users/paxlucta/.openclaw/workspace/peace-grappler/raw-videos/mex_videos/1ItdWa0hAw9iS7sliuagdTJINlJKXBkFf_C8345clean.mov",
+      "start": 15.1,
+      "end": 17.9
+    },
+    {
+      "type": "transition",
+      "name": "wipeup"
+    },
+    {
+      "type": "clip",
+      "video_file": "/Users/paxlucta/.openclaw/workspace/peace-grappler/raw-videos/mex_videos/1o1CuKzsZbFYfYuW9Zsg0X8kYUz-WZZP4_C8343clean.mov",
+      "start": 49.0,
+      "end": 52.7
+    },
+    {
+      "type": "transition",
+      "name": "coverleft"
+    },
+    {
+      "type": "clip",
+      "video_file": "/Users/paxlucta/.openclaw/workspace/peace-grappler/raw-videos/mex_videos/1o1CuKzsZbFYfYuW9Zsg0X8kYUz-WZZP4_C8343clean.mov",
+      "start": 12.5,
+      "end": 15.5
+    },
+    {
+      "type": "transition",
+      "name": "revealright"
+    },
+    {
+      "type": "clip",
+      "video_file": "/Users/paxlucta/.openclaw/workspace/peace-grappler/raw-videos/mex_videos/10Ci6BQo7jzQhhpuSAO182o9MrmZ-5IwI_C8351clean.mov",
+      "start": 15.2,
+      "end": 18.8
+    },
+    {
+      "type": "transition",
+      "name": "wipeleft"
+    },
+    {
+      "type": "clip",
+      "video_file": "/Users/paxlucta/.openclaw/workspace/peace-grappler/raw-videos/mex_videos/1o1CuKzsZbFYfYuW9Zsg0X8kYUz-WZZP4_C8343clean.mov",
+      "start": 65.4,
+      "end": 67.9
+    },
+    {
+      "type": "transition",
+      "name": "circleopen"
+    },
+    {
+      "type": "clip",
+      "video_file": "/Users/paxlucta/.openclaw/workspace/peace-grappler/raw-videos/mex_videos/1ItdWa0hAw9iS7sliuagdTJINlJKXBkFf_C8345clean.mov",
+      "start": 24.7,
+      "end": 28.2
+    },
+    {
+      "type": "transition",
+      "name": "diagbr"
+    },
+    {
+      "type": "clip",
+      "video_file": "/Users/paxlucta/.openclaw/workspace/peace-grappler/raw-videos/mex_videos/1o1CuKzsZbFYfYuW9Zsg0X8kYUz-WZZP4_C8343clean.mov",
+      "start": 27.5,
+      "end": 30.5
+    }
+  ]
+}

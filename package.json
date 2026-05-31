@@ -1,0 +1,13 @@
+{
+  "name": "peace-grappler",
+  "private": true,
+  "scripts": {
+    "init-db": "sqlite3 peacegrappler.db < schema.sql",
+    "sync": "node src/ig-sync.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.10.0",
+    "dotenv": "^16.4.5",
+    "xlsx": "^0.18.5"
+  }
+}

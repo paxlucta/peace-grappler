@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "generated": "2026-04-22T23:32:36.754069",
+  "video_path": "/Users/paxlucta/.openclaw/workspace/peace-grappler/output/generated/2026-04-22/hl-20-9.mp4",
+  "timeline": [
+    {
+      "type": "music",
+      "name": "the-gatekeepers",
+      "volume": 3
+    },
+    {
+      "type": "clip",
+      "video_file": "/Users/paxlucta/.openclaw/workspace/peace-grappler/raw-videos/mex_videos/1ItdWa0hAw9iS7sliuagdTJINlJKXBkFf_C8345clean.mov",
+      "start": 19.0,
+      "end": 23.3
+    },
+    {
+      "type": "transition",
+      "name": "hlslice"
+    },
+    {
+      "type": "clip",
+      "video_file": "/Users/paxlucta/.openclaw/workspace/peace-grappler/raw-videos/mex_videos/1Y6xrXmlt06FOAaao-_oeYEh6vCuoCwbz_C8353clean.mov",
+      "start": 0.2,
+      "end": 3.9
+    },
+    {
+      "type": "transition",
+      "name": "diagbr"
+    },
+    {
+      "type": "clip",
+      "video_file": "/Users/paxlucta/.openclaw/workspace/peace-grappler/raw-videos/mex_videos/1o1CuKzsZbFYfYuW9Zsg0X8kYUz-WZZP4_C8343clean.mov",
+      "start": 48.7,
+      "end": 51.8
+    },
+    {
+      "type": "transition",
+      "name": "revealleft"
+    },
+    {
+      "type": "clip",
+      "video_file": "/Users/paxlucta/.openclaw/workspace/peace-grappler/raw-videos/mex_videos/1o1CuKzsZbFYfYuW9Zsg0X8kYUz-WZZP4_C8343clean.mov",
+      "start": 21.5,
+      "end": 24.5
+    },
+    {
+      "type": "transition",
+      "name": "hlslice"
+    },
+    {
+      "type": "clip",
+      "video_file": "/Users/paxlucta/.openclaw/workspace/peace-grappler/raw-videos/mex_videos/1o1CuKzsZbFYfYuW9Zsg0X8kYUz-WZZP4_C8343clean.mov",
+      "start": 6.5,
+      "end": 9.5
+    },
+    {
+      "type": "transition",
+      "name": "diagtl"
+    },
+    {
+      "type": "clip",
+      "video_file": "/Users/paxlucta/.openclaw/workspace/peace-grappler/raw-videos/something/a9f23a49261b43c0bdee58e5beb34720.mp4",
+      "start": 6.7,
+      "end": 10.2
+    }
+  ]
+}

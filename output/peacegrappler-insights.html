@@ -1,0 +1,1350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PeaceGrappler — Insights</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #ffffff;
+    --page: #fafafa;
+    --card: #ffffff;
+    --border: #e5e7eb;
+    --text: #111827;
+    --muted: #6b7280;
+    --muted-2: #9ca3af;
+    --accent: #6366f1;
+    --accent-soft: #c7d2fe;
+    --pink: #ec4899;
+    --pink-soft: #fbcfe8;
+    --green: #10b981;
+    --red: #ef4444;
+    --yellow: #f59e0b;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--page); color: var(--text); line-height: 1.5; font-size: 14px; }
+  .container { max-width: 1080px; margin: 0 auto; padding: 24px 24px 64px; }
+
+  .topbar { display: flex; justify-content: space-between; align-items: center; padding-bottom: 12px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+  .topbar a { color: var(--accent); text-decoration: none; font-size: 13px; font-weight: 600; }
+  .topbar .date-range { color: var(--muted); font-size: 13px; }
+
+  .profile-row { display: flex; align-items: center; gap: 14px; padding: 14px 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); margin-bottom: 24px; }
+  .profile-row .name { font-weight: 700; font-size: 15px; }
+  .profile-row .handle { color: var(--muted); font-size: 13px; }
+
+  h1 { font-size: 26px; font-weight: 700; margin: 24px 0 16px; }
+  h2 { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+  .section-desc { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
+
+  .grid { display: grid; gap: 12px; }
+  .grid-4 { grid-template-columns: repeat(4, 1fr); }
+  .grid-2 { grid-template-columns: repeat(2, 1fr); }
+  .grid-3 { grid-template-columns: repeat(3, 1fr); }
+
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+
+  .metric-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; min-height: 120px; display: flex; flex-direction: column; justify-content: space-between; }
+  .metric-label { color: var(--muted); font-size: 13px; }
+  .metric-value { font-size: 32px; font-weight: 600; margin: 6px 0; color: var(--text); letter-spacing: -0.5px; }
+  .delta { font-size: 12px; font-weight: 600; }
+  .delta.up { color: var(--green); }
+  .delta.down { color: var(--red); }
+  .delta.flat { color: var(--muted); }
+  .delta-sub { color: var(--muted); font-weight: 400; }
+
+  .chart-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+  .chart-card .legend-row { display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .chart-card .delta-line { color: var(--muted); font-size: 12px; }
+  .chart-wrap { position: relative; height: 280px; }
+  .chart-wrap.tall { height: 320px; }
+  .chart-wrap.short { height: 220px; }
+
+  .legend-item { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin-right: 12px; }
+  .legend-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; padding: 10px 12px; color: var(--muted); font-weight: 500; font-size: 12px; border-bottom: 1px solid var(--border); }
+  td { padding: 10px 12px; border-bottom: 1px solid #f3f4f6; vertical-align: middle; }
+
+  .media-cell { display: flex; align-items: center; gap: 10px; min-width: 240px; }
+  .thumb { width: 38px; height: 38px; border-radius: 6px; object-fit: cover; background: #f3f4f6; }
+  .thumb-placeholder { width: 38px; height: 38px; border-radius: 6px; background: linear-gradient(135deg, #e5e7eb, #d1d5db); }
+  .media-meta { display: flex; flex-direction: column; }
+  .media-cap { font-size: 13px; color: var(--text); }
+  .media-time { font-size: 11px; color: var(--muted); }
+  .ext { color: var(--accent); text-decoration: none; font-size: 11px; padding: 0 4px; }
+
+  .demo-row { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; }
+  .pie-stats { display: flex; gap: 16px; justify-content: center; margin-top: 8px; }
+  .pie-stat { text-align: center; }
+  .pie-stat .pct { font-size: 18px; font-weight: 700; }
+  .pie-stat .label { font-size: 11px; color: var(--muted); }
+  .pie-stat.male .pct { color: var(--accent); }
+  .pie-stat.female .pct { color: var(--pink); }
+  .pie-stat.unspec .pct { color: var(--green); }
+
+  .heatmap { display: grid; grid-template-columns: 80px repeat(24, 1fr); gap: 2px; font-size: 10px; color: var(--muted); }
+  .heatmap .hh { text-align: center; padding: 2px 0; font-size: 10px; }
+  .heatmap .day-label { padding: 4px 6px; }
+  .heat-cell { height: 18px; border-radius: 2px; background: #f3f4f6; }
+  .heatmap-legend { display: flex; align-items: center; gap: 8px; justify-content: flex-end; margin-top: 8px; font-size: 11px; color: var(--muted); }
+  .legend-bar { width: 120px; height: 8px; background: linear-gradient(to right, #f3f4f6, var(--accent)); border-radius: 4px; }
+
+  .bar-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; font-size: 12px; }
+  .bar-row .label { width: 200px; color: var(--muted); text-align: right; flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar-row .bar { flex: 1; height: 14px; background: var(--accent-soft); border-radius: 3px; position: relative; }
+  .bar-row .bar > span { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+  .bar-row .val { width: 60px; color: var(--text); font-weight: 600; }
+
+  .pdf-note { font-size: 11px; color: var(--muted-2); margin-top: 8px; font-style: italic; }
+
+  @media (max-width: 800px) {
+    .grid-4 { grid-template-columns: repeat(2, 1fr); }
+    .grid-3 { grid-template-columns: 1fr; }
+    .grid-2 { grid-template-columns: 1fr; }
+    .demo-row { grid-template-columns: 1fr; }
+    .heatmap { grid-template-columns: 60px repeat(24, minmax(8px, 1fr)); font-size: 8px; }
+    .bar-row .label { width: 130px; font-size: 11px; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="topbar">
+    <a href="index.html">&larr; All Reports</a>
+    <div class="date-range">May 02, 2026 to May 31, 2026</div>
+  </div>
+
+  <div class="profile-row">
+    <div>
+      <div class="name">@peacegrappler</div>
+      <div class="handle">Peace Grappler | MMA Stories</div>
+    </div>
+  </div>
+
+  <h1>Instagram Profile</h1>
+
+  <div class="grid grid-4">
+    
+  <div class="metric-card">
+    <div class="metric-label">Total Followers</div>
+    <div class="metric-value">1.7K</div>
+    <div class="delta-sub">Lifetime Data</div>
+  </div>
+    
+  <div class="metric-card">
+    <div class="metric-label">Total Reach</div>
+    <div class="metric-value">169.2K</div>
+    <div class="delta flat"> 0% <span class="delta-sub">in last 30 days</span></div>
+  </div>
+    
+  <div class="metric-card">
+    <div class="metric-label">Total Views</div>
+    <div class="metric-value">539.7K</div>
+    <div class="delta flat"> 0% <span class="delta-sub">in last 30 days</span></div>
+  </div>
+    
+  <div class="metric-card">
+    <div class="metric-label">Total Interactions</div>
+    <div class="metric-value">67.2K</div>
+    <div class="delta flat"> 0% <span class="delta-sub">in last 30 days</span></div>
+  </div>
+    
+  <div class="metric-card">
+    <div class="metric-label">Interaction Rate</div>
+    <div class="metric-value">39.70%</div>
+    
+  </div>
+    
+  <div class="metric-card">
+    <div class="metric-label">Profile Link Taps</div>
+    <div class="metric-value">2</div>
+    <div class="delta flat"> 0% <span class="delta-sub">in last 30 days</span></div>
+  </div>
+  </div>
+
+  <div class="chart-card">
+    <h2>Follower Growth Trend</h2>
+    <div class="section-desc">Track followers gained.</div>
+    <div class="chart-wrap"><canvas id="ch_followers"></canvas></div>
+    <div class="legend-row">
+      <div></div>
+      <div><span class="legend-item"><span class="legend-dot" style="background:var(--accent)"></span>New Followers (0)</span></div>
+    </div>
+  </div>
+
+  <div class="chart-card">
+    <h2>Reach Insights</h2>
+    <div class="section-desc">Discover the number of unique users your content reached.</div>
+    <div class="chart-wrap short"><canvas id="ch_reach"></canvas></div>
+    <div class="legend-row">
+      <div class="delta-line">↓ 0% Since Previous Period</div>
+      <div>
+        <span class="legend-item"><span class="legend-dot" style="background:var(--accent)"></span>Follower (1.2K)</span>
+        <span class="legend-item"><span class="legend-dot" style="background:var(--pink)"></span>Non Follower (158.7K)</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="chart-card">
+    <h2>Views Insights</h2>
+    <div class="section-desc">Displays the number of users who have viewed your content.</div>
+    <div class="chart-wrap short"><canvas id="ch_views"></canvas></div>
+    <div class="legend-row">
+      <div class="delta-line">↓ 0% Since Previous Period</div>
+      <div>
+        <span class="legend-item"><span class="legend-dot" style="background:var(--accent)"></span>Follower (51.8K)</span>
+        <span class="legend-item"><span class="legend-dot" style="background:var(--pink)"></span>Non Follower (483.2K)</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="chart-card">
+    <h2>Interaction Insights</h2>
+    <div class="section-desc">Displays the interaction received on your content.</div>
+    <div class="chart-wrap short"><canvas id="ch_interactions"></canvas></div>
+    <div class="legend-row">
+      <div class="delta-line">↓ 0% Since Previous Period</div>
+      <div>
+        <span class="legend-item"><span class="legend-dot" style="background:#6b7280"></span>Ad (4,946)</span>
+        <span class="legend-item"><span class="legend-dot" style="background:var(--pink)"></span>Feed (3,465)</span>
+        <span class="legend-item"><span class="legend-dot" style="background:var(--green)"></span>Reel (58.7K)</span>
+        <span class="legend-item"><span class="legend-dot" style="background:var(--yellow)"></span>Story (104)</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="chart-card">
+    <div class="demo-row">
+      <div>
+        <h2>Audience Demographics</h2>
+        <div class="section-desc">Analyze your audience demographics by gender and age.</div>
+        <div class="chart-wrap"><canvas id="ch_demo"></canvas></div>
+      </div>
+      <div>
+        <h2>Gender Insights</h2>
+        <div class="section-desc">Since Previous Period</div>
+        <div class="chart-wrap short" style="height:200px"><canvas id="ch_gender"></canvas></div>
+        <div class="pie-stats">
+          <div class="pie-stat male"><div class="pct">72%</div><div class="label">Male</div></div>
+          <div class="pie-stat female"><div class="pct">16%</div><div class="label">Female</div></div>
+          <div class="pie-stat unspec"><div class="pct">13%</div><div class="label">Unspecified</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid grid-2">
+    <div class="card">
+      <h2>Top Cities By Followers</h2>
+      <div class="section-desc">Geographical distribution of your followers.</div>
+      
+    </div>
+    <div class="card">
+      <h2>Top Countries By Followers</h2>
+      <div class="section-desc">Geographical distribution of your followers.</div>
+      
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Profile Link Taps Insights</h2>
+    <div class="section-desc">Track user interaction on the links in your profile.</div>
+    <div class="bar-row">
+          <span class="label">Book Now</span>
+          <span class="bar"><span style="width:0%"></span></span>
+          <span class="val">0</span>
+        </div><div class="bar-row">
+          <span class="label">Call</span>
+          <span class="bar"><span style="width:0%"></span></span>
+          <span class="val">0</span>
+        </div><div class="bar-row">
+          <span class="label">Get Directions</span>
+          <span class="bar"><span style="width:0%"></span></span>
+          <span class="val">0</span>
+        </div><div class="bar-row">
+          <span class="label">Email</span>
+          <span class="bar"><span style="width:100%"></span></span>
+          <span class="val">2</span>
+        </div><div class="bar-row">
+          <span class="label">Text</span>
+          <span class="bar"><span style="width:0%"></span></span>
+          <span class="val">0</span>
+        </div><div class="bar-row">
+          <span class="label">Instant Experience</span>
+          <span class="bar"><span style="width:0%"></span></span>
+          <span class="val">0</span>
+        </div>
+    <div class="delta-line" style="margin-top:8px">↓ 0% Since Previous Period</div>
+  </div>
+
+  <div class="chart-card">
+    <h2>Followers Online Activity</h2>
+    <div class="section-desc">Engagement times derived from comment activity (proxy — IG no longer exposes online_followers).</div>
+    <div class="heatmap">
+      <div></div>
+      <div class="hh">12 AM</div><div class="hh">1 AM</div><div class="hh">2 AM</div><div class="hh">3 AM</div><div class="hh">4 AM</div><div class="hh">5 AM</div><div class="hh">6 AM</div><div class="hh">7 AM</div><div class="hh">8 AM</div><div class="hh">9 AM</div><div class="hh">10 AM</div><div class="hh">11 AM</div><div class="hh">12 PM</div><div class="hh">1 PM</div><div class="hh">2 PM</div><div class="hh">3 PM</div><div class="hh">4 PM</div><div class="hh">5 PM</div><div class="hh">6 PM</div><div class="hh">7 PM</div><div class="hh">8 PM</div><div class="hh">9 PM</div><div class="hh">10 PM</div><div class="hh">11 PM</div>
+      <div class="day-label">Monday</div><div class="heat-cell" style="background: rgba(99,102,241,0.05)" title="56 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.14)" title="150 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.06)" title="68 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.04)" title="39 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="0 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="0 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="0 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="0 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="0 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="1 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="1 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.02)" title="26 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.03)" title="34 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.19)" title="205 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.05)" title="53 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.01)" title="15 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.12)" title="128 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.45)" title="488 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.03)" title="28 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.04)" title="38 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.38)" title="407 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.03)" title="36 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.20)" title="213 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.18)" title="199 comments"></div><div class="day-label">Tuesday</div><div class="heat-cell" style="background: rgba(99,102,241,0.30)" title="321 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.19)" title="206 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.03)" title="28 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="0 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="0 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="0 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="4 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="2 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="0 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="0 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.01)" title="8 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.01)" title="7 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.02)" title="25 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.01)" title="11 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.01)" title="8 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.11)" title="123 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.21)" title="229 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.05)" title="55 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.11)" title="124 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.04)" title="45 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.01)" title="12 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.11)" title="123 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.15)" title="166 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.07)" title="73 comments"></div><div class="day-label">Wednesday</div><div class="heat-cell" style="background: rgba(99,102,241,0.29)" title="315 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.05)" title="53 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.17)" title="184 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="4 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="1 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="4 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="2 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="0 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="4 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="1 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.01)" title="6 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.23)" title="251 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="5 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.04)" title="40 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.02)" title="23 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.30)" title="329 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.16)" title="178 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.13)" title="140 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.04)" title="48 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="5 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.03)" title="31 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.26)" title="280 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,1.00)" title="1079 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.10)" title="104 comments"></div><div class="day-label">Thursday</div><div class="heat-cell" style="background: rgba(99,102,241,0.27)" title="295 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.03)" title="36 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.11)" title="116 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="4 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="0 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="4 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="3 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="0 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="2 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.02)" title="19 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.02)" title="23 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="5 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.02)" title="23 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="0 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.01)" title="16 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.18)" title="195 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.11)" title="120 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="5 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.01)" title="7 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.33)" title="356 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.05)" title="57 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.18)" title="194 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.40)" title="433 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.14)" title="156 comments"></div><div class="day-label">Friday</div><div class="heat-cell" style="background: rgba(99,102,241,0.36)" title="390 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.01)" title="6 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="4 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="1 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="0 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="0 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="0 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="2 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="0 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.01)" title="6 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.02)" title="19 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.02)" title="20 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.01)" title="7 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.01)" title="6 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.01)" title="14 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.18)" title="191 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.14)" title="149 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="3 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.02)" title="19 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.20)" title="214 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="5 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.37)" title="395 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.67)" title="719 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.17)" title="188 comments"></div><div class="day-label">Saturday</div><div class="heat-cell" style="background: rgba(99,102,241,0.29)" title="315 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.35)" title="382 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.01)" title="15 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="0 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.01)" title="6 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="0 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="0 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="0 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="1 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="4 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="4 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.05)" title="54 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.01)" title="10 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="0 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.01)" title="16 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.21)" title="226 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.19)" title="209 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.01)" title="10 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.02)" title="20 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.27)" title="286 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.15)" title="167 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.31)" title="334 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.57)" title="619 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.04)" title="39 comments"></div><div class="day-label">Sunday</div><div class="heat-cell" style="background: rgba(99,102,241,0.14)" title="150 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="4 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.25)" title="268 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.01)" title="6 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="0 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="0 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="0 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="0 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="0 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="4 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="2 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.03)" title="32 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.01)" title="6 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.00)" title="5 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.01)" title="15 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.14)" title="149 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.16)" title="177 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.14)" title="152 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.01)" title="13 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.29)" title="311 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.15)" title="162 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.06)" title="68 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.10)" title="110 comments"></div><div class="heat-cell" style="background: rgba(99,102,241,0.01)" title="12 comments"></div>
+    </div>
+    <div class="heatmap-legend"><span>Lower</span><span class="legend-bar"></span><span>Higher</span></div>
+  </div>
+
+  <h1>Instagram Post</h1>
+
+  <div class="grid grid-4">
+    
+  <div class="metric-card">
+    <div class="metric-label">Post Published</div>
+    <div class="metric-value">11</div>
+    <div class="delta up">↑ 57% <span class="delta-sub">in last 30 days</span></div>
+  </div>
+    
+  <div class="metric-card">
+    <div class="metric-label">Post Reach</div>
+    <div class="metric-value">9.2K</div>
+    
+  </div>
+    
+  <div class="metric-card">
+    <div class="metric-label">Post Views</div>
+    <div class="metric-value">19.0K</div>
+    
+  </div>
+    
+  <div class="metric-card">
+    <div class="metric-label">Post Interactions</div>
+    <div class="metric-value">3,282</div>
+    
+  </div>
+    
+  <div class="metric-card">
+    <div class="metric-label">Post Interaction Rate</div>
+    <div class="metric-value">35.66%</div>
+    
+  </div>
+    
+  <div class="metric-card">
+    <div class="metric-label">Post Comments</div>
+    <div class="metric-value">2,496</div>
+    
+  </div>
+    
+  <div class="metric-card">
+    <div class="metric-label">Post Saves</div>
+    <div class="metric-value">28</div>
+    
+  </div>
+    
+  <div class="metric-card">
+    <div class="metric-label">Post Shares</div>
+    <div class="metric-value">100</div>
+    
+  </div>
+    
+  <div class="metric-card">
+    <div class="metric-label">Post Likes</div>
+    <div class="metric-value">585</div>
+    
+  </div>
+  </div>
+
+  <div class="chart-card">
+    <h2>Post Reach &amp; Views Trend</h2>
+    <div class="section-desc">Daily reach and views of posts over time.</div>
+    <div class="chart-wrap"><canvas id="ch_post_trend"></canvas></div>
+    <div class="legend-row">
+      <div></div>
+      <div>
+        <span class="legend-item"><span class="legend-dot" style="background:var(--accent)"></span>Reach (9.2K)</span>
+        <span class="legend-item"><span class="legend-dot" style="background:var(--pink)"></span>Views (19.0K)</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="chart-card">
+    <h2>Post Interaction Trend</h2>
+    <div class="section-desc">Likes, comments, saves and shares over time.</div>
+    <div class="chart-wrap"><canvas id="ch_post_int"></canvas></div>
+    <div class="legend-row">
+      <div></div>
+      <div>
+        <span class="legend-item"><span class="legend-dot" style="background:var(--accent)"></span>Likes (585)</span>
+        <span class="legend-item"><span class="legend-dot" style="background:var(--pink)"></span>Comments (2,496)</span>
+        <span class="legend-item"><span class="legend-dot" style="background:var(--green)"></span>Saves (28)</span>
+        <span class="legend-item"><span class="legend-dot" style="background:var(--yellow)"></span>Shares (100)</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Post Performance</h2>
+    <div class="section-desc">Performance of your posts across all engagement metrics.</div>
+    <table>
+      <thead><tr><th>Posts</th><th>Reach</th><th>Interactions</th><th>Likes</th><th>Comments</th><th>Saves</th><th>Shares</th></tr></thead>
+      <tbody><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad3-2.cdninstagram.com/v/t51.82787-15/712227119_18050016464596388_6626819643471984192_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=111&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0FST1VTRUxfSVRFTS5iZXN0X2ltYWdlX3VybGdlbi5DMyJ9&amp;_nc_ohc=esuymWuMgI4Q7kNvwG4_GoE&amp;_nc_oc=Adocbs2YUTuygA-pF3oWNIP9hcfhg0zhOXxg8cXdDpqpgB3VvCt6d-Sc6mjQqq--yqjYk5Bnz9stTWgiJsRaVTpw&amp;_nc_zt=23&amp;_nc_ht=scontent-iad3-2.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;oh=00_Af-Uvgmv_x5NkaBSJBo51sXucLiuCQ2snMPknKed1Gl7kg&amp;oe=6A2213AC" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">🇧🇷 Deiveson Figueiredo e Song Yado… <a href="https://www.instagram.com/p/DY9yQjAFhfG/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 30, 2026, 11:00 AM</div>
+      </div>
+    </td>
+    <td>140</td>
+    
+    <td>150</td>
+    <td>26</td>
+    <td>119</td>
+    <td>2</td>
+    <td>0</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad6-1.cdninstagram.com/v/t51.82787-15/708853339_18049916918596388_3572889420518491806_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=106&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiRkVFRC5iZXN0X2ltYWdlX3VybGdlbi5DMyJ9&amp;_nc_ohc=JVyELtnEKNoQ7kNvwHrK29i&amp;_nc_oc=AdoDGym-FwSS8N7ghKjnZf_IEB0w2DZIAczAsy8tpFKBMEGFtKFcz2RczxzxlgMl9ijawyLH_nemzsCteAOXD5Ve&amp;_nc_zt=23&amp;_nc_ht=scontent-iad6-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;oh=00_Af_EfcqX9mhyWqHJCciSLIMgfMhn9ofGGhTCads2A7lcEA&amp;oe=6A223298" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">🇺🇸 Staying undefeated in the UFC i… <a href="https://www.instagram.com/p/DY78SBkGuJs/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 29, 2026, 5:50 PM</div>
+      </div>
+    </td>
+    <td>184</td>
+    
+    <td>249</td>
+    <td>35</td>
+    <td>183</td>
+    <td>1</td>
+    <td>20</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad3-1.cdninstagram.com/v/t51.82787-15/705374171_18048718148596388_3855629983071155142_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=108&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0FST1VTRUxfSVRFTS5iZXN0X2ltYWdlX3VybGdlbi5DMyJ9&amp;_nc_ohc=ZJltx4f65BIQ7kNvwFqmCfy&amp;_nc_oc=AdrYKKLIyrRlS-zG4KaflZU-xaLUciWDSMCO0yep3lNn6Ayv45t71WD_dsp7CNvrf_rStkEvFm4oOq-WFCBCPK_D&amp;_nc_zt=23&amp;_nc_ht=scontent-iad3-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;oh=00_Af9wZ-KrO-vkbw8OxHUDmpiV1cRVcPH5qDJsLEJbCbXFPg&amp;oe=6A22053C" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">🇺🇸 Part 2 😳🔥 Because apparently … <a href="https://www.instagram.com/p/DYzl7_DDhxk/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 26, 2026, 11:00 AM</div>
+      </div>
+    </td>
+    <td>2.9K</td>
+    
+    <td>289</td>
+    <td>62</td>
+    <td>184</td>
+    <td>1</td>
+    <td>31</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad3-1.cdninstagram.com/v/t51.82787-15/707048750_18049284848596388_8928884199939628562_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=108&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiRkVFRC5iZXN0X2ltYWdlX3VybGdlbi5DMyJ9&amp;_nc_ohc=MFqOM9itgjEQ7kNvwGdYick&amp;_nc_oc=AdqeIUA-H67zAFjipwxdLYtFQ5maJe7QmE1Sp3NKjHi2Raou2fafdPg8UdjNQORkOF7qMC4XxHa5wITrNQPluF3s&amp;_nc_zt=23&amp;_nc_ht=scontent-iad3-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;oh=00_Af_LLvktl0ycexG3wjhTudaCPw4PX-sF07mQaYhCswVHfg&amp;oe=6A222D61" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">🇧🇷 Figueiredo e Yadong entram em u… <a href="https://www.instagram.com/p/DYwsoZ6EXOD/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 25, 2026, 9:01 AM</div>
+      </div>
+    </td>
+    <td>444</td>
+    
+    <td>159</td>
+    <td>49</td>
+    <td>83</td>
+    <td>2</td>
+    <td>19</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad3-2.cdninstagram.com/v/t51.82787-15/695802770_18047556455596388_5726634013009652029_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=105&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0FST1VTRUxfSVRFTS5iZXN0X2ltYWdlX3VybGdlbi5DMyJ9&amp;_nc_ohc=TEUEVjet6O4Q7kNvwGXHxji&amp;_nc_oc=AdpbwyicWMU4Bx-AnkQ1B1-kAQb33tbFWyeQXFatoRZALs9n21Rk19VxWTJNUWBHELSkefzgebQu7pxsAAUijGa6&amp;_nc_zt=23&amp;_nc_ht=scontent-iad3-2.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;oh=00_Af9osDxsGGK28GyRoI8Ahcos3ibsPCCGvxpnGYbjeERZ8A&amp;oe=6A22390C" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">🇺🇸 Pure violence 😳🔥 These were s… <a href="https://www.instagram.com/p/DYsS-ZClDwn/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 24, 2026, 11:00 AM</div>
+      </div>
+    </td>
+    <td>1.9K</td>
+    
+    <td>227</td>
+    <td>48</td>
+    <td>162</td>
+    <td>3</td>
+    <td>7</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad6-1.cdninstagram.com/v/t51.82787-15/703880382_18048484112596388_4934900387484932982_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=106&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiRkVFRC5iZXN0X2ltYWdlX3VybGdlbi5DMyJ9&amp;_nc_ohc=qYHDxNiA-skQ7kNvwHpHqVE&amp;_nc_oc=AdpkwKeW-lapwi1SFgMGsoXQ6-RGQ7Y3dhjA7PLqel_1JJiwnD5OQlT9xX6SeEHaZMhssTNEUcAR9gykPehBAiaV&amp;_nc_zt=23&amp;_nc_ht=scontent-iad6-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;oh=00_Af_R0mBqzHTRwwIN8wBp5xacwO5m7K0mz1AXhK6CmZPX0Q&amp;oe=6A2225E0" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">🇺🇸 UFC rankings update week. With … <a href="https://www.instagram.com/p/DYiMVNEASLP/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 19, 2026, 5:50 PM</div>
+      </div>
+    </td>
+    <td>160</td>
+    
+    <td>177</td>
+    <td>33</td>
+    <td>137</td>
+    <td>1</td>
+    <td>1</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad3-1.cdninstagram.com/v/t51.82787-15/694734731_18046953707596388_4481305779023491002_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=101&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0FST1VTRUxfSVRFTS5iZXN0X2ltYWdlX3VybGdlbi5DMyJ9&amp;_nc_ohc=hVzdRELkByQQ7kNvwGZc14l&amp;_nc_oc=AdqHWGyVMVhe5Je_2lSDupSpYsBZ9g839Tkc7u8smVO9qOCCY3WtmBBjIXsSY-6ZS1-cL-vDbevjCj5SbRlwLTWM&amp;_nc_zt=23&amp;_nc_ht=scontent-iad3-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;oh=00_Af-BGVDImy9RG0XDnfOA1ohc2p4Ucyj_hT6UoGF3gQskLg&amp;oe=6A220DD1" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">🇧🇷Arnold Allen chega com guerra at… <a href="https://www.instagram.com/p/DYZ19nCDhEi/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 16, 2026, 11:00 AM</div>
+      </div>
+    </td>
+    <td>413</td>
+    
+    <td>411</td>
+    <td>69</td>
+    <td>335</td>
+    <td>3</td>
+    <td>0</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad6-1.cdninstagram.com/v/t51.82787-15/671183760_18047532146596388_7566107990746296913_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=107&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiRkVFRC5iZXN0X2ltYWdlX3VybGdlbi5DMyJ9&amp;_nc_ohc=kpRJDQcvdmMQ7kNvwG6_oLd&amp;_nc_oc=AdoQF0P-SnLoNNj8zzBhcejWxBXAx3U68MVkhJJpnXNGKB5RD4j2WsXZF9Q8adTdH7VYO0AmIEqBH5sNCL6vz-cr&amp;_nc_zt=23&amp;_nc_ht=scontent-iad6-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;oh=00_Af9WuV0-JjoGgfDzMf1e0O6mpJkGaljMElV_6mm6KjWDUg&amp;oe=6A2216CC" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">🇧🇷 Sean Strickland assume o topo d… <a href="https://www.instagram.com/p/DYSAyseFWLI/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 13, 2026, 11:00 AM</div>
+      </div>
+    </td>
+    <td>194</td>
+    
+    <td>417</td>
+    <td>34</td>
+    <td>371</td>
+    <td>4</td>
+    <td>3</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad6-1.cdninstagram.com/v/t51.82787-15/687605752_18047232620596388_2234396513592271239_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=107&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiRkVFRC5iZXN0X2ltYWdlX3VybGdlbi5DMyJ9&amp;_nc_ohc=dI8x0eq6UooQ7kNvwG7Rfeo&amp;_nc_oc=Adp1t_I0QM6Gj25eHt_8KsJTCX0_Hyn-t-_1Q3fdIfmyDyzQj3gDjork6HjvV_Bg6pLC7lHpa54dUVF4Xne4tfG0&amp;_nc_zt=23&amp;_nc_ht=scontent-iad6-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;oh=00_Af9xLiLBwQNH3FwRlhpGpnYHdhEgbI2acC_7ftOw8542Yg&amp;oe=6A223374" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">🇧🇷 Melk Costa encara o maior teste… <a href="https://www.instagram.com/p/DYMpbgzFc-v/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 11, 2026, 9:01 AM</div>
+      </div>
+    </td>
+    <td>2.5K</td>
+    
+    <td>506</td>
+    <td>138</td>
+    <td>344</td>
+    <td>9</td>
+    <td>5</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad3-1.cdninstagram.com/v/t51.82787-15/687104207_18046418555596388_3473701085457130873_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=104&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiRkVFRC5iZXN0X2ltYWdlX3VybGdlbi5DMyJ9&amp;_nc_ohc=Ci2fNleD7p8Q7kNvwEDx-UM&amp;_nc_oc=AdovpWGcbZBnt8bwAbyyEp0S5wtM8h7-CLUqRTK3wlx_Y6rZ00Q1noDT145NvTdANHrNCLahWwnQAdCDqClisX3n&amp;_nc_zt=23&amp;_nc_ht=scontent-iad3-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;oh=00_Af9GKQk-nvsDrgV--zkMxCdurxznKwO8-eT4lo7ZXJ5oDw&amp;oe=6A222B76" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">Os rankings mexeram… e não foi pouco… <a href="https://www.instagram.com/p/DX-JM71n598/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 05, 2026, 5:50 PM</div>
+      </div>
+    </td>
+    <td>227</td>
+    
+    <td>275</td>
+    <td>46</td>
+    <td>220</td>
+    <td>1</td>
+    <td>1</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad3-2.cdninstagram.com/v/t51.82787-15/685323053_18046194206596388_8150792047696390068_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=103&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiRkVFRC5iZXN0X2ltYWdlX3VybGdlbi5DMyJ9&amp;_nc_ohc=t0IMT7qmNRsQ7kNvwFOBuyl&amp;_nc_oc=AdpfqP8R1SXn8Yskjq6-IQemkYDx1hp4WttUDzz55ReIKtkHTzx8jSxXwO6wCzJSIp4HjEL3ci9cPPt9pKPDuDRJ&amp;_nc_zt=23&amp;_nc_ht=scontent-iad3-2.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;oh=00_Af-xEGykjpDnEi174m5Pne13ab3-K6aruICiJSWiIz0h5w&amp;oe=6A222DD0" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">Card imperdível!  Chimaev, invicto, … <a href="https://www.instagram.com/p/DX6n6EHFlNw/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 04, 2026, 9:00 AM</div>
+      </div>
+    </td>
+    <td>223</td>
+    
+    <td>422</td>
+    <td>45</td>
+    <td>358</td>
+    <td>1</td>
+    <td>13</td>
+  </tr></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Post Hashtag Performance</h2>
+    <div class="section-desc">Hashtag performance with average reach and interaction.</div>
+    <table>
+      <thead><tr><th>Hashtag</th><th>Post Count</th><th>Average Reach</th><th>Average Interaction</th></tr></thead>
+      <tbody>
+        <tr><td>UFC</td><td>11</td><td>837</td><td>298</td></tr><tr><td>MMA</td><td>10</td><td>904</td><td>311</td></tr><tr><td>PeaceGrappler</td><td>9</td><td>981</td><td>291</td></tr><tr><td>UFCRankings</td><td>3</td><td>194</td><td>290</td></tr><tr><td>Knockout</td><td>2</td><td>2.4K</td><td>258</td></tr><tr><td>TKO</td><td>2</td><td>2.4K</td><td>258</td></tr><tr><td>BrasilNoUFC</td><td>1</td><td>2.5K</td><td>506</td></tr><tr><td>FightNight</td><td>1</td><td>2.5K</td><td>506</td></tr><tr><td>UFCFightNight</td><td>1</td><td>444</td><td>159</td></tr><tr><td>UFCBrasil</td><td>1</td><td>444</td><td>159</td></tr><tr><td>MelkCosta</td><td>1</td><td>413</td><td>411</td></tr><tr><td>ArnoldAllen</td><td>1</td><td>413</td><td>411</td></tr><tr><td>FightTalk</td><td>1</td><td>227</td><td>275</td></tr><tr><td>Chimaev</td><td>1</td><td>223</td><td>422</td></tr><tr><td>Strickland</td><td>1</td><td>223</td><td>422</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h1>Instagram Reels</h1>
+
+  <div class="grid grid-4">
+    
+  <div class="metric-card">
+    <div class="metric-label">Reels Published</div>
+    <div class="metric-value">35</div>
+    <div class="delta down">↓ 57% <span class="delta-sub">in last 30 days</span></div>
+  </div>
+    
+  <div class="metric-card">
+    <div class="metric-label">Reels Reach</div>
+    <div class="metric-value">61.6K</div>
+    <div class="delta up">↑ 2503% <span class="delta-sub">in last 30 days</span></div>
+  </div>
+    
+  <div class="metric-card">
+    <div class="metric-label">Reels Interactions</div>
+    <div class="metric-value">16.3K</div>
+    <div class="delta up">↑ 10672% <span class="delta-sub">in last 30 days</span></div>
+  </div>
+    
+  <div class="metric-card">
+    <div class="metric-label">Reels Views</div>
+    <div class="metric-value">96.2K</div>
+    <div class="delta up">↑ 3432% <span class="delta-sub">in last 30 days</span></div>
+  </div>
+    
+  <div class="metric-card">
+    <div class="metric-label">Reel Interaction Rate</div>
+    <div class="metric-value">26.41%</div>
+    
+  </div>
+    
+  <div class="metric-card">
+    <div class="metric-label">Reels Saves</div>
+    <div class="metric-value">96</div>
+    <div class="delta up">↑ 4700% <span class="delta-sub">in last 30 days</span></div>
+  </div>
+    
+  <div class="metric-card">
+    <div class="metric-label">Reels Comments</div>
+    <div class="metric-value">11.4K</div>
+    <div class="delta up">↑ 10726% <span class="delta-sub">in last 30 days</span></div>
+  </div>
+    
+  <div class="metric-card">
+    <div class="metric-label">Reels Shares</div>
+    <div class="metric-value">1,598</div>
+    <div class="delta up">↑ 159700% <span class="delta-sub">in last 30 days</span></div>
+  </div>
+    
+  <div class="metric-card">
+    <div class="metric-label">Reels Likes</div>
+    <div class="metric-value">2.8K</div>
+    <div class="delta up">↑ 6983% <span class="delta-sub">in last 30 days</span></div>
+  </div>
+  </div>
+
+  <div class="chart-card">
+    <h2>Reels Reach &amp; Views Trend</h2>
+    <div class="section-desc">Daily reach and views of reels over time.</div>
+    <div class="chart-wrap"><canvas id="ch_reel_trend"></canvas></div>
+    <div class="legend-row">
+      <div></div>
+      <div>
+        <span class="legend-item"><span class="legend-dot" style="background:var(--accent)"></span>Reach (61.6K)</span>
+        <span class="legend-item"><span class="legend-dot" style="background:var(--pink)"></span>Views (96.2K)</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="chart-card">
+    <h2>Reels Interactions Trend</h2>
+    <div class="section-desc">Likes, saves, comments, and shares over time.</div>
+    <div class="chart-wrap"><canvas id="ch_reel_int"></canvas></div>
+    <div class="legend-row">
+      <div></div>
+      <div>
+        <span class="legend-item"><span class="legend-dot" style="background:var(--accent)"></span>Likes (2.8K)</span>
+        <span class="legend-item"><span class="legend-dot" style="background:var(--pink)"></span>Comments (11.4K)</span>
+        <span class="legend-item"><span class="legend-dot" style="background:var(--green)"></span>Saves (96)</span>
+        <span class="legend-item"><span class="legend-dot" style="background:var(--yellow)"></span>Shares (1,598)</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Reels Performance</h2>
+    <div class="section-desc">Compare performance metrics of your reels.</div>
+    <table>
+      <thead><tr><th>Reels</th><th>Reach</th><th>Views</th><th>Interactions</th><th>Likes</th><th>Comments</th><th>Saves</th><th>Shares</th></tr></thead>
+      <tbody><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad6-1.cdninstagram.com/v/t51.82787-15/713344332_18050082413596388_7377177192103960323_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=109&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=lCJlwgx_By0Q7kNvwG6Ezwq&amp;_nc_oc=AdpbLK_JkKco2UBRswujeZtsMtaowlSLrSTiGeNDgMgzNjEZduhc3oT3e5fgCKUr03WFgo5BompgDIyZE9QzuEcP&amp;_nc_zt=23&amp;_nc_ht=scontent-iad6-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQEwRQ4DyJi_2zuG4Ekuw-9Ui_Sp1OKuGB-CYxxWHb6xLAD0cyaCuI390xuiJn3GTav1Ddi6vAQc&amp;oh=00_Af9IH1XGCCD1rXiW3Mz2cAOoiRTuq4LtR7C7O09zHCoBYQ&amp;oe=6A222994" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">🇺🇸 UFC Macau delivered 🔥
+
+From br… <a href="https://www.instagram.com/reel/DY-gg3CCTSO/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 30, 2026, 5:45 PM</div>
+      </div>
+    </td>
+    <td>996</td>
+    <td>1.1K</td>
+    <td>180</td>
+    <td>37</td>
+    <td>65</td>
+    <td>0</td>
+    <td>67</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad3-2.cdninstagram.com/v/t51.82787-15/709546107_18049900331596388_4448019738994210671_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=105&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=cEPFiXZQ0AgQ7kNvwEEGD3B&amp;_nc_oc=Adrpz3AEKXwLjTZ6eiuw3QrYApyGHZCtEgQPE3j6r30dgM6BuYjtMwSUNjDOLfkNiYeJGqOUGh3WZCZU0siVPdHx&amp;_nc_zt=23&amp;_nc_ht=scontent-iad3-2.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQGZA_mj1ThkBjKjopQBHErc8gBNAC5C0P2QB7UzFl-MQRUGKkKtRQ1NlOhdXyndZgawgWnEgtdz&amp;oh=00_Af9bJO2m4OmrqMqYquuQIFn4yK8mtEsxpeNfNyPDXeTdQQ&amp;oe=6A2230AA" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">🇺🇸 The UFC built the most powerful… <a href="https://www.instagram.com/reel/DY5Xj4YFKcN/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 28, 2026, 5:50 PM</div>
+      </div>
+    </td>
+    <td>1.2K</td>
+    <td>1.9K</td>
+    <td>624</td>
+    <td>104</td>
+    <td>400</td>
+    <td>1</td>
+    <td>100</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad3-1.cdninstagram.com/v/t51.82787-15/707004664_18049633871596388_4290713282160665551_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=101&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=c-LebkMNUSkQ7kNvwEZN6tE&amp;_nc_oc=AdrV9XvJqpuAsMCtw0hd8c1bzQmdEebq5TwXKb9q2wp86zShWnhi6cFmmPkvMSkmyFgHJ13E8MacHBz6tTuU4r9P&amp;_nc_zt=23&amp;_nc_ht=scontent-iad3-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQE_b_PmmM3OE1aPbfNT8wZGDF1I4JkbC058TldezL5RcYAtA6KxVXBkTU0535_qNHedvJ5EbIWm&amp;oh=00_Af8_onuVqX3pEu_YKN_pSsw_iepuvQapYbQe7ITWPp6k6w&amp;oe=6A2222D4" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">🇧🇷 Prospectos, veteranos e lutador… <a href="https://www.instagram.com/reel/DY2yssik0c7/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 27, 2026, 5:50 PM</div>
+      </div>
+    </td>
+    <td>535</td>
+    <td>727</td>
+    <td>203</td>
+    <td>45</td>
+    <td>151</td>
+    <td>2</td>
+    <td>1</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad6-1.cdninstagram.com/v/t51.82787-15/706991130_18049351100596388_1895724349457503640_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=100&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=tnNbkYfx7yEQ7kNvwE5vzBa&amp;_nc_oc=AdosLVKPJ3CKHQZ9NRco5u577TT_d8rokRGEswWwesNCdn_6MU9lEWxXKQjfhIf_WkF7bAynqkKcI-SYVEs4xkzW&amp;_nc_zt=23&amp;_nc_ht=scontent-iad6-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQH-7IblPprazvZXH-AA3n4zABZB8Qoh7CSMi5AaI91upaIV6-2iFjfHlkcdgfhXEIqI-HEZY-X9&amp;oh=00_Af-oNGyoXBsRDt0rKjPn0GuHoHJhLrrcl-QMUgYkbmTA0Q&amp;oe=6A22052D" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">🇺🇸 The UFC gives visibility. The s… <a href="https://www.instagram.com/reel/DYxpHZ2ANOZ/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 25, 2026, 5:50 PM</div>
+      </div>
+    </td>
+    <td>791</td>
+    <td>1.2K</td>
+    <td>378</td>
+    <td>80</td>
+    <td>215</td>
+    <td>2</td>
+    <td>67</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad3-1.cdninstagram.com/v/t51.82787-15/706218899_18049037183596388_5555129461101870096_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=101&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=i2nrrJdrVp4Q7kNvwEytpoU&amp;_nc_oc=AdpNLJe8R7CKnroD8zEUaebgLDHiJlHEP1CxGkZ56_5hr-4MVkqe3fMjcAHu349bv-nP5SR6I09-fXiXauEdEVRr&amp;_nc_zt=23&amp;_nc_ht=scontent-iad3-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQH9T8k-7Lvr0cAI9hr5K1XwEwEW6qzhauPltnH9ddyJIGIGDSFRRSw_e5KgbTd_HWPZ8AKaQX7_&amp;oh=00_Af-Oe7nDCi-GQwVOqtHsqGicU_vxqqdqLD6tDNnuqM23qg&amp;oe=6A22129E" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">🇺🇸 “I created a monster.” 😳🇺🇸 
+… <a href="https://www.instagram.com/reel/DYsMGIBFCGk/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 23, 2026, 3:00 PM</div>
+      </div>
+    </td>
+    <td>494</td>
+    <td>927</td>
+    <td>483</td>
+    <td>75</td>
+    <td>378</td>
+    <td>4</td>
+    <td>16</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad6-1.cdninstagram.com/v/t51.82787-15/705061544_18048903833596388_6585466050100230795_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=100&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=JHI6pg9BOEYQ7kNvwHKmbSg&amp;_nc_oc=Adoe4QsPDQW1A58-b1k7VCk3FvGA8pTqZRKz1ppxvXd1AQZFOZYLv4x-23I4AOrVBFTuuyThwLof0FmQaja7MAI9&amp;_nc_zt=23&amp;_nc_ht=scontent-iad6-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQHzdxxwfjnZr3rRhs_D5msq95waSkegMH0cKzGzRI0grHvIuiS6ZKG64hNhXSEVHPM42MR6DodB&amp;oh=00_Af9Tj5SsC1uZjXm37cPMmGfHlGdGAnNkkqMKRQ0IZrAn4w&amp;oe=6A2223A8" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">🇧🇷 Ilia encurta distância muito be… <a href="https://www.instagram.com/reel/DYqBDLADXt1/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 22, 2026, 5:46 PM</div>
+      </div>
+    </td>
+    <td>5.5K</td>
+    <td>8.4K</td>
+    <td>1,039</td>
+    <td>240</td>
+    <td>631</td>
+    <td>3</td>
+    <td>144</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad3-1.cdninstagram.com/v/t51.82787-15/703948398_18048764720596388_9176895842323258872_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=101&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=Nonah-ij_KsQ7kNvwFxWNII&amp;_nc_oc=AdqU2lD10CGXVY5Buzv_dn5gRBoav863dnYveQwScT-XPJmDDsBeB8w_WLGY_Gcilx0xmRfVsK4Z3l9W18guklM9&amp;_nc_zt=23&amp;_nc_ht=scontent-iad3-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQH85DhGNS8fPFh8WQp4ZVOC7V8ye-WRCKscLGoFbTZ2G1oBdV6PpZgt7XHkvMlX8YchXfNEActT&amp;oh=00_Af-G2IrJ9m2-y8OrBknDMmmUGcdUI2hR-RqcWpHf0S9WLQ&amp;oe=6A223582" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">🇺🇸 For the first time, attention w… <a href="https://www.instagram.com/reel/DYnVXO5iGsM/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 21, 2026, 5:45 PM</div>
+      </div>
+    </td>
+    <td>508</td>
+    <td>835</td>
+    <td>414</td>
+    <td>59</td>
+    <td>331</td>
+    <td>1</td>
+    <td>15</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad6-1.cdninstagram.com/v/t51.82787-15/702763703_18048625568596388_4748314176671048657_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=102&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=rgzRo9hdiDAQ7kNvwE2QV2U&amp;_nc_oc=AdrSxmVDVsP0nHgXbmdkvrV7m1v3f_qM1-qZ6Ox-ZDTyUYGOAmqd0MTQWwd2488iP5PVzvQpF0aVk7yeqtaXXNpl&amp;_nc_zt=23&amp;_nc_ht=scontent-iad6-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQHQVK09l91M19tz6q_KrCByrzXBFY9eWQWWEyG6fpDaqBrxxrmjPq_GRO8yX0FJLUj03Q7GtxtS&amp;oh=00_Af_6dy2UD8_snAnn4y2dOGqoradNBXezpZk9V97Kvu-Fzw&amp;oe=6A220D69" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">🇺🇸 From legends like Jon Jones, Is… <a href="https://www.instagram.com/reel/DYkxM5pDaR3/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 20, 2026, 5:50 PM</div>
+      </div>
+    </td>
+    <td>967</td>
+    <td>1.3K</td>
+    <td>547</td>
+    <td>83</td>
+    <td>362</td>
+    <td>3</td>
+    <td>91</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad3-2.cdninstagram.com/v/t51.71878-15/694075960_2402498113593630_6058463684291304093_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=103&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=VQKsHpiJOMMQ7kNvwG09sER&amp;_nc_oc=AdoxfLGbTSLPD9RY6CIO2WEYlMhK9vUsncjzJAwgpIC-jLnxKas3mzzMdH7biLfp2xeFpmEoY26wgDhoSqMtU7UG&amp;_nc_zt=23&amp;_nc_ht=scontent-iad3-2.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQGIrOhpcTXPuCHRr2tX4BOYfO_7Jqo3z_fso6P_ZIuj4rvraTOBhW8YdEOWZCRzzy-oc9zbIp46&amp;oh=00_Af-JZh3DEXZnZ5JWdYJhyG_2G5ER2anuJE1LQQTTDXZUlA&amp;oe=6A220857" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">🇧🇷Os rankings oficiais do UFC são … <a href="https://www.instagram.com/reel/DYQRpjIh64W/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 18, 2026, 5:50 PM</div>
+      </div>
+    </td>
+    <td>1.8K</td>
+    <td>3.5K</td>
+    <td>621</td>
+    <td>115</td>
+    <td>324</td>
+    <td>6</td>
+    <td>157</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad3-1.cdninstagram.com/v/t51.82787-15/703299235_18048363677596388_3706393617024890666_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=110&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=purgJ4ptbg4Q7kNvwEO5UAZ&amp;_nc_oc=AdrGeNBvl9YEx5Fe2avJiwG9krr_0kkWmJAMcePumvFytRGs9mKmc97chdOJ150LYWvInhXX5S6gfamG5JN6I6zb&amp;_nc_zt=23&amp;_nc_ht=scontent-iad3-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQH1rf7RAKcmoM0KSaAKKcBsapMpepvEl1y0k4mpygu0usihV8eYxF2A4U_Sh_lZ5DqwukRuieN-&amp;oh=00_Af-U92XxD0mH7nCYAeRBcwMhenTRsTKx0g42xwv_br2oTQ&amp;oe=6A2235F3" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">#ufc all #knockout s &amp; #submission s… <a href="https://www.instagram.com/reel/DYc3k6kB2jn/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 17, 2026, 3:17 PM</div>
+      </div>
+    </td>
+    <td>261</td>
+    <td>397</td>
+    <td>405</td>
+    <td>33</td>
+    <td>365</td>
+    <td>1</td>
+    <td>3</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad3-2.cdninstagram.com/v/t51.82787-15/698765789_18047712926596388_4222975066662756770_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=111&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=V-3yv8iyNdAQ7kNvwG2lxEi&amp;_nc_oc=AdpTkbVJCcafty4NM2AZsU-m4CZB0h8UQaT-yplUOwSnxXZq55_WEBc72zunJV-cWFjsFNwRSQ5S3VbOOZcx2Rjd&amp;_nc_zt=23&amp;_nc_ht=scontent-iad3-2.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQE1oVruqvkj0QD3o0l7U8Fe9IV9IOc_O2asuYb1eJytnjzT8U5ciDhDT9tCk279IPRPrkINDnOj&amp;oh=00_Af9DVRuZCTH_2uvQl2HN1ldQQ86M-y1gyaGZ1luIj2vyRw&amp;oe=6A2218F9" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">🇧🇷 Arnold Allen tava confortável n… <a href="https://www.instagram.com/reel/DYPivQ2htWW/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 16, 2026, 3:00 PM</div>
+      </div>
+    </td>
+    <td>16.8K</td>
+    <td>18.6K</td>
+    <td>407</td>
+    <td>46</td>
+    <td>344</td>
+    <td>2</td>
+    <td>9</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad6-1.cdninstagram.com/v/t51.82787-15/700092173_18047712848596388_5197375858522495904_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=102&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=z5F33gFlsuQQ7kNvwGpSgwk&amp;_nc_oc=AdqpxUue84_tkxBoNKrK7XM6ACu9X7bRoHLoi1WpfGu9ea1J5ewsGVEa9ZCOsVkrrwVyDYi-xCm9YZ7tNtrGFhFN&amp;_nc_zt=23&amp;_nc_ht=scontent-iad6-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQHx48VAUSPT_ajw5hp6dzh3qAYTWDP5mlbv2VlgkGNHOnf0PU4UOeHIzZ4SDxT94o3-htE-LkZD&amp;oh=00_Af8E0k-jaRNG5TQ7yVWT9UESb9XCwJ1Dn3YB7lG-3arPKA&amp;oe=6A2229F1" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">🇧🇷 Daniel Willycat Santos sabe o t… <a href="https://www.instagram.com/reel/DYYAC9aBgaL/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 15, 2026, 8:00 PM</div>
+      </div>
+    </td>
+    <td>2.7K</td>
+    <td>3.4K</td>
+    <td>252</td>
+    <td>69</td>
+    <td>173</td>
+    <td>2</td>
+    <td>2</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad3-2.cdninstagram.com/v/t51.82787-15/699779487_18047900348596388_2610556636952996921_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=105&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=sWosjYCoSQEQ7kNvwFhGNKY&amp;_nc_oc=AdoNym3ZGW-cXMGb1gGZ190V5BZUpuilL9897VvKVIspOL7eOCzHDk5RrYf9IKr4KN4WSMKsROltUIUygCN16j7_&amp;_nc_zt=23&amp;_nc_ht=scontent-iad3-2.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQH5zX5CBMx3G_QgFB47jHZujPzaw1KaWY1JT95G-IxUTD-0UGKP6W6Mto65Nv6WdFme-c64E3wd&amp;oh=00_Af_DpfeloLuTSwQnghMT5_PmCqNQQojMFqDls_Xk9fHdnQ&amp;oe=6A2224CD" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">🇺🇸 Francis Ngannou is walking in w… <a href="https://www.instagram.com/reel/DYYEfoXCI49/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 15, 2026, 6:30 PM</div>
+      </div>
+    </td>
+    <td>1.5K</td>
+    <td>2.1K</td>
+    <td>680</td>
+    <td>73</td>
+    <td>495</td>
+    <td>4</td>
+    <td>91</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad6-1.cdninstagram.com/v/t51.82787-15/700103270_18047712755596388_481582308049548277_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=106&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=CirkUw4OiHgQ7kNvwH5ehIL&amp;_nc_oc=AdrDzSy1jLs9-kDq7MJRFOvGQvyhUtCVb6vA4lOQ5x59ohIp4UzSCd4L5ddHlaKmphf9_sdU-wjsLpejbfACwZzC&amp;_nc_zt=23&amp;_nc_ht=scontent-iad6-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQER0T70TRsHG8JjpM1XXsFO-kXDy0iUHWNYZVauA-aE41EEKzkk8VsA79h106BpJXKOGfLDI9Vt&amp;oh=00_Af9lpnrwjqII2GfLOVgAcWmkG_SWm5tXPrF6SyAR5U3gXg&amp;oe=6A22190B" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">🇧🇷 Melk Costa abriu o coração ao f… <a href="https://www.instagram.com/reel/DYXRJK-Bb8M/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 15, 2026, 11:00 AM</div>
+      </div>
+    </td>
+    <td>785</td>
+    <td>10.8K</td>
+    <td>572</td>
+    <td>77</td>
+    <td>402</td>
+    <td>2</td>
+    <td>79</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad6-1.cdninstagram.com/v/t51.82787-15/700102359_18047738756596388_873004768941951973_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=107&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=pRXrgDw3fVYQ7kNvwHU4V3b&amp;_nc_oc=AdoMtQ6QJ71AzGNXQIP2DM5iUQOk5gG_jyS2La3GoRHmsJ3cbpQtPczErnNHLUUG7P_wMKouLJ4vc6Yne3LpenqA&amp;_nc_zt=23&amp;_nc_ht=scontent-iad6-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQFUVoM-6hAx5TVSMLC0BWddwaPmQUzmpzgmH9KRD4ATVC942VxgylZQwudMAizk5jIBOCnNPvlg&amp;oh=00_Af8ao7APasthxTiIGIeBkvzTqIo-AEKas6wJZsgl3jXV-A&amp;oe=6A223133" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">🇧🇷 Philipe Lins, Junior dos Santos… <a href="https://www.instagram.com/reel/DYVUXR3Dj5G/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 14, 2026, 5:50 PM</div>
+      </div>
+    </td>
+    <td>374</td>
+    <td>577</td>
+    <td>442</td>
+    <td>34</td>
+    <td>402</td>
+    <td>2</td>
+    <td>0</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad6-1.cdninstagram.com/v/t51.82787-15/695101753_18047843795596388_1970668943504550333_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=102&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=BOb6QlU4npoQ7kNvwHNoNDS&amp;_nc_oc=AdquyjPQK14uYZ0wYcMUMZUzhliwO_Py-v9T8uamVLK8HdfUepWY_YogkZeSwO_3dH4lHDeKxSKSuQwFksqDFJkx&amp;_nc_zt=23&amp;_nc_ht=scontent-iad6-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQGDBktY9fZmyRadLSHqRO0sS8fXZ1a7uEiqpTF6bWZYNYJxej-yia9FYn_jhAmCmnwtaaBTYYyr&amp;oh=00_Af90RUUTHm18egoop6HN74s_g_USQCTN7RAAVFPQeiBT4g&amp;oe=6A220418" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">🇧🇷 O Brasil chega forte com Melk C… <a href="https://www.instagram.com/reel/DYSvm9qF4qR/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 13, 2026, 5:50 PM</div>
+      </div>
+    </td>
+    <td>852</td>
+    <td>1.2K</td>
+    <td>438</td>
+    <td>61</td>
+    <td>313</td>
+    <td>2</td>
+    <td>50</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad6-1.cdninstagram.com/v/t51.71878-15/693400171_1672515367330047_2556157635567350069_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=109&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=XwwGdh5IHvoQ7kNvwESJp6j&amp;_nc_oc=Ado2FWnS0BhR9cQ3tDlnnNmoAkimKpRg_GQJITPgrX4LpUKX7ahgOUwuwRUVs4UtI0iLhFefk2myjPSY3BRtzJoR&amp;_nc_zt=23&amp;_nc_ht=scontent-iad6-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQG0yEOuhmjdWQ4QjF-ZsQjwzFmH3JORquaINO7mXZhUOVVIxOvsTmF0aw52wZX8_U6UPL6L7VP4&amp;oh=00_Af8t9s6YRvioz9Q1pwaoODQbgDAPgo0346o9vPny99g7LQ&amp;oe=6A22303C" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">🇺🇸 Poatan looks like a final boss … <a href="https://www.instagram.com/reel/DYQQy6jhr-H/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 12, 2026, 5:43 PM</div>
+      </div>
+    </td>
+    <td>564</td>
+    <td>992</td>
+    <td>430</td>
+    <td>65</td>
+    <td>342</td>
+    <td>3</td>
+    <td>9</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad6-1.cdninstagram.com/v/t51.82787-15/689498505_18047299349596388_5070276541701247207_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=100&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=3hBpx3tqKdkQ7kNvwEjVEhv&amp;_nc_oc=Ado7vzNvOaXD2Ms0J7UNqpyJZlCP7_E-MF2Z8M_8_yd5I86VnKR3icEi7Jl1kaHQqadhlLk4EbumG-ffSuiDW6tf&amp;_nc_zt=23&amp;_nc_ht=scontent-iad6-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQE364Eo_2TLqkE0DYmeWNWVuqY3lThMggCm8HlVfnLmqmwNzGZOUWszvA1ZUS438EtvwkalNZ3-&amp;oh=00_Af_jyvJNzSm1IFTUwLaJOGycpCAHDE-_tC8wvAkb4LEmJg&amp;oe=6A221DB7" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">🇧🇷 Tem gente ganhando dinheiro só … <a href="https://www.instagram.com/reel/DYPU-GzhSgi/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 11, 2026, 6:26 PM</div>
+      </div>
+    </td>
+    <td>2.6K</td>
+    <td>3.7K</td>
+    <td>574</td>
+    <td>99</td>
+    <td>298</td>
+    <td>11</td>
+    <td>141</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad3-1.cdninstagram.com/v/t51.71878-15/689014590_955526433996838_5675418956385856319_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=101&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=b5VDkHIjLsIQ7kNvwFTvNKe&amp;_nc_oc=Adp4TNnN4DM2UJJYHFk8kzqYrHho70JAiUm5K2vQHQZBFdBz2WXzVSIsYx1ia2nTVHEUgqG1PESbZii_a-kPsAHB&amp;_nc_zt=23&amp;_nc_ht=scontent-iad3-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQFh3dWDitCEkBOJOJLOvAnz5EEnn7O3uR0reeZHk76BFnWlY1kf0M2pIbiUoV_nWyNikq3WC_7B&amp;oh=00_Af9wc_eWmUj_jw4hQlRtYcVJYpyRo8yQ9qTYXK-6D_Ag-A&amp;oe=6A22317C" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">💀 This card was pure violence. Knoc… <a href="https://www.instagram.com/reel/DYKb8eauP4I/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 10, 2026, 11:25 AM</div>
+      </div>
+    </td>
+    <td>1.0K</td>
+    <td>1.2K</td>
+    <td>504</td>
+    <td>47</td>
+    <td>435</td>
+    <td>1</td>
+    <td>12</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad6-1.cdninstagram.com/v/t51.82787-15/687961736_18046980737596388_6480034924259122793_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=106&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=1RinWu2CFa4Q7kNvwHTtI6D&amp;_nc_oc=AdolJsM2TPf3Err0L8kCvbsNsKIU6XoCdILmNEqGKPlXumtzOd82241jK4EYDoR4_s8hfRsh6JBAJWmSwL2Z7_zW&amp;_nc_zt=23&amp;_nc_ht=scontent-iad6-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQEPH6zujiBUAb44P-Ws6zkAlSdwt9834u2zVvigDv8XKPjH_hV7D4CJZ6uDJn6UkhJFTwOGGfBU&amp;oh=00_Af_5cpBjryPee0w_rfPSS2WtaaPVxniamta1mLnCa3cf8Q&amp;oe=6A22356A" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">🇧🇷 Chimaev falou… e o caos começou… <a href="https://www.instagram.com/reel/DYII9sHjWiW/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 09, 2026, 3:00 PM</div>
+      </div>
+    </td>
+    <td>573</td>
+    <td>1.0K</td>
+    <td>256</td>
+    <td>62</td>
+    <td>181</td>
+    <td>4</td>
+    <td>1</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad3-2.cdninstagram.com/v/t51.71878-15/685173599_967507055857983_6489069623402880091_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=105&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=Oalb77woaGIQ7kNvwHQUGFI&amp;_nc_oc=Ado382FcKukzyXKOgFjq5VLlyHS2ZVBwIVYYdYNpXx4EPQo6ZdpEQ_HRRgKSQaVjT4jZBa4ZbN-h9ADMPQICE3TC&amp;_nc_zt=23&amp;_nc_ht=scontent-iad3-2.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQFBCqnR5fizG6KARZoDNaGNVXdoXCJxynmhSbWbnBUpmg5JaGQmJ0XSym_DTORmOwUIRpCeRpnA&amp;oh=00_Af-BRSOjbwBIA9JOiB-FbvECuQmkrK3GP504qdCANzRCug&amp;oe=6A2231C4" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">🇧🇷 Waldo Cortes-Acosta já deixou c… <a href="https://www.instagram.com/reel/DX7rXk1B1GX/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 09, 2026, 11:00 AM</div>
+      </div>
+    </td>
+    <td>134</td>
+    <td>295</td>
+    <td>214</td>
+    <td>27</td>
+    <td>173</td>
+    <td>2</td>
+    <td>4</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad6-1.cdninstagram.com/v/t51.82787-15/689228495_18046863914596388_2708755609010688329_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=107&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=1vv8KsEbWRcQ7kNvwFXWA4G&amp;_nc_oc=Adrjvw6h7Q1Vx3c_5g0TnQcfkxVJgbETHchbqgsMSIZznrbK6oKnpHhFt2iwcZK31Xj1WR57hf9aN1l2cZVUnoCe&amp;_nc_zt=23&amp;_nc_ht=scontent-iad6-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQHll3HXGlE2vvNqim_aD7aSUTeNeEhZIuO1m7Cqa-j1lGRQSkKSSFnSWeYdmMbFLTos61SYiaPw&amp;oh=00_Af80Q0sP8XiLEEOum-V3T0Up-VXuxY3PoeOWYvAe6nJX5w&amp;oe=6A221CFB" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">Josh Hokit x Ilia Topuria !!!! Show … <a href="https://www.instagram.com/reel/DYGOKC2hdxX/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 08, 2026, 8:09 PM</div>
+      </div>
+    </td>
+    <td>2.1K</td>
+    <td>3.5K</td>
+    <td>556</td>
+    <td>117</td>
+    <td>376</td>
+    <td>5</td>
+    <td>42</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad6-1.cdninstagram.com/v/t51.71878-15/684078393_1648285689777375_7828838674134780479_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=102&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=SOYM_tzrSn8Q7kNvwFdU40X&amp;_nc_oc=AdqrGlKjcxNU99T1HkphH6fCX5IeFpfbqbjpFvioiIPStBSkELxHWOw4J2z_9hjUipqsWhjt6c3vuFU_UibE5Zjm&amp;_nc_zt=23&amp;_nc_ht=scontent-iad6-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQEO3hiZ9r_kYleOZOCDX-Yqe2YNdMgrXLH3V76UkwMncNwnMGfn5y0AxhpRD2ORctB4QtSdZ02h&amp;oh=00_Af-61cxrh21mkjBetzZNCbdqgZcZwJlVUB0YmyNkTE9uZg&amp;oe=6A222227" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">🇧🇷 Chimaev e Strickland já começar… <a href="https://www.instagram.com/reel/DYCq0m8h8A_/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 08, 2026, 5:50 PM</div>
+      </div>
+    </td>
+    <td>470</td>
+    <td>790</td>
+    <td>523</td>
+    <td>50</td>
+    <td>451</td>
+    <td>3</td>
+    <td>9</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad3-1.cdninstagram.com/v/t51.82787-15/685378998_18046808468596388_3006778321148990064_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=108&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=7ovIUxfUg3IQ7kNvwFmropp&amp;_nc_oc=AdpRl_SV2Tbptw4QnKAkJ1NOjvDUsIOLsIcMvcj38J8FiWo_ZzBJ6fofWTAQApWrjJOPjIlyziysOw4nYcVwHP4D&amp;_nc_zt=23&amp;_nc_ht=scontent-iad3-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQHRIcyQ7QsjvE6ktliY56XoM_40UPSOBxURace9lNoXVNsaYE-oCHXEDNTUIEfa1jv2DKpSXTu5&amp;oh=00_Af-RGJd6_b4qakX7gGl0HQ0q4lURqerTDrbtU170c4jDOw&amp;oe=6A22341A" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">Prepare-se para uma noite pesada de … <a href="https://www.instagram.com/reel/DYFI1-Pmte5/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 08, 2026, 11:00 AM</div>
+      </div>
+    </td>
+    <td>544</td>
+    <td>831</td>
+    <td>332</td>
+    <td>63</td>
+    <td>225</td>
+    <td>1</td>
+    <td>34</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad3-1.cdninstagram.com/v/t51.82787-15/689095351_18046697117596388_2953703526575331851_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=110&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=Ws630ELjH60Q7kNvwHd9k16&amp;_nc_oc=AdoNact_rwBJj06U-Ws5sSG-uY3b0W9ehsfeTlE02-vPK3_xqHLsn1YLvutZoGvSMvTJfwXNk9g2sxHwC7bd6_84&amp;_nc_zt=23&amp;_nc_ht=scontent-iad3-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQGnGr6bPwZOBRN9UrjhcocqOUhiXGHJjudz2JEi8_L2Z3LBt-veltN0IshZQDzR8eh7T1-yYInh&amp;oh=00_Af-emX9Z-CGcbKDnl7vtS5681eV51nswakJtVnLaW7qbdA&amp;oe=6A2209F8" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">🇺🇸 Our take on Strickland vs Chima… <a href="https://www.instagram.com/reel/DYC_oXnj3Yf/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 07, 2026, 3:00 PM</div>
+      </div>
+    </td>
+    <td>559</td>
+    <td>919</td>
+    <td>535</td>
+    <td>72</td>
+    <td>360</td>
+    <td>3</td>
+    <td>84</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad3-2.cdninstagram.com/v/t51.82787-15/672412858_18046668248596388_7431596748995437968_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=111&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=s1MY0w2vQFwQ7kNvwEIZGJU&amp;_nc_oc=Adrf44uBqV_kGlErZKVqNeeVl6nBTPsHWoqjcRFf-3zdjkjMG9H2dqvzqzf1Kb_NE7-oz9EARjaS8tN3i2--OoyB&amp;_nc_zt=23&amp;_nc_ht=scontent-iad3-2.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQG2SP-IIM0C72uesO_fBhZ-_r2RpItEjjs8flCsJ8YNuA99yUgFrjbkrZ41-95aQgHTmgjQ5dvk&amp;oh=00_Af9mai6XdgDnikNrWuEmbbBI4Xzg01vhn3aXkuuQxz7OcQ&amp;oe=6A220762" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">Sean Strickland respondeu aos coment… <a href="https://www.instagram.com/reel/DYCj8JLHU3v/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 07, 2026, 11:00 AM</div>
+      </div>
+    </td>
+    <td>1.3K</td>
+    <td>1.8K</td>
+    <td>438</td>
+    <td>70</td>
+    <td>325</td>
+    <td>3</td>
+    <td>33</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad6-1.cdninstagram.com/v/t51.71878-15/671780648_1306289901445750_4375168642505418430_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=109&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=_1sRvuGAUV0Q7kNvwE8p6gw&amp;_nc_oc=Adp1amQ-aiuT-dSvpLRR2WFzOtQKEMqdwSce7bO_LIGF-iNFSpRcmPLuoU2i0UoDvWBxv0JRd2K4pBnxE9TL1-mf&amp;_nc_zt=23&amp;_nc_ht=scontent-iad6-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQH17DXSfsK1NreoEaIlKp6o9Z7_rTkgQZojKkr6joL2ddLT_0Gj9NrcilNdG7R3KkvtRa_w6GtF&amp;oh=00_Af93BdKHNzMZ_mclgHQQKXQE-zoKgJy02Zr0CtoNbfa0mw&amp;oe=6A22173B" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">🇺🇸 Islam wants Prates… but is he a… <a href="https://www.instagram.com/reel/DYA3wdihQQm/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 06, 2026, 6:15 PM</div>
+      </div>
+    </td>
+    <td>3.5K</td>
+    <td>4.6K</td>
+    <td>1,192</td>
+    <td>136</td>
+    <td>843</td>
+    <td>2</td>
+    <td>183</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad6-1.cdninstagram.com/v/t51.82787-15/686289816_18046526393596388_2032906237072311178_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=102&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=WWA1VQDp4eQQ7kNvwHi73pd&amp;_nc_oc=AdoUy7HqPE0yxp7WblaPcbml7WYs-LI7F-wU-WPItdan6O3vkrEYY0fY3RNrrpUBJKZeE9lZq0awu7AybZlwIvej&amp;_nc_zt=23&amp;_nc_ht=scontent-iad6-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQG-b8R-RR0GCqtxslxj-G4Ai9x5hfJgcR8E6pZuL4PespsfAaN3I9AbdNmyGKq540U_9iceyxhx&amp;oh=00_Af8NQvvPhmzh7gRwQYUlf4j70Ow-e3vqpHf9fz1QE8fOEw&amp;oe=6A2209E8" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">Marco Tulio não está falando em espe… <a href="https://www.instagram.com/reel/DX__OHojl0U/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 06, 2026, 11:00 AM</div>
+      </div>
+    </td>
+    <td>1.2K</td>
+    <td>1.9K</td>
+    <td>857</td>
+    <td>115</td>
+    <td>638</td>
+    <td>1</td>
+    <td>95</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad6-1.cdninstagram.com/v/t51.82787-15/686066899_18046377584596388_2506682087115672130_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=109&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=OvGRp5jVMA8Q7kNvwFeupT1&amp;_nc_oc=Ado9OdREEFVNEWE0Zek8F2IrZ9cjeM9retw3pp5oql6BWnYJiCHnXop4L8hWpaqMakSCoyBuv_fb_ojfRcZfMucP&amp;_nc_zt=23&amp;_nc_ht=scontent-iad6-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQHXWbz3ceN8c0lxIiRJJNqC_4Yid6MsPh--YF0ix0Fber5gGEsJzjI9f7VMPmiW8x6ZdkPqLjug&amp;oh=00_Af9YHLHt_IH-6CqVdjNlytdY_BO-urB9wVVPQCEhK92FNg&amp;oe=6A222313" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">José Ochoa sabe o que vem pela frent… <a href="https://www.instagram.com/reel/DX9hOmuBbm8/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 05, 2026, 11:00 AM</div>
+      </div>
+    </td>
+    <td>1.5K</td>
+    <td>2.3K</td>
+    <td>508</td>
+    <td>110</td>
+    <td>373</td>
+    <td>4</td>
+    <td>6</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad6-1.cdninstagram.com/v/t51.71878-15/684834600_1540013157685083_3544495211658714352_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=102&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=WWQtc3h9E1kQ7kNvwGDLE7V&amp;_nc_oc=AdpoztF5GKiquj2Ay1_PY-gvtPpIs_KViQnqdiVK4lYXabs8sRvwNdp2-7oyfQRrR9O5VPhu6HZdYj0R6y8RUqQU&amp;_nc_zt=23&amp;_nc_ht=scontent-iad6-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQHWWFxeGXlZHpMV28eXk1QnC8nJyTO9RQIGcfX4ECUhVW4EFBQL9MtKuZIjMtqFBfKk69As9jj8&amp;oh=00_Af-g4H-Fk_iRBv5kS8NqGDfqjSsvzh4ZxZVcujLeVuFDqA&amp;oe=6A222163" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">Qual a melhor estratégia para Poatan… <a href="https://www.instagram.com/reel/DX78RyxhqtX/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 04, 2026, 8:20 PM</div>
+      </div>
+    </td>
+    <td>4.7K</td>
+    <td>9.0K</td>
+    <td>752</td>
+    <td>347</td>
+    <td>364</td>
+    <td>6</td>
+    <td>27</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad6-1.cdninstagram.com/v/t51.82787-15/685997981_18046103360596388_6082453421389554597_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=100&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=rwJ2KODAw5sQ7kNvwHAQkZh&amp;_nc_oc=AdojzbaSY5A2m-rkTK4wFwCCNbAhQbAccqj7I_UoXSkf18ECZiI3YNJE_mTYk7krZBF_co0h9WmfX8xP8mZwHRrJ&amp;_nc_zt=23&amp;_nc_ht=scontent-iad6-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQGlXSJEXFk_MugxTWtvG3EZ6etgPxLsUGPfjefyZwOtDB9STBrQ_Qjq18fosl6sFtUt9NKPNjEs&amp;oh=00_Af9lvaSSeSe0_FZeP3JBY4HsLlpSuHt34Mwca7ryuU1Gtw&amp;oe=6A221647" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">Carlos Prates deixa claro a mentalid… <a href="https://www.instagram.com/reel/DX46CtxgAfK/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 03, 2026, 5:00 PM</div>
+      </div>
+    </td>
+    <td>958</td>
+    <td>1.3K</td>
+    <td>306</td>
+    <td>58</td>
+    <td>233</td>
+    <td>1</td>
+    <td>8</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad3-2.cdninstagram.com/v/t51.71878-15/685929799_1548794883587364_4257352100331940397_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=111&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=dKPvmdUzSwkQ7kNvwFVU4Qa&amp;_nc_oc=Adoe94SxvyNZn0MqBuyPCtObv6NvHqMXHmSqBNI238Pj0msh8s9a16I_-QLL9TrjMS-_SpmEb8pNNVtWyJPHzOTg&amp;_nc_zt=23&amp;_nc_ht=scontent-iad3-2.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQG-9tldWHiDteGui7JOr7Q19iFmFydgeACjQKYj6_4VXqi65TTuCZTB6kj22g3yaOPXPx7OnpA4&amp;oh=00_Af_X1MA-5808LW64QgyXIupRiiXCitt0jU0ZwDkOKhGBbA&amp;oe=6A2228D9" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">9-0. 2-0 in the UFC. Another first-r… <a href="https://www.instagram.com/reel/DX43gxAhZBu/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 03, 2026, 3:42 PM</div>
+      </div>
+    </td>
+    <td>559</td>
+    <td>804</td>
+    <td>203</td>
+    <td>57</td>
+    <td>136</td>
+    <td>4</td>
+    <td>2</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad3-2.cdninstagram.com/v/t51.71878-15/683813586_2400246217068279_6513268350271226502_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=105&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=_H6eJeJucG0Q7kNvwGqB8-O&amp;_nc_oc=AdrY3TzwmHtqlbIkRysMNNV8Zmuj3Z2pgH5h0jaAl1EqbqLfgjpKguGUK3TYYNFqZWoQSLUxbz2c2oM2rhJW4JKP&amp;_nc_zt=23&amp;_nc_ht=scontent-iad3-2.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQGXlaaniItydaGJxhGYNccnS-gnwkJ7r9rsriKh5T8lTNURY7Ilmp7rqSXYdfnvKeklBxxO8BV2&amp;oh=00_Af93mgTqveG-TJi1upg5kLHbSHWTYJVNsMyRiyBZ9axEaw&amp;oe=6A2212B3" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">Poatan &amp; Gane washington square park… <a href="https://www.instagram.com/reel/DX32qbCuB8w/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 03, 2026, 6:15 AM</div>
+      </div>
+    </td>
+    <td>233</td>
+    <td>274</td>
+    <td>3</td>
+    <td>2</td>
+    <td>1</td>
+    <td>0</td>
+    <td>0</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad6-1.cdninstagram.com/v/t51.82787-15/684890873_18045905891596388_3279211833875674463_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=106&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=drRyeKBzd00Q7kNvwEKJQKr&amp;_nc_oc=AdpFJopmzxM36byB51KXY_Ser60SKSlBhdRnP8sEpQu0dmkh2_Of-xa-ebCDNeKlGr0ayCF-MInROaMIiNzQnIjO&amp;_nc_zt=23&amp;_nc_ht=scontent-iad6-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQGmjggfgCwrqogprXErHmSLmGrNaA8P1rcI1d5Y6ej7dhNzahSX28OWJIyaUtlURGI5Po9H5oNq&amp;oh=00_Af9vf4oL5Azgg8BUjnA6e_dypvSjnhnOt6Bl25duD-ZvaA&amp;oe=6A222D6C" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">UFC Carlos Prates x JDM - knockouts … <a href="https://www.instagram.com/reel/DX17uTiOevY/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 02, 2026, 12:21 PM</div>
+      </div>
+    </td>
+    <td>2.8K</td>
+    <td>3.3K</td>
+    <td>197</td>
+    <td>48</td>
+    <td>137</td>
+    <td>4</td>
+    <td>2</td>
+  </tr><tr>
+    <td class="media-cell">
+      <img class="thumb" src="https://scontent-iad6-1.cdninstagram.com/v/t51.71878-15/683076346_984344227460116_4437827313102360051_n.jpg?stp=dst-jpg_e35_tt6&amp;_nc_cat=109&amp;ccb=7-5&amp;_nc_sid=18de74&amp;efg=eyJlZmdfdGFnIjoiQ0xJUFMuYmVzdF9pbWFnZV91cmxnZW4uQzMifQ%3D%3D&amp;_nc_ohc=SrWBf0hwdeEQ7kNvwGM-EpW&amp;_nc_oc=AdrxnZViXv3e7OvwVHpGGW1EuathfcrmY5aEvoodMx5iaZU5wPBVc1XC7NoOSdjq86Bfxc1jdCieW88uveYSgCnB&amp;_nc_zt=23&amp;_nc_ht=scontent-iad6-1.cdninstagram.com&amp;edm=AM6HXa8EAAAA&amp;_nc_gid=Q30kmA9Pdn38xGoW3gYOWw&amp;_nc_tpa=Q5bMBQGUUnoYj0FOymjq-eWHNFFzwq4i2bTAhCe7qYbQ5caxLBorXrJzStMLWdSCrPlxEzkLCiphdRbl&amp;oh=00_Af_8eX99jh_7003dsY44QlLvNuQUZpLMcWCuT50xld9Vcg&amp;oe=6A22389C" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="media-meta">
+        <div class="media-cap">Carlos Prates x Jack Della Maddalena… <a href="https://www.instagram.com/reel/DX1CcDYOTOX/" target="_blank" rel="noopener" class="ext">↗</a></div>
+        <div class="media-time">May 02, 2026, 3:58 AM</div>
+      </div>
+    </td>
+    <td>307</td>
+    <td>543</td>
+    <td>201</td>
+    <td>57</td>
+    <td>125</td>
+    <td>1</td>
+    <td>14</td>
+  </tr></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Reel Hashtag Performance</h2>
+    <div class="section-desc">Hashtag performance with average reach and interaction.</div>
+    <table>
+      <thead><tr><th>Hashtag</th><th>Reels Count</th><th>Average Reach</th><th>Average Interaction</th></tr></thead>
+      <tbody>
+        <tr><td>UFC</td><td>27</td><td>1.8K</td><td>464</td></tr><tr><td>MMA</td><td>26</td><td>1.6K</td><td>440</td></tr><tr><td>PeaceGrappler</td><td>24</td><td>1.9K</td><td>509</td></tr><tr><td>ufc</td><td>5</td><td>2.0K</td><td>422</td></tr><tr><td>mma</td><td>4</td><td>2.5K</td><td>377</td></tr><tr><td>CarlosPrates</td><td>3</td><td>3.3K</td><td>846</td></tr><tr><td>chama</td><td>3</td><td>2.3K</td><td>437</td></tr><tr><td>CombatSports</td><td>3</td><td>1.5K</td><td>590</td></tr><tr><td>DanaWhite</td><td>3</td><td>1.3K</td><td>541</td></tr><tr><td>SeanStrickland</td><td>3</td><td>972</td><td>492</td></tr><tr><td>Chimaev</td><td>3</td><td>792</td><td>406</td></tr><tr><td>MelkCosta</td><td>2</td><td>8.8K</td><td>490</td></tr><tr><td>ArnoldAllen</td><td>2</td><td>8.5K</td><td>406</td></tr><tr><td>IslamMakhachev</td><td>2</td><td>2.2K</td><td>870</td></tr><tr><td>fyp</td><td>2</td><td>1.9K</td><td>598</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div style="text-align:center;color:var(--muted);font-size:11px;margin-top:32px">
+    Generated May 31, 2026, 1:54 PM · Data source: peacegrappler.db
+  </div>
+
+</div>
+
+<script>
+const FOLLOWER_TREND = [];
+const REACH_BREAKDOWN = {"AD":108241,"CAROUSEL_CONTAINER":5139,"POST":3072,"REEL":51067,"STORY":1718};
+const VIEWS_BREAKDOWN = {"AD":158852,"CAROUSEL_CONTAINER":10917,"POST":8817,"REEL":349990,"STORY":11157};
+const INT_BREAKDOWN = {"AD":4946,"POST":3465,"REEL":58673,"STORY":104};
+const AGE_DIST = [{"bucket":"13-17","male":0,"female":0,"unknown":0},{"bucket":"18-24","male":0,"female":0,"unknown":0},{"bucket":"25-34","male":0,"female":0,"unknown":0},{"bucket":"35-44","male":0,"female":0,"unknown":0},{"bucket":"45-54","male":0,"female":0,"unknown":0},{"bucket":"55-64","male":0,"female":0,"unknown":0},{"bucket":"65+","male":0,"female":0,"unknown":0}];
+const GENDER_TOTALS = {"Male":1081,"Female":234,"Unspecified":192};
+const POST_REACH = [{"date":"2026-05-02","value":0},{"date":"2026-05-03","value":0},{"date":"2026-05-04","value":223},{"date":"2026-05-05","value":227},{"date":"2026-05-06","value":0},{"date":"2026-05-07","value":0},{"date":"2026-05-08","value":0},{"date":"2026-05-09","value":0},{"date":"2026-05-10","value":0},{"date":"2026-05-11","value":2470},{"date":"2026-05-12","value":0},{"date":"2026-05-13","value":194},{"date":"2026-05-14","value":0},{"date":"2026-05-15","value":0},{"date":"2026-05-16","value":413},{"date":"2026-05-17","value":0},{"date":"2026-05-18","value":0},{"date":"2026-05-19","value":160},{"date":"2026-05-20","value":0},{"date":"2026-05-21","value":0},{"date":"2026-05-22","value":0},{"date":"2026-05-23","value":0},{"date":"2026-05-24","value":1882},{"date":"2026-05-25","value":444},{"date":"2026-05-26","value":2867},{"date":"2026-05-27","value":0},{"date":"2026-05-28","value":0},{"date":"2026-05-29","value":184},{"date":"2026-05-30","value":140},{"date":"2026-05-31","value":0}];
+const POST_VIEWS = [{"date":"2026-05-02","value":0},{"date":"2026-05-03","value":0},{"date":"2026-05-04","value":700},{"date":"2026-05-05","value":537},{"date":"2026-05-06","value":0},{"date":"2026-05-07","value":0},{"date":"2026-05-08","value":0},{"date":"2026-05-09","value":0},{"date":"2026-05-10","value":0},{"date":"2026-05-11","value":4783},{"date":"2026-05-12","value":0},{"date":"2026-05-13","value":523},{"date":"2026-05-14","value":0},{"date":"2026-05-15","value":0},{"date":"2026-05-16","value":1182},{"date":"2026-05-17","value":0},{"date":"2026-05-18","value":0},{"date":"2026-05-19","value":442},{"date":"2026-05-20","value":0},{"date":"2026-05-21","value":0},{"date":"2026-05-22","value":0},{"date":"2026-05-23","value":0},{"date":"2026-05-24","value":4673},{"date":"2026-05-25","value":1035},{"date":"2026-05-26","value":4344},{"date":"2026-05-27","value":0},{"date":"2026-05-28","value":0},{"date":"2026-05-29","value":413},{"date":"2026-05-30","value":412},{"date":"2026-05-31","value":0}];
+const POST_LIKES = [{"date":"2026-05-02","value":0},{"date":"2026-05-03","value":0},{"date":"2026-05-04","value":45},{"date":"2026-05-05","value":46},{"date":"2026-05-06","value":0},{"date":"2026-05-07","value":0},{"date":"2026-05-08","value":0},{"date":"2026-05-09","value":0},{"date":"2026-05-10","value":0},{"date":"2026-05-11","value":138},{"date":"2026-05-12","value":0},{"date":"2026-05-13","value":34},{"date":"2026-05-14","value":0},{"date":"2026-05-15","value":0},{"date":"2026-05-16","value":69},{"date":"2026-05-17","value":0},{"date":"2026-05-18","value":0},{"date":"2026-05-19","value":33},{"date":"2026-05-20","value":0},{"date":"2026-05-21","value":0},{"date":"2026-05-22","value":0},{"date":"2026-05-23","value":0},{"date":"2026-05-24","value":48},{"date":"2026-05-25","value":49},{"date":"2026-05-26","value":62},{"date":"2026-05-27","value":0},{"date":"2026-05-28","value":0},{"date":"2026-05-29","value":35},{"date":"2026-05-30","value":26},{"date":"2026-05-31","value":0}];
+const POST_COMMENTS = [{"date":"2026-05-02","value":0},{"date":"2026-05-03","value":0},{"date":"2026-05-04","value":358},{"date":"2026-05-05","value":220},{"date":"2026-05-06","value":0},{"date":"2026-05-07","value":0},{"date":"2026-05-08","value":0},{"date":"2026-05-09","value":0},{"date":"2026-05-10","value":0},{"date":"2026-05-11","value":344},{"date":"2026-05-12","value":0},{"date":"2026-05-13","value":371},{"date":"2026-05-14","value":0},{"date":"2026-05-15","value":0},{"date":"2026-05-16","value":335},{"date":"2026-05-17","value":0},{"date":"2026-05-18","value":0},{"date":"2026-05-19","value":137},{"date":"2026-05-20","value":0},{"date":"2026-05-21","value":0},{"date":"2026-05-22","value":0},{"date":"2026-05-23","value":0},{"date":"2026-05-24","value":162},{"date":"2026-05-25","value":83},{"date":"2026-05-26","value":184},{"date":"2026-05-27","value":0},{"date":"2026-05-28","value":0},{"date":"2026-05-29","value":183},{"date":"2026-05-30","value":119},{"date":"2026-05-31","value":0}];
+const POST_SAVES = [{"date":"2026-05-02","value":0},{"date":"2026-05-03","value":0},{"date":"2026-05-04","value":1},{"date":"2026-05-05","value":1},{"date":"2026-05-06","value":0},{"date":"2026-05-07","value":0},{"date":"2026-05-08","value":0},{"date":"2026-05-09","value":0},{"date":"2026-05-10","value":0},{"date":"2026-05-11","value":9},{"date":"2026-05-12","value":0},{"date":"2026-05-13","value":4},{"date":"2026-05-14","value":0},{"date":"2026-05-15","value":0},{"date":"2026-05-16","value":3},{"date":"2026-05-17","value":0},{"date":"2026-05-18","value":0},{"date":"2026-05-19","value":1},{"date":"2026-05-20","value":0},{"date":"2026-05-21","value":0},{"date":"2026-05-22","value":0},{"date":"2026-05-23","value":0},{"date":"2026-05-24","value":3},{"date":"2026-05-25","value":2},{"date":"2026-05-26","value":1},{"date":"2026-05-27","value":0},{"date":"2026-05-28","value":0},{"date":"2026-05-29","value":1},{"date":"2026-05-30","value":2},{"date":"2026-05-31","value":0}];
+const POST_SHARES = [{"date":"2026-05-02","value":0},{"date":"2026-05-03","value":0},{"date":"2026-05-04","value":13},{"date":"2026-05-05","value":1},{"date":"2026-05-06","value":0},{"date":"2026-05-07","value":0},{"date":"2026-05-08","value":0},{"date":"2026-05-09","value":0},{"date":"2026-05-10","value":0},{"date":"2026-05-11","value":5},{"date":"2026-05-12","value":0},{"date":"2026-05-13","value":3},{"date":"2026-05-14","value":0},{"date":"2026-05-15","value":0},{"date":"2026-05-16","value":0},{"date":"2026-05-17","value":0},{"date":"2026-05-18","value":0},{"date":"2026-05-19","value":1},{"date":"2026-05-20","value":0},{"date":"2026-05-21","value":0},{"date":"2026-05-22","value":0},{"date":"2026-05-23","value":0},{"date":"2026-05-24","value":7},{"date":"2026-05-25","value":19},{"date":"2026-05-26","value":31},{"date":"2026-05-27","value":0},{"date":"2026-05-28","value":0},{"date":"2026-05-29","value":20},{"date":"2026-05-30","value":0},{"date":"2026-05-31","value":0}];
+const REEL_REACH = [{"date":"2026-05-02","value":3083},{"date":"2026-05-03","value":1750},{"date":"2026-05-04","value":0},{"date":"2026-05-05","value":6164},{"date":"2026-05-06","value":4686},{"date":"2026-05-07","value":1892},{"date":"2026-05-08","value":1014},{"date":"2026-05-09","value":2800},{"date":"2026-05-10","value":1024},{"date":"2026-05-11","value":2609},{"date":"2026-05-12","value":564},{"date":"2026-05-13","value":852},{"date":"2026-05-14","value":374},{"date":"2026-05-15","value":2247},{"date":"2026-05-16","value":19504},{"date":"2026-05-17","value":261},{"date":"2026-05-18","value":1765},{"date":"2026-05-19","value":0},{"date":"2026-05-20","value":967},{"date":"2026-05-21","value":508},{"date":"2026-05-22","value":5522},{"date":"2026-05-23","value":494},{"date":"2026-05-24","value":0},{"date":"2026-05-25","value":791},{"date":"2026-05-26","value":0},{"date":"2026-05-27","value":535},{"date":"2026-05-28","value":1193},{"date":"2026-05-29","value":0},{"date":"2026-05-30","value":996},{"date":"2026-05-31","value":0}];
+const REEL_VIEWS = [{"date":"2026-05-02","value":3830},{"date":"2026-05-03","value":2419},{"date":"2026-05-04","value":0},{"date":"2026-05-05","value":11323},{"date":"2026-05-06","value":6553},{"date":"2026-05-07","value":2736},{"date":"2026-05-08","value":1621},{"date":"2026-05-09","value":4812},{"date":"2026-05-10","value":1186},{"date":"2026-05-11","value":3727},{"date":"2026-05-12","value":992},{"date":"2026-05-13","value":1211},{"date":"2026-05-14","value":577},{"date":"2026-05-15","value":12885},{"date":"2026-05-16","value":22022},{"date":"2026-05-17","value":397},{"date":"2026-05-18","value":3472},{"date":"2026-05-19","value":0},{"date":"2026-05-20","value":1323},{"date":"2026-05-21","value":835},{"date":"2026-05-22","value":8435},{"date":"2026-05-23","value":927},{"date":"2026-05-24","value":0},{"date":"2026-05-25","value":1187},{"date":"2026-05-26","value":0},{"date":"2026-05-27","value":727},{"date":"2026-05-28","value":1925},{"date":"2026-05-29","value":0},{"date":"2026-05-30","value":1097},{"date":"2026-05-31","value":0}];
+const REEL_LIKES = [{"date":"2026-05-02","value":105},{"date":"2026-05-03","value":117},{"date":"2026-05-04","value":0},{"date":"2026-05-05","value":457},{"date":"2026-05-06","value":251},{"date":"2026-05-07","value":142},{"date":"2026-05-08","value":113},{"date":"2026-05-09","value":206},{"date":"2026-05-10","value":47},{"date":"2026-05-11","value":99},{"date":"2026-05-12","value":65},{"date":"2026-05-13","value":61},{"date":"2026-05-14","value":34},{"date":"2026-05-15","value":150},{"date":"2026-05-16","value":115},{"date":"2026-05-17","value":33},{"date":"2026-05-18","value":115},{"date":"2026-05-19","value":0},{"date":"2026-05-20","value":83},{"date":"2026-05-21","value":59},{"date":"2026-05-22","value":240},{"date":"2026-05-23","value":75},{"date":"2026-05-24","value":0},{"date":"2026-05-25","value":80},{"date":"2026-05-26","value":0},{"date":"2026-05-27","value":45},{"date":"2026-05-28","value":104},{"date":"2026-05-29","value":0},{"date":"2026-05-30","value":37},{"date":"2026-05-31","value":0}];
+const REEL_COMMENTS = [{"date":"2026-05-02","value":262},{"date":"2026-05-03","value":370},{"date":"2026-05-04","value":0},{"date":"2026-05-05","value":737},{"date":"2026-05-06","value":1481},{"date":"2026-05-07","value":685},{"date":"2026-05-08","value":676},{"date":"2026-05-09","value":730},{"date":"2026-05-10","value":435},{"date":"2026-05-11","value":298},{"date":"2026-05-12","value":342},{"date":"2026-05-13","value":313},{"date":"2026-05-14","value":402},{"date":"2026-05-15","value":897},{"date":"2026-05-16","value":517},{"date":"2026-05-17","value":365},{"date":"2026-05-18","value":324},{"date":"2026-05-19","value":0},{"date":"2026-05-20","value":362},{"date":"2026-05-21","value":331},{"date":"2026-05-22","value":631},{"date":"2026-05-23","value":378},{"date":"2026-05-24","value":0},{"date":"2026-05-25","value":215},{"date":"2026-05-26","value":0},{"date":"2026-05-27","value":151},{"date":"2026-05-28","value":400},{"date":"2026-05-29","value":0},{"date":"2026-05-30","value":65},{"date":"2026-05-31","value":0}];
+const REEL_SAVES = [{"date":"2026-05-02","value":5},{"date":"2026-05-03","value":5},{"date":"2026-05-04","value":0},{"date":"2026-05-05","value":10},{"date":"2026-05-06","value":3},{"date":"2026-05-07","value":6},{"date":"2026-05-08","value":4},{"date":"2026-05-09","value":11},{"date":"2026-05-10","value":1},{"date":"2026-05-11","value":11},{"date":"2026-05-12","value":3},{"date":"2026-05-13","value":2},{"date":"2026-05-14","value":2},{"date":"2026-05-15","value":6},{"date":"2026-05-16","value":4},{"date":"2026-05-17","value":1},{"date":"2026-05-18","value":6},{"date":"2026-05-19","value":0},{"date":"2026-05-20","value":3},{"date":"2026-05-21","value":1},{"date":"2026-05-22","value":3},{"date":"2026-05-23","value":4},{"date":"2026-05-24","value":0},{"date":"2026-05-25","value":2},{"date":"2026-05-26","value":0},{"date":"2026-05-27","value":2},{"date":"2026-05-28","value":1},{"date":"2026-05-29","value":0},{"date":"2026-05-30","value":0},{"date":"2026-05-31","value":0}];
+const REEL_SHARES = [{"date":"2026-05-02","value":16},{"date":"2026-05-03","value":10},{"date":"2026-05-04","value":0},{"date":"2026-05-05","value":33},{"date":"2026-05-06","value":278},{"date":"2026-05-07","value":117},{"date":"2026-05-08","value":43},{"date":"2026-05-09","value":47},{"date":"2026-05-10","value":12},{"date":"2026-05-11","value":141},{"date":"2026-05-12","value":9},{"date":"2026-05-13","value":50},{"date":"2026-05-14","value":0},{"date":"2026-05-15","value":170},{"date":"2026-05-16","value":11},{"date":"2026-05-17","value":3},{"date":"2026-05-18","value":157},{"date":"2026-05-19","value":0},{"date":"2026-05-20","value":91},{"date":"2026-05-21","value":15},{"date":"2026-05-22","value":144},{"date":"2026-05-23","value":16},{"date":"2026-05-24","value":0},{"date":"2026-05-25","value":67},{"date":"2026-05-26","value":0},{"date":"2026-05-27","value":1},{"date":"2026-05-28","value":100},{"date":"2026-05-29","value":0},{"date":"2026-05-30","value":67},{"date":"2026-05-31","value":0}];
+
+const C = { accent: "#6366f1", pink: "#ec4899", green: "#10b981", yellow: "#f59e0b", grid: "#e5e7eb", muted: "#9ca3af" };
+
+function shortDate(iso) { const d = new Date(iso + "T00:00:00Z"); return d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }); }
+
+const baseLine = {
+  responsive: true, maintainAspectRatio: false,
+  plugins: { legend: { display: false } },
+  scales: {
+    x: { grid: { display: false }, ticks: { color: C.muted, autoSkip: true, maxTicksLimit: 8 } },
+    y: { grid: { color: C.grid, drawBorder: false }, ticks: { color: C.muted } }
+  }
+};
+
+function lineDataset(label, color, points) {
+  return {
+    label, data: points.map(p => p.value),
+    borderColor: color, backgroundColor: color + "33",
+    tension: 0.35, borderWidth: 2, pointRadius: 2.5, pointBackgroundColor: color, fill: false,
+  };
+}
+
+new Chart(document.getElementById("ch_followers"), {
+  type: "line",
+  data: { labels: FOLLOWER_TREND.map(p => shortDate(p.date)), datasets: [lineDataset("New Followers", C.accent, FOLLOWER_TREND)] },
+  options: { ...baseLine, plugins: { legend: { display: false }, tooltip: { mode: "index", intersect: false } } }
+});
+
+function horizontalBar(canvasId, breakdown) {
+  const labels = ["Ad", "Feed", "Reel", "Story"];
+  const map = {
+    Ad: breakdown.AD || 0,
+    Feed: (breakdown.POST || 0) + (breakdown.CAROUSEL_CONTAINER || 0),
+    Reel: breakdown.REEL || 0,
+    Story: breakdown.STORY || 0,
+  };
+  new Chart(document.getElementById(canvasId), {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [{
+        data: labels.map(l => map[l]),
+        backgroundColor: [C.muted, C.pink, C.green, C.yellow],
+        borderRadius: 4, barThickness: 22,
+      }]
+    },
+    options: {
+      indexAxis: "y", responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { color: C.grid }, ticks: { color: C.muted } },
+        y: { grid: { display: false }, ticks: { color: C.muted } }
+      }
+    }
+  });
+}
+horizontalBar("ch_reach", REACH_BREAKDOWN);
+horizontalBar("ch_views", VIEWS_BREAKDOWN);
+horizontalBar("ch_interactions", INT_BREAKDOWN);
+
+new Chart(document.getElementById("ch_demo"), {
+  type: "bar",
+  data: {
+    labels: AGE_DIST.map(a => a.bucket),
+    datasets: [
+      { label: "Male", data: AGE_DIST.map(a => a.male), backgroundColor: C.accent, borderRadius: 4 },
+      { label: "Female", data: AGE_DIST.map(a => a.female), backgroundColor: C.pink, borderRadius: 4 },
+      { label: "Unspecified", data: AGE_DIST.map(a => a.unknown), backgroundColor: C.green, borderRadius: 4 },
+    ]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: true, position: "bottom", labels: { color: C.muted, boxWidth: 10 } } },
+    scales: {
+      x: { stacked: false, grid: { display: false }, ticks: { color: C.muted } },
+      y: { grid: { color: C.grid }, ticks: { color: C.muted } }
+    }
+  }
+});
+
+new Chart(document.getElementById("ch_gender"), {
+  type: "pie",
+  data: {
+    labels: ["Male", "Female", "Unspecified"],
+    datasets: [{
+      data: [GENDER_TOTALS.Male, GENDER_TOTALS.Female, GENDER_TOTALS.Unspecified],
+      backgroundColor: [C.accent, C.pink, C.green], borderWidth: 0,
+    }]
+  },
+  options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+});
+
+function dualLine(canvasId, sA, sB, labelA, labelB, colorA, colorB) {
+  new Chart(document.getElementById(canvasId), {
+    type: "line",
+    data: { labels: sA.map(p => shortDate(p.date)), datasets: [lineDataset(labelA, colorA, sA), lineDataset(labelB, colorB, sB)] },
+    options: { ...baseLine, plugins: { legend: { display: false }, tooltip: { mode: "index", intersect: false } } }
+  });
+}
+
+dualLine("ch_post_trend", POST_REACH, POST_VIEWS, "Reach", "Views", C.accent, C.pink);
+dualLine("ch_reel_trend", REEL_REACH, REEL_VIEWS, "Reach", "Views", C.accent, C.pink);
+
+function quadLine(canvasId, sL, sC, sSv, sSh) {
+  new Chart(document.getElementById(canvasId), {
+    type: "line",
+    data: {
+      labels: sL.map(p => shortDate(p.date)),
+      datasets: [
+        lineDataset("Likes", C.accent, sL),
+        lineDataset("Comments", C.pink, sC),
+        lineDataset("Saves", C.green, sSv),
+        lineDataset("Shares", C.yellow, sSh),
+      ]
+    },
+    options: { ...baseLine, plugins: { legend: { display: false }, tooltip: { mode: "index", intersect: false } } }
+  });
+}
+
+quadLine("ch_post_int", POST_LIKES, POST_COMMENTS, POST_SAVES, POST_SHARES);
+quadLine("ch_reel_int", REEL_LIKES, REEL_COMMENTS, REEL_SAVES, REEL_SHARES);
+</script>
+</body>
+</html>
