@@ -9,10 +9,24 @@ from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 from datetime import datetime
+from pathlib import Path
 
-# Configuration
+
+def _load_env_file(path: Path) -> None:
+    if not path.exists():
+        return
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        os.environ.setdefault(k.strip(), v.strip())
+
+
+_load_env_file(Path(__file__).parent.parent / ".env")
+
 SMTP_USER = "paxlucta@gmail.com"
-SMTP_PASS = "ftfqkshvbfwwtxvz"
+SMTP_PASS = os.environ["GMAIL_PASSWORD_TOKEN"]
 RECIPIENTS = ["abghandour@gmail.com", "marcello1spinelli@gmail.com"]
 
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))

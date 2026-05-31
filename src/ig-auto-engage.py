@@ -33,8 +33,21 @@ LOCK_FILE  = ROOT_DIR / "data" / "ig-auto-engage.lock"
 API_VERSION = "v25.0"
 ACCOUNT_ID  = "17841447891636367"   # @peacegrappler
 
+def _load_env_file(path):
+    if not path.exists():
+        return
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        os.environ.setdefault(k.strip(), v.strip())
+
+
+_load_env_file(ENV_FILE)
+
 SMTP_USER  = "paxlucta@gmail.com"
-SMTP_PASS  = "ftfqkshvbfwwtxvz"
+SMTP_PASS  = os.environ["GMAIL_PASSWORD_TOKEN"]
 RECIPIENTS = ["abghandour@gmail.com", "marcello1spinelli@gmail.com"]
 
 MAX_POSTS_PER_RUN = 5   # cap per run to avoid rate limits

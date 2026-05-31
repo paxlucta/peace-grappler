@@ -22,11 +22,56 @@ const path = require("path");
 
 const ROOT_DIR = path.join(__dirname, "..");
 const DB_PATH = path.join(ROOT_DIR, "peacegrappler.db");
-const OUTPUT_PATH = path.join(ROOT_DIR, "output", "comprehensive-growth-report.html");
 const db = new Database(DB_PATH, { readonly: true });
 
-const isEvening = process.argv.includes("--evening");
-const reportType = isEvening ? "Evening" : "Morning";
+const argv = process.argv.slice(2);
+const isEvening = argv.includes("--evening");
+
+// Monthly mode: --month YYYY-MM (specific month) or --monthly (current month).
+const monthIdx = argv.indexOf("--month");
+const monthArg = monthIdx >= 0 ? argv[monthIdx + 1]
+  : (argv.find((a) => a.startsWith("--month=")) || "").split("=")[1] || null;
+const isMonthly = !!monthArg || argv.includes("--monthly");
+
+let YEAR_MONTH = null;
+let MONTH_LABEL = null;
+if (isMonthly) {
+  const now = monthArg ? new Date(`${monthArg}-01T00:00:00Z`) : new Date();
+  const y = now.getUTCFullYear();
+  const m = now.getUTCMonth() + 1;
+  YEAR_MONTH = `${y}-${String(m).padStart(2, "0")}`;
+  MONTH_LABEL = new Date(Date.UTC(y, m - 1, 1)).toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+}
+
+const OUTPUT_PATH = isMonthly
+  ? path.join(ROOT_DIR, "output", `comprehensive-growth-report-${YEAR_MONTH}.html`)
+  : path.join(ROOT_DIR, "output", "comprehensive-growth-report.html");
+
+const reportType = isMonthly ? `Monthly (${MONTH_LABEL})` : (isEvening ? "Evening" : "Morning");
+
+// SQL date-range expressions for the engagement window(s) shown in the report.
+// Daily mode: 7d + 30d. Monthly mode: full target month (MTD if current).
+function monthBounds(yyyymm) {
+  // Returns [sinceISO, untilISO] for the calendar month.
+  const [y, m] = yyyymm.split("-").map(Number);
+  const since = `${yyyymm}-01 00:00:00`;
+  const nextMonth = new Date(Date.UTC(y, m, 1));
+  const until = nextMonth.toISOString().slice(0, 19).replace("T", " ");
+  return [since, until];
+}
+
+let ENGAGEMENT_WINDOWS;
+if (isMonthly) {
+  const [since, until] = monthBounds(YEAR_MONTH);
+  ENGAGEMENT_WINDOWS = [
+    { key: "mtd", label: MONTH_LABEL, sinceExpr: `'${since}'`, untilExpr: `'${until}'` },
+  ];
+} else {
+  ENGAGEMENT_WINDOWS = [
+    { key: "last7",  label: "7d",  sinceExpr: "datetime('now', '-7 days')",  untilExpr: null },
+    { key: "last30", label: "30d", sinceExpr: "datetime('now', '-30 days')", untilExpr: null },
+  ];
+}
 
 // ============================================================
 // Helpers
@@ -309,9 +354,9 @@ function getCommentersPerPost() {
   return result;
 }
 
-function getEngagementAnalytics() {
-  // Last 7 days engagement summary
-  const last7 = db.prepare(`
+function getEngagementMetrics(sinceExpr, untilExpr = null) {
+  const untilClause = untilExpr ? `AND m.timestamp < ${untilExpr}` : "";
+  return db.prepare(`
     SELECT
       COUNT(*) as posts,
       SUM(COALESCE(m.like_count, 0)) as total_likes,
@@ -334,21 +379,17 @@ function getEngagementAnalytics() {
       AND fetched_at = (SELECT MAX(fetched_at) FROM ig_media_insights mi2 WHERE mi2.media_id = ig_media_insights.media_id AND mi2.metric = 'saved')
     ) i_saved ON i_saved.media_id = m.id
     WHERE m.media_product_type != 'STORY'
-      AND m.timestamp >= datetime('now', '-7 days')
+      AND m.timestamp >= ${sinceExpr}
+      ${untilClause}
   `).get();
+}
 
-  // Last 30 days
-  const last30 = db.prepare(`
-    SELECT
-      COUNT(*) as posts,
-      SUM(COALESCE(m.like_count, 0)) as total_likes,
-      SUM(COALESCE(m.comments_count, 0)) as total_comments
-    FROM ig_media m
-    WHERE m.media_product_type != 'STORY'
-      AND m.timestamp >= datetime('now', '-30 days')
-  `).get();
-
-  return { last7, last30 };
+function getEngagementAnalytics() {
+  const out = {};
+  for (const w of ENGAGEMENT_WINDOWS) {
+    out[w.key] = getEngagementMetrics(w.sinceExpr, w.untilExpr);
+  }
+  return out;
 }
 
 function getAccountInsightsSummary() {
@@ -413,9 +454,27 @@ function generateReport() {
   const now = new Date();
   const generatedAt = now.toLocaleString("en-US", { dateStyle: "full", timeStyle: "short" });
 
-  // Compute engagement rate
-  const totalEngLast7 = (engagement.last7.total_likes || 0) + (engagement.last7.total_comments || 0);
-  const avgEngPerPost = engagement.last7.posts ? Math.round(totalEngLast7 / engagement.last7.posts) : 0;
+  // Per-window engagement totals + averages.
+  const engagementSummary = {};
+  for (const w of ENGAGEMENT_WINDOWS) {
+    const e = engagement[w.key] || {};
+    const total = (e.total_likes || 0) + (e.total_comments || 0);
+    engagementSummary[w.key] = {
+      label: w.label,
+      total,
+      avgPerPost: e.posts ? Math.round(total / e.posts) : 0,
+      views: e.total_views || 0,
+      reach: e.total_reach || 0,
+      shares: e.total_shares || 0,
+      saves: e.total_saved || 0,
+      likes: e.total_likes || 0,
+      comments: e.total_comments || 0,
+      posts: e.posts || 0,
+    };
+  }
+  // Primary window for the Account Summary cards: first defined window.
+  const primaryKey = ENGAGEMENT_WINDOWS[0].key;
+  const primary = engagementSummary[primaryKey];
 
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -559,16 +618,16 @@ function generateReport() {
       <div class="label">Following</div>
     </div>
     <div class="metric-card">
-      <div class="value">${fmtNum(totalEngLast7)}</div>
-      <div class="label">Engagement (7d)</div>
+      <div class="value">${fmtNum(primary.total)}</div>
+      <div class="label">Engagement (${primary.label})</div>
     </div>
     <div class="metric-card">
-      <div class="value">${fmtNum(engagement.last7?.total_views)}</div>
-      <div class="label">Views (7d)</div>
+      <div class="value">${fmtNum(primary.views)}</div>
+      <div class="label">Views (${primary.label})</div>
     </div>
     <div class="metric-card">
-      <div class="value">${fmtNum(engagement.last7?.total_reach)}</div>
-      <div class="label">Reach (7d)</div>
+      <div class="value">${fmtNum(primary.reach)}</div>
+      <div class="label">Reach (${primary.label})</div>
     </div>
   </div>
 
@@ -604,48 +663,22 @@ function generateReport() {
   </div>
 
   <h2>Engagement Analytics</h2>
+  ${ENGAGEMENT_WINDOWS.map((w) => {
+    const s = engagementSummary[w.key];
+    return `
+  <h3>${esc(w.label)}</h3>
   <div class="metrics-grid">
-    <div class="metric-card">
-      <div class="value">${fmtNum(totalEngLast7)}</div>
-      <div class="label">Total Engagement (7d)</div>
-    </div>
-    <div class="metric-card">
-      <div class="value">${fmtNum(avgEngPerPost)}</div>
-      <div class="label">Avg per Post (7d)</div>
-    </div>
-    <div class="metric-card">
-      <div class="value">${fmtNum(engagement.last7?.total_views)}</div>
-      <div class="label">Views (7d)</div>
-    </div>
-    <div class="metric-card">
-      <div class="value">${fmtNum(engagement.last7?.total_reach)}</div>
-      <div class="label">Reach (7d)</div>
-    </div>
-    <div class="metric-card">
-      <div class="value">${fmtNum(engagement.last7?.total_shares)}</div>
-      <div class="label">Shares (7d)</div>
-    </div>
-    <div class="metric-card">
-      <div class="value">${fmtNum(engagement.last7?.total_saved)}</div>
-      <div class="label">Saves (7d)</div>
-    </div>
-    <div class="metric-card">
-      <div class="value">${fmtNum((engagement.last30?.total_likes || 0) + (engagement.last30?.total_comments || 0))}</div>
-      <div class="label">Total Engagement (30d)</div>
-    </div>
-    <div class="metric-card">
-      <div class="value">${fmtNum(engagement.last30?.total_likes)}</div>
-      <div class="label">Likes (30d)</div>
-    </div>
-    <div class="metric-card">
-      <div class="value">${fmtNum(engagement.last30?.total_comments)}</div>
-      <div class="label">Comments (30d)</div>
-    </div>
-    <div class="metric-card">
-      <div class="value">${fmtNum(engagement.last30?.posts)}</div>
-      <div class="label">Posts (30d)</div>
-    </div>
-  </div>
+    <div class="metric-card"><div class="value">${fmtNum(s.total)}</div><div class="label">Total Engagement</div></div>
+    <div class="metric-card"><div class="value">${fmtNum(s.avgPerPost)}</div><div class="label">Avg per Post</div></div>
+    <div class="metric-card"><div class="value">${fmtNum(s.views)}</div><div class="label">Views</div></div>
+    <div class="metric-card"><div class="value">${fmtNum(s.reach)}</div><div class="label">Reach</div></div>
+    <div class="metric-card"><div class="value">${fmtNum(s.shares)}</div><div class="label">Shares</div></div>
+    <div class="metric-card"><div class="value">${fmtNum(s.saves)}</div><div class="label">Saves</div></div>
+    <div class="metric-card"><div class="value">${fmtNum(s.likes)}</div><div class="label">Likes</div></div>
+    <div class="metric-card"><div class="value">${fmtNum(s.comments)}</div><div class="label">Comments</div></div>
+    <div class="metric-card"><div class="value">${fmtNum(s.posts)}</div><div class="label">Posts</div></div>
+  </div>`;
+  }).join("")}
 
 </div>
 
@@ -837,7 +870,7 @@ function switchTab(id) {
 </html>`;
 
   fs.writeFileSync(OUTPUT_PATH, html);
-  console.log(`Daily email report generated: ${OUTPUT_PATH}`);
+  console.log(`${isMonthly ? "Monthly" : "Daily"} email report generated: ${OUTPUT_PATH}`);
   return OUTPUT_PATH;
 }
 

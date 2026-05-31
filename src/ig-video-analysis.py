@@ -25,18 +25,24 @@ STATE_FILE = ROOT_DIR / "data" / "video-analysis-state.json"
 OUTPUT_DIR = ROOT_DIR / "output"
 ENV_FILE   = ROOT_DIR / ".env"
 
-def _load_token():
-    if ENV_FILE.exists():
-        for line in ENV_FILE.read_text().splitlines():
-            if line.startswith("TOKEN="):
-                return line.partition("=")[2].strip()
-    return os.environ.get("TOKEN", "")
+def _load_env_file(path):
+    if not path.exists():
+        return
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        os.environ.setdefault(k.strip(), v.strip())
 
-IG_TOKEN = _load_token()
+
+_load_env_file(ENV_FILE)
+
+IG_TOKEN = os.environ.get("TOKEN", "")
 API_VERSION = "v25.0"
 
 SMTP_USER   = "paxlucta@gmail.com"
-SMTP_PASS   = "ftfqkshvbfwwtxvz"
+SMTP_PASS   = os.environ["GMAIL_PASSWORD_TOKEN"]
 RECIPIENTS  = ["abghandour@gmail.com", "marcello1spinelli@gmail.com"]
 
 # ─── state ───────────────────────────────────────────────────────────────────
@@ -56,9 +62,15 @@ def save_state(ts: str):
 
 # ─── database ────────────────────────────────────────────────────────────────
 
-def fetch_recent_reels(con):
-    """Return reels from the last 7 days that already have metrics synced."""
-    rows = con.execute("""
+def _anchor(anchor_date):
+    # SQL fragment that stands in for 'now'. Backfill anchors to a past date.
+    return f"'{anchor_date}'" if anchor_date else "'now'"
+
+
+def fetch_recent_reels(con, anchor_date=None):
+    """Return reels from the 7 days preceding anchor_date (or now) that have metrics."""
+    a = _anchor(anchor_date)
+    rows = con.execute(f"""
         SELECT
             m.id,
             m.caption,
@@ -77,16 +89,18 @@ def fetch_recent_reels(con):
         FROM ig_media m
         JOIN ig_media_insights i ON m.id = i.media_id
         WHERE m.media_product_type = 'REELS'
-          AND m.timestamp >= datetime('now', '-7 days')
+          AND m.timestamp >= datetime({a}, '-7 days')
+          AND m.timestamp <  datetime({a}, '+1 day')
         GROUP BY m.id
         HAVING reach IS NOT NULL AND reach > 0
         ORDER BY m.timestamp DESC
     """).fetchall()
     return [dict(r) for r in rows]
 
-def fetch_benchmarks(con):
+def fetch_benchmarks(con, anchor_date=None):
     """90-day median-style benchmarks via percentile approximation."""
-    rows = con.execute("""
+    a = _anchor(anchor_date)
+    rows = con.execute(f"""
         SELECT
             AVG(CASE WHEN i.metric='views'                   THEN i.value END) AS avg_views,
             AVG(CASE WHEN i.metric='reach'                   THEN i.value END) AS avg_reach,
@@ -98,7 +112,8 @@ def fetch_benchmarks(con):
         FROM ig_media m
         JOIN ig_media_insights i ON m.id = i.media_id
         WHERE m.media_product_type = 'REELS'
-          AND m.timestamp >= datetime('now', '-90 days')
+          AND m.timestamp >= datetime({a}, '-90 days')
+          AND m.timestamp <  datetime({a}, '+1 day')
     """).fetchone()
     b = dict(rows) if rows else {}
 
@@ -110,7 +125,8 @@ def fetch_benchmarks(con):
                 FROM ig_media m
                 JOIN ig_media_insights i ON m.id = i.media_id
                 WHERE m.media_product_type = 'REELS'
-                  AND m.timestamp >= datetime('now', '-90 days')
+                  AND m.timestamp >= datetime({a}, '-90 days')
+                  AND m.timestamp <  datetime({a}, '+1 day')
                 GROUP BY m.id
                 HAVING val IS NOT NULL
                 ORDER BY val
@@ -120,7 +136,8 @@ def fetch_benchmarks(con):
                  FROM ig_media m2
                  JOIN ig_media_insights i2 ON m2.id = i2.media_id
                  WHERE m2.media_product_type = 'REELS'
-                   AND m2.timestamp >= datetime('now', '-90 days')
+                   AND m2.timestamp >= datetime({a}, '-90 days')
+                   AND m2.timestamp <  datetime({a}, '+1 day')
                    AND i2.metric = ?
                 ) * {pct} / 100.0 AS INT
             )
@@ -137,9 +154,10 @@ def fetch_benchmarks(con):
     b["p25_watch_ms"] = percentile("ig_reels_avg_watch_time", 25)
     return b
 
-def fetch_all_reels_for_patterns(con):
+def fetch_all_reels_for_patterns(con, anchor_date=None):
     """Return last 90 days of reels for pattern mining."""
-    rows = con.execute("""
+    a = _anchor(anchor_date)
+    rows = con.execute(f"""
         SELECT
             m.id, m.caption, m.timestamp,
             MAX(CASE WHEN i.metric='reach'                   THEN i.value END) AS reach,
@@ -151,7 +169,8 @@ def fetch_all_reels_for_patterns(con):
         FROM ig_media m
         JOIN ig_media_insights i ON m.id = i.media_id
         WHERE m.media_product_type = 'REELS'
-          AND m.timestamp >= datetime('now', '-90 days')
+          AND m.timestamp >= datetime({a}, '-90 days')
+          AND m.timestamp <  datetime({a}, '+1 day')
         GROUP BY m.id
         HAVING reach IS NOT NULL AND reach > 0
     """).fetchall()
@@ -891,6 +910,73 @@ def regenerate_for_date(target_date: str, rerun_ai: bool = False):
     return True
 
 
+def backfill_for_date(target_date: str, skip_ai: bool = False):
+    """Generate a video-analysis report dated to a past day (no email, no state update).
+
+    Anchors the "last 7 days" / "last 90 days" SQL windows to target_date so the report
+    reflects what would have run on that date — with the caveat that insight metrics
+    are current values, not historical snapshots.
+    """
+    out_html = OUTPUT_DIR / f"video-analysis-{target_date}.html"
+    if out_html.exists():
+        print(f"[skip] {out_html.name} already exists")
+        return False
+
+    run_time = datetime.strptime(target_date, "%Y-%m-%d").replace(tzinfo=timezone.utc, hour=12)
+    print(f"[backfill {target_date}] fetching reels (7d window anchored to {target_date})")
+
+    con = sqlite3.connect(str(DB_PATH))
+    con.row_factory = sqlite3.Row
+    new_reels = fetch_recent_reels(con, anchor_date=target_date)
+    all_reels = fetch_all_reels_for_patterns(con, anchor_date=target_date)
+    bm = fetch_benchmarks(con, anchor_date=target_date)
+    con.close()
+
+    print(f"  reels with metrics in window: {len(new_reels)}")
+
+    ai_analyses = {}
+    if skip_ai:
+        for r in new_reels:
+            ai_analyses[r["id"]] = {"good": [], "bad": [], "top_tip": ""}
+    else:
+        for i, r in enumerate(new_reels):
+            print(f"  Analyzing reel {i+1}/{len(new_reels)}: {r['id']}...")
+            ai_analyses[r["id"]] = analyze_video_with_claude(r, bm)
+
+    html = build_html(new_reels, bm, all_reels, run_time, ai_analyses)
+    OUTPUT_DIR.mkdir(exist_ok=True)
+    with open(out_html, "w", encoding="utf-8") as f:
+        f.write(html)
+    print(f"  wrote {out_html.name}")
+
+    scored = [(r, score_reel(r, bm)) for r in new_reels]
+    scored.sort(key=lambda x: x[1], reverse=True)
+    sidecar = {
+        "date": target_date,
+        "reels": [
+            {
+                "id":        r["id"],
+                "permalink": r.get("permalink", ""),
+                "caption":   (r.get("caption") or "")[:120],
+                "score":     sc,
+                "tier":      tier(sc)[0],
+                "views":     r.get("views"),
+                "reach":     r.get("reach"),
+                "timestamp": (r.get("timestamp") or "")[:10],
+                "good":      ai_analyses.get(r["id"], {}).get("good", []),
+                "bad":       ai_analyses.get(r["id"], {}).get("bad", []),
+                "top_tip":   ai_analyses.get(r["id"], {}).get("top_tip", ""),
+            }
+            for r, sc in scored
+        ],
+    }
+    sidecar_path = OUTPUT_DIR / f"video-analysis-{target_date}.json"
+    with open(sidecar_path, "w", encoding="utf-8") as f:
+        json.dump(sidecar, f)
+    print(f"  wrote {sidecar_path.name}")
+    return True
+
+
 def main():
     # CLI flags:
     #   --regen-date YYYY-MM-DD       re-render one day from its sidecar
@@ -908,6 +994,12 @@ def main():
         for sc in sidecars:
             date = sc.stem.replace("video-analysis-", "")
             regenerate_for_date(date, rerun_ai=rerun_ai)
+        return
+
+    if "--backfill" in sys.argv:
+        idx = sys.argv.index("--backfill")
+        target = sys.argv[idx + 1]
+        backfill_for_date(target, skip_ai=("--no-ai" in sys.argv))
         return
 
     run_time = datetime.now(timezone.utc)
