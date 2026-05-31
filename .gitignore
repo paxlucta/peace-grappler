@@ -1,0 +1,57 @@
+# Secrets — NEVER commit. This repo is public on GitHub.
+.env
+.env.*
+!.env.example
+
+# Node dependencies — reinstall via `npm install`.
+node_modules/
+
+# Python caches
+__pycache__/
+*.pyc
+.cache/
+
+# SQLite database + transient WAL/SHM files.
+# The DB contains private DMs, comments, and account analytics — keep local only.
+*.db
+*.db-wal
+*.db-shm
+
+# Logs
+logs/
+
+# Local state files (auth tokens, runtime state)
+data/ig-auto-engage-state.json
+data/ig-hl-video-state.json
+data/video-analysis-state.json
+data/*.lock
+
+# Media (large binaries)
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.m4v
+*.mp3
+*.m4a
+*.wav
+*.aac
+*.ogg
+media/
+raw-videos/
+assets/
+
+# macOS / editor cruft
+.DS_Store
+.claude
+.idea/
+.vscode/
+
+# Misc artifacts that historically lived alongside scripts but shouldn't be published
+mma-elo
+CLAUDE.md
+cron-sync.log
+cron-sync.sh
+long-token.sh
+page-read.sh
