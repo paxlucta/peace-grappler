@@ -524,23 +524,49 @@ async function fetchAccountInsightsWindow(accountId, periodLabel, since, until, 
 }
 
 async function syncAccountInsights(accountId) {
+  // Day-granular insights. The IG API only returns single-day aggregates when
+  // called with single-day windows, so iterate one calendar day at a time and
+  // write each result with end_time = that day's midnight UTC.
+  //
+  // Strategy: find the most recent day-period row already in the DB, then fill
+  // every missing calendar day from there up through yesterday (today's value
+  // isn't final until the day rolls over). Bounded at 30 days back to keep the
+  // first run from making hundreds of API calls.
   const syncId = startSync("account_insights", accountId);
-  const lastSync = getLastSync("account_insights");
 
-  const since = lastSync
-    ? Math.floor(new Date(lastSync).getTime() / 1000)
-    : Math.floor((Date.now() - 30 * 24 * 60 * 60 * 1000) / 1000);
-  const until = Math.floor(Date.now() / 1000);
-  const endTime = new Date().toISOString();
+  const lastDayRow = db.prepare(`
+    SELECT MAX(end_time) AS last_day
+    FROM ig_account_insights
+    WHERE period = 'day' AND substr(end_time, 12) = '00:00:00Z'
+  `).get();
 
-  try {
-    const count = await fetchAccountInsightsWindow(accountId, "day", since, until, endTime);
-    console.log(`  Account insights: ${count} data points`);
-    completeSync(syncId, count);
-  } catch (e) {
-    failSync(syncId, e.message);
-    throw e;
+  const today = new Date();
+  const todayMidnightMs = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  const maxLookbackMs = todayMidnightMs - 30 * 86400e3;
+  let startMs = maxLookbackMs;
+  if (lastDayRow?.last_day) {
+    const next = new Date(lastDayRow.last_day).getTime() + 86400e3;
+    if (next > startMs) startMs = next;
   }
+
+  let totalCount = 0;
+  let dayCount = 0;
+  for (let dayMs = startMs; dayMs < todayMidnightMs; dayMs += 86400e3) {
+    const dayDate = new Date(dayMs);
+    const since = Math.floor(dayMs / 1000);
+    const until = since + 86400;
+    const endTime = dayDate.toISOString().slice(0, 19) + "Z";
+    try {
+      const count = await fetchAccountInsightsWindow(accountId, "day", since, until, endTime);
+      totalCount += count;
+      dayCount++;
+    } catch (e) {
+      console.error(`  Day ${endTime.slice(0, 10)}: ${e.message?.slice(0, 80)}`);
+    }
+  }
+
+  console.log(`  Account insights: ${totalCount} data points across ${dayCount} day${dayCount === 1 ? "" : "s"}`);
+  completeSync(syncId, totalCount);
 }
 
 // Pull deduplicated 28-day-rolling totals — what IG dashboard headline tiles show.

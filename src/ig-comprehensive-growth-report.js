@@ -449,9 +449,20 @@ function getAccountWideTotals({ monthYM = null } = {}) {
   `).all(monthStart, nextMonth);
 
   if (dailyRows.length > 0 && dailyRows[0].days >= 14) {
-    // Have at least half a month of daily snapshots — use them.
+    // Have at least half a month of daily snapshots — use them for additive
+    // metrics (views, profile_views, etc).
     const out = { label: monthYM, isFallback: false };
     for (const r of dailyRows) out[r.metric] = r.total;
+
+    // Reach is unique-accounts-per-day in daily rows. Summing double-counts users
+    // who appeared on multiple days. Prefer the monthly-aggregate row (single API
+    // call over the month) which IG returns deduplicated.
+    const monthlyReach = db.prepare(`
+      SELECT value FROM ig_account_insights
+      WHERE period = 'monthly' AND metric = 'reach' AND breakdown_dimension IS NULL
+        AND end_time = ?
+    `).get(`${monthYM}-01T00:00:00Z`);
+    if (monthlyReach) out.reach = monthlyReach.value;
     return out;
   }
 
