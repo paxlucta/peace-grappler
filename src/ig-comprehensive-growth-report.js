@@ -401,6 +401,28 @@ function getAccountInsightsSummary() {
   `).all();
 }
 
+/**
+ * Account-wide totals from ig_account_insights (matches what IG's native app shows).
+ * Sums across all media_product_type buckets — REEL, AD, STORY, CAROUSEL_CONTAINER, POST —
+ * so AD and STORY views are included (the per-media `ig_media_insights` sums miss them).
+ *
+ * Uses the latest `days_28` snapshot, which is a single point-in-time 28-day rolling total
+ * that the Graph API returns directly. Returns null for any metric without data.
+ */
+function getAccountWideTotals() {
+  const row = db.prepare(`
+    SELECT metric, SUM(value) AS total
+    FROM ig_account_insights
+    WHERE period = 'days_28'
+      AND breakdown_dimension = 'media_product_type'
+      AND end_time = (SELECT MAX(end_time) FROM ig_account_insights WHERE period = 'days_28')
+    GROUP BY metric
+  `).all();
+  const out = {};
+  for (const r of row) out[r.metric] = r.total;
+  return out;
+}
+
 function getTopTaggedPosts() {
   // Posts with most comments (proxy for "tagged"/mentioned - most discussed)
   return db.prepare(`
@@ -450,6 +472,7 @@ function generateReport() {
   const engagement = getEngagementAnalytics();
   const topTagged = getTopTaggedPosts();
   const shares = getRepostsAndShares();
+  const accountWide = getAccountWideTotals();
 
   const now = new Date();
   const generatedAt = now.toLocaleString("en-US", { dateStyle: "full", timeStyle: "short" });
@@ -534,13 +557,16 @@ function generateReport() {
       <div class="label">Engagement (${primary.label})</div>
     </div>
     <div class="metric-card">
-      <div class="value">${fmtNum(primary.views)}</div>
-      <div class="label">Views (${primary.label})</div>
+      <div class="value">${fmtNum(accountWide.views)}</div>
+      <div class="label">Views (28d, all sources)</div>
     </div>
     <div class="metric-card">
-      <div class="value">${fmtNum(primary.reach)}</div>
-      <div class="label">Reach (${primary.label})</div>
+      <div class="value">${fmtNum(accountWide.reach)}</div>
+      <div class="label">Reach (28d, all sources)</div>
     </div>
+  </div>
+  <div class="section-note">
+    Views/Reach include ads, stories, and carousels — matching what Instagram's native app shows. Per-post breakdowns in Engagement Analytics below count organic posts only.
   </div>
 
   <h2>Follower Growth</h2>
