@@ -403,24 +403,61 @@ function getAccountInsightsSummary() {
 
 /**
  * Account-wide totals from ig_account_insights (matches what IG's native app shows).
- * Sums across all media_product_type buckets — REEL, AD, STORY, CAROUSEL_CONTAINER, POST —
- * so AD and STORY views are included (the per-media `ig_media_insights` sums miss them).
+ * Reads the no-breakdown row (breakdown_dimension IS NULL) so reach is the account-wide
+ * deduplicated count rather than a sum across content types (which would double-count
+ * users who saw both an ad AND a Reel, for instance).
  *
- * Uses the latest `days_28` snapshot, which is a single point-in-time 28-day rolling total
- * that the Graph API returns directly. Returns null for any metric without data.
+ * Two modes:
+ *   - rolling (default): returns the latest `days_28` snapshot — what IG's app shows.
+ *   - month(YYYY-MM): sums `period='day'` rows whose end_time falls in the target month.
+ *                     Falls back to days_28 with a note when not enough daily history exists.
+ *
+ * Returns: { views, reach, label, isFallback }
  */
-function getAccountWideTotals() {
-  const row = db.prepare(`
-    SELECT metric, SUM(value) AS total
+function getAccountWideTotals({ monthYM = null } = {}) {
+  // Helper: read the latest days_28 (no breakdown) snapshot.
+  function days28() {
+    const rows = db.prepare(`
+      SELECT metric, value
+      FROM ig_account_insights
+      WHERE period = 'days_28'
+        AND breakdown_dimension IS NULL
+        AND end_time = (SELECT MAX(end_time) FROM ig_account_insights WHERE period = 'days_28' AND breakdown_dimension IS NULL)
+    `).all();
+    const out = {};
+    for (const r of rows) out[r.metric] = r.value;
+    return out;
+  }
+
+  if (!monthYM) {
+    const t = days28();
+    return { ...t, label: "28d", isFallback: false };
+  }
+
+  // Monthly mode: sum day-period rows whose end_time falls in the target month.
+  const [y, m] = monthYM.split("-").map(Number);
+  const monthStart = `${monthYM}-01`;
+  const nextMonth = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10);
+  const dailyRows = db.prepare(`
+    SELECT metric, SUM(value) AS total, COUNT(*) AS days
     FROM ig_account_insights
-    WHERE period = 'days_28'
-      AND breakdown_dimension = 'media_product_type'
-      AND end_time = (SELECT MAX(end_time) FROM ig_account_insights WHERE period = 'days_28')
+    WHERE period = 'day'
+      AND breakdown_dimension IS NULL
+      AND end_time >= ?
+      AND end_time < ?
     GROUP BY metric
-  `).all();
-  const out = {};
-  for (const r of row) out[r.metric] = r.total;
-  return out;
+  `).all(monthStart, nextMonth);
+
+  if (dailyRows.length > 0 && dailyRows[0].days >= 14) {
+    // Have at least half a month of daily snapshots — use them.
+    const out = { label: monthYM, isFallback: false };
+    for (const r of dailyRows) out[r.metric] = r.total;
+    return out;
+  }
+
+  // Fallback: not enough daily history yet, use rolling days_28.
+  const t = days28();
+  return { ...t, label: "28d (rolling)", isFallback: true };
 }
 
 function getTopTaggedPosts() {
@@ -472,7 +509,7 @@ function generateReport() {
   const engagement = getEngagementAnalytics();
   const topTagged = getTopTaggedPosts();
   const shares = getRepostsAndShares();
-  const accountWide = getAccountWideTotals();
+  const accountWide = getAccountWideTotals({ monthYM: isMonthly ? YEAR_MONTH : null });
 
   const now = new Date();
   const generatedAt = now.toLocaleString("en-US", { dateStyle: "full", timeStyle: "short" });
@@ -558,15 +595,15 @@ function generateReport() {
     </div>
     <div class="metric-card">
       <div class="value">${fmtNum(accountWide.views)}</div>
-      <div class="label">Views (28d, all sources)</div>
+      <div class="label">Views (${accountWide.label}, all sources)</div>
     </div>
     <div class="metric-card">
       <div class="value">${fmtNum(accountWide.reach)}</div>
-      <div class="label">Reach (28d, all sources)</div>
+      <div class="label">Reach (${accountWide.label}, all sources)</div>
     </div>
   </div>
   <div class="section-note">
-    Views/Reach include ads, stories, and carousels — matching what Instagram's native app shows. Per-post breakdowns in Engagement Analytics below count organic posts only.
+    Views/Reach include ads, stories, and carousels — matching what Instagram's native app shows. Per-post breakdowns in Engagement Analytics below count organic posts only.${accountWide.isFallback ? ` <strong>Note:</strong> not enough daily snapshots yet for true month totals; showing rolling 28d.` : ""}
   </div>
 
   <h2>Follower Growth</h2>
