@@ -1,0 +1,375 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><title>Video Analysis 2026-07-31</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+/* video-analysis daily report tweaks */
+body{padding:24px;}
+.wrap{max-width:900px;margin:0 auto;}
+h1{font-size:28px;color:var(--text);margin-bottom:4px;}
+.sub{color:var(--muted);font-size:13px;margin-bottom:32px;}
+h2{font-size:18px;color:var(--text);margin:32px 0 14px;border-bottom:1px solid var(--border);padding-bottom:8px;text-transform:none;letter-spacing:0;}
+h3{font-size:15px;color:var(--text);margin-bottom:8px;text-transform:none;letter-spacing:0;}
+.kpi-row{display:table;width:100%;border-collapse:separate;border-spacing:12px;}
+.kpi{display:table-cell;background:var(--card);border:1px solid var(--border);
+  border-radius:10px;padding:16px 20px;text-align:center;width:16%;}
+.kpi .val{font-size:24px;font-weight:700;color:var(--accent);}
+.kpi .lbl{font-size:11px;color:var(--muted);margin-top:2px;}
+.badge.top{background:#d1fae5;color:#047857;}
+.badge.avg{background:#fef3c7;color:#92400e;}
+.badge.low{background:#fee2e2;color:#b91c1c;}
+.score{font-size:18px;font-weight:700;}
+.bar-wrap{background:#f3f4f6;border-radius:4px;height:6px;margin-top:4px;}
+.bar{height:6px;border-radius:4px;}
+.cap{color:var(--muted);font-size:12px;max-width:280px;line-height:1.4;}
+.cap a{color:var(--accent);text-decoration:none;}
+.insight-list{list-style:none;}
+.insight-list li{padding:10px 14px;border-left:3px solid var(--accent);
+  background:var(--card);margin-bottom:8px;border-radius:0 8px 8px 0;font-size:14px;border-top:1px solid var(--border);border-right:1px solid var(--border);border-bottom:1px solid var(--border);}
+.insight-list.avoid li{border-left-color:var(--red);}
+.insight-list.do li{border-left-color:var(--green);}
+.pct{font-weight:700;color:var(--accent);}
+.no-new{background:var(--card);border:1px solid var(--border);border-radius:10px;
+  padding:32px;text-align:center;color:var(--muted);}
+.reel-card{background:var(--card);border:1px solid var(--border);border-radius:12px;
+  padding:20px;margin-bottom:20px;}
+.reel-header{display:flex;align-items:flex-start;gap:16px;margin-bottom:14px;}
+.reel-score-block{text-align:center;min-width:60px;}
+.reel-meta{flex:1;}
+.reel-caption{font-size:13px;color:var(--muted);margin-top:4px;line-height:1.5;}
+.reel-stats{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px;font-size:13px;}
+.stat{color:var(--muted);}
+.stat b{color:var(--text);}
+.ai-section{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;}
+.ai-col{background:var(--page);border:1px solid var(--border);border-radius:8px;padding:12px 14px;}
+.ai-col h4{font-size:12px;font-weight:700;letter-spacing:.05em;margin-bottom:8px;text-transform:uppercase;}
+.ai-col.good h4{color:var(--green);}
+.ai-col.bad  h4{color:var(--red);}
+.ai-col ul{list-style:none;padding:0;}
+.ai-col li{font-size:12px;line-height:1.5;padding:3px 0;border-bottom:1px solid var(--border);}
+.ai-col li:last-child{border-bottom:none;}
+.ai-col.good li::before{content:"✓ ";color:var(--green);font-weight:700;}
+.ai-col.bad  li::before{content:"✗ ";color:var(--red);font-weight:700;}
+.top-tip{font-size:12px;color:#92400e;margin-top:10px;padding:8px 12px;
+  background:#fef3c7;border-radius:6px;border-left:3px solid var(--orange);}
+.top-tip b{color:#78350f;}
+</style>
+</head><body>
+<div class="wrap">
+<h1>Instagram Video Analysis</h1>
+<div class="sub">Reels from the last 7 days with metrics &mdash; Generated Jul 31, 2026 11:03 AM</div>
+
+<h2>New Content Summary (8 reels)</h2>
+<table class="kpi-row">
+<tr>
+<td class="kpi"><div class="val">650 <span style="color:#f87171;font-size:11px">▼67%</span></div><div class="lbl">Avg Views</div></td>
+<td class="kpi"><div class="val">456 <span style="color:#f87171;font-size:11px">▼65%</span></div><div class="lbl">Avg Reach</div></td>
+<td class="kpi"><div class="val">5</div><div class="lbl">Avg Shares</div></td>
+<td class="kpi"><div class="val">1</div><div class="lbl">Avg Saves</div></td>
+<td class="kpi"><div class="val">6.4s <span style="color:#f87171;font-size:11px">▼39%</span></div><div class="lbl">Avg Watch</div></td>
+<td class="kpi"><div class="val">9.33%</div><div class="lbl">Eng Rate</div></td>
+</tr>
+</table>
+<h2>Per-Reel Breakdown (8 reels)</h2>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f87171">37</span><br>
+      <span class="badge low">⚠️ Needs Work</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DbYU7RWu3F1/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        Jon Jones comentou que assistiu ao wrestling de Alex Pereira e disse que ele é fraco nessa área. Segundo Jones, vencer A…
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-07-29</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>1.9k</b><div class="bar-wrap"><div class="bar" style="width:47%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>1.2k</b><div class="bar-wrap"><div class="bar" style="width:45%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>8</b></span>
+    <span class="stat">🔖 Saves <b>1</b></span>
+    <span class="stat">❤️ Likes <b>55</b></span>
+    <span class="stat">💬 Comments <b>5</b></span>
+    <span class="stat" style="color:#34d399">⏱ Watch <b>12.7s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">5.69%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>Strong hook: recognizable fighter's face fills frame immediately with direct eye contact</li><li>Clear text hierarchy: bold top text with readable contrast on dark background draws attention</li><li>Narrative progression: starts with claim, shows training footage, ends with professional interview setting</li><li>Decent average watch time (12.7s) suggests viewers stay engaged despite low initial views</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>Extremely low saves (1) despite 5.7% engagement—content entertains but doesn't feel valuable enough to keep</li><li>Hook is interview/talking head format; MMA content typically needs action footage to stop scrollers effectively</li><li>Text overlay cuts off mid-sentence in later frames ('Eu sinto como se minha for ça física'), feeling incomplete and confusing</li><li>Low view count (1876) relative to reach suggests hook isn't compelling enough to convert scrolls into watches</li></ul>
+    </div>
+  </div>
+  <div class="top-tip"><b>Top tip:</b> Replace the talking-head hook with 2-3 seconds of dynamic fight footage or explosive training moment—MMA audiences respond to action, not commentary. This will improve stop rate and shareability.</div>
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f87171">35</span><br>
+      <span class="badge low">⚠️ Needs Work</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DbPD7gJhQws/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        Chanco (John Pork), companheiro de equipe de Islam Makhachev e Khabib Nurmagomedov, fez sua estreia no UFC contra um atl…
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-07-26</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>1.1k</b><div class="bar-wrap"><div class="bar" style="width:26%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>829</b><div class="bar-wrap"><div class="bar" style="width:31%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>7</b></span>
+    <span class="stat">🔖 Saves <b>2</b></span>
+    <span class="stat">❤️ Likes <b>26</b></span>
+    <span class="stat">💬 Comments <b>6</b></span>
+    <span class="stat" style="color:#34d399">⏱ Watch <b>11.2s</b></span>
+    <span class="stat">💥 Eng <b style="color:var(--muted)">4.95%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>Strong visual contrast with neon 'KICK' text overlay creates immediate eye-catching moment</li><li>Clear action combat footage demonstrates UFC production quality and authenticity</li><li>Solid 11.2s average watch time indicates content holds attention once viewer engages</li><li>Official UFC branding establishes credibility and legitimacy</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>Low view-to-reach ratio (1056 views, 829 reach) suggests hook fails to stop scrolls despite visual contrast</li><li>Critically low shares (7) and saves (2) indicate viewers don't perceive content as shareable or valuable</li><li>End frame heavily filtered with magenta/purple color grade degrading visual quality and professionalism</li><li>No on-screen text explaining the fight's significance—viewers don't understand why this debut matters</li></ul>
+    </div>
+  </div>
+  <div class="top-tip"><b>Top tip:</b> Replace generic 'KICK' text with context overlay in first 2 seconds: 'Islam Makhachev's teammate debuts' or highlight the notable opponent/stakes. The hook has visual impact but no value proposition—viewers must understand why they should watch before scrolling past.</div>
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f87171">29</span><br>
+      <span class="badge low">⚠️ Needs Work</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DbQjgsiiWGG/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        🇧🇷 Para Ismael Bonfim, confiança é acreditar na vitória sem esquecer que do outro lado existe outro atleta que treinou t…
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-07-26</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>170</b><div class="bar-wrap"><div class="bar" style="width:4%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>126</b><div class="bar-wrap"><div class="bar" style="width:4%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>0</b></span>
+    <span class="stat">🔖 Saves <b>2</b></span>
+    <span class="stat">❤️ Likes <b>13</b></span>
+    <span class="stat">💬 Comments <b>5</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>5.3s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">15.87%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>Hook text creates curiosity gap with 'THE DIFFERENCE BETWEEN' that teases payoff</li><li>Prominent face visibility in opening frames — viewer sees someone immediately</li><li>Bilingual caption (Portuguese/English) expands reach to both language audiences</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>Desk/podcast setup in hook signals educational content, not MMA/fight sports — loses genre alignment on first scroll</li><li>Low virality (170 views, 0 shares) and short watch time (5.3s) indicate hook-to-content transition loses viewers before payoff</li><li>CTA redirecting to YouTube splits focus and may funnel engagement away from Instagram native performance</li><li>Hook text takes until frame 3 to clarify this is MMA content — missed immediate context for cold viewers</li></ul>
+    </div>
+  </div>
+  <div class="top-tip"><b>Top tip:</b> Lead with fighter (Ismael) in frame 1 instead of desk setup, with MMA-specific hook text ('The mindset separating pro fighters from others...' or similar) — move visual authority from creator talking head to the fighter himself, and immediately signal fight-sports genre</div>
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f87171">26</span><br>
+      <span class="badge low">⚠️ Needs Work</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DbOozTmBMf6/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        UFC Fight Night Ankalaev x Bogdan
+
+#ufc #mma #peacegrappler
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-07-25</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>484</b><div class="bar-wrap"><div class="bar" style="width:12%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>301</b><div class="bar-wrap"><div class="bar" style="width:11%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>1</b></span>
+    <span class="stat">🔖 Saves <b>1</b></span>
+    <span class="stat">❤️ Likes <b>18</b></span>
+    <span class="stat">💬 Comments <b>25</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>4.2s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">14.95%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>Bold red/white text overlay on hook is high-contrast and scroll-stopping</li><li>Faces prominent in frames—especially fighter reactions drive engagement</li><li>4.2s average watch time shows decent content retention</li><li>Clear subject matter (UFC branding visible) makes it identifiable at a glance</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>Only 484 views with 1 share/1 save indicates poor viral coefficient—algorithm isn't pushing it</li><li>Minimal caption with no hook copy or call-to-action to drive initial interest</li><li>Lacks narrative tension—just fight clips without clear story or payoff (who won? why does it matter?)</li><li>Motion blur in frame 2 reduces clarity; ending frame disconnected from the action story</li></ul>
+    </div>
+  </div>
+  <div class="top-tip"><b>Top tip:</b> Add caption copy that creates curiosity or conflict (e.g., 'This submission shocked everyone' or tag-to-vote on winner). The hook text should answer WHY this fight matters, not just list names—hook copy drives initial algorithm consideration.</div>
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f87171">25</span><br>
+      <span class="badge low">⚠️ Needs Work</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DbN0ZaAikug/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        🇧🇷 Valter Walker respondeu com bom humor às críticas sobre seu estilo de luta. 😂 🎥 Assista à entrevista completa no YouT…
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-07-25</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>461</b><div class="bar-wrap"><div class="bar" style="width:11%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>230</b><div class="bar-wrap"><div class="bar" style="width:8%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>0</b></span>
+    <span class="stat">🔖 Saves <b>1</b></span>
+    <span class="stat">❤️ Likes <b>15</b></span>
+    <span class="stat">💬 Comments <b>9</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>4.4s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">10.87%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>Strong curiosity hook with text progression 'I DON'T GO IN' → 'WHAT??' — creates intrigue and stops scrolls</li><li>Eye-catching fight poster with multiple fighter faces provides visual target for MMA audience</li><li>Authentic personality-driven reactions feel genuine and relatable</li><li>Professional production with strong color contrast (yellow/black branding pops against dark background)</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>Critical: 4.4s average watch time is very low — static reaction frames without context don't retain viewers past the hook</li><li>Zero shares indicates content feels incomplete — pure reaction lacks the memorable moment or information that drives sharing</li><li>Category ambiguity in cold scroll — 'I DON'T GO IN' + poster isn't immediately clear this is MMA to unfamiliar viewers, causes early drop-off</li><li>No dynamic movement or action — MMA audience expects fight clips, not static promotional poster reactions</li></ul>
+    </div>
+  </div>
+  <div class="top-tip"><b>Top tip:</b> Add fight footage or action clips to the hook instead of static reactions — viewers need to see the 'what' (fight moment) not just the 'who' (reaction) to stay past 3 seconds</div>
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f87171">22</span><br>
+      <span class="badge low">⚠️ Needs Work</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DbTyL7CBhOF/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        🇧🇷 Poderíamos ver Paddy Pimblett e Ilia Topuria tentando se matar em dezembro? 👀🔥 Você gostaria de ver essa luta? E, na …
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-07-27</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>445</b><div class="bar-wrap"><div class="bar" style="width:11%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>321</b><div class="bar-wrap"><div class="bar" style="width:12%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>0</b></span>
+    <span class="stat">🔖 Saves <b>1</b></span>
+    <span class="stat">❤️ Likes <b>13</b></span>
+    <span class="stat">💬 Comments <b>9</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>4.8s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">7.17%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+  </div>
+  
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f87171">22</span><br>
+      <span class="badge low">⚠️ Needs Work</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DbL-a0yhz6v/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        🇧🇷Levi Rodrigues é conhecido pelo poder na trocação, mas Felipe Franco não hesitou em aceitar o desafio em pé. 🎥Assista …
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-07-24</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>259</b><div class="bar-wrap"><div class="bar" style="width:6%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>187</b><div class="bar-wrap"><div class="bar" style="width:7%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>0</b></span>
+    <span class="stat">🔖 Saves <b>1</b></span>
+    <span class="stat">❤️ Likes <b>10</b></span>
+    <span class="stat">💬 Comments <b>5</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>3.8s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">8.56%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+  </div>
+  
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f87171">21</span><br>
+      <span class="badge low">⚠️ Needs Work</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DbQwMghuH1l/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        Ramazan Temirov entra no Top 10 dos moscas após nocautear o #10 Steve Erceg por TKO! Agora 3-0 no UFC, já pede uma dispu…
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-07-26</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>446</b><div class="bar-wrap"><div class="bar" style="width:11%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>438</b><div class="bar-wrap"><div class="bar" style="width:16%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>0</b></span>
+    <span class="stat">🔖 Saves <b>1</b></span>
+    <span class="stat">❤️ Likes <b>22</b></span>
+    <span class="stat">💬 Comments <b>6</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>4.6s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">6.62%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>Bold, readable text overlay creates clear narrative arc across frames</li><li>UFC branding and fighter name prominently displayed for context</li><li>Production quality shows professional fight footage with cage/sponsorships visible</li><li>Pacing moves through story beats (introduction → fighter → claim) quickly</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>Hook frame is too dark and unclear - fighter action barely visible, causing immediate scroll-away</li><li>Zero call-to-action overlay text ('Comment', 'Tell us', 'Debate') despite caption asking engagement question ('É justo?')</li><li>No shares on controversial topic indicates viewers aren't compelled to share/discuss despite debate-baiting question</li><li>Bilingual caption (PT/EN split) may confuse algorithm about primary language and target audience</li></ul>
+    </div>
+  </div>
+  <div class="top-tip"><b>Top tip:</b> Replace hook frame with a bright, clear shot of the knockout finish or fighter's face—the current dark frame fails to stop scrolls before viewers move on</div>
+</div><h2>What to Keep Doing</h2><ul class="insight-list do"><li><b>Long captions (>350 chars)</b> — present in <span class="pct">70%</span> of top reels vs 42% of weak reels. Keep it up.</li></ul><ul class="insight-list do" style="margin-top:8px"><li><b>Watch time in top performers is 2.6× higher</b> — the hook and pacing in your best reels work. Top: 15.7s avg vs bottom: 6.0s avg.</li></ul><ul class="insight-list do" style="margin-top:8px"><li><b>Top reels get 29.5× more shares per viewer</b> — your best content triggers sharing instincts. Keep creating that type.</li></ul><h2>What to Stop / Fix</h2><p style="color:var(--muted);font-size:13px;">No strong negative patterns detected yet.</p>
+<ul class="insight-list avoid" style="margin-top:8px">
+  <li><b>6 reels had watch time well below average (&lt;60% of 10.4s)</b> —
+  viewers are dropping off early. The first 2–3 seconds likely aren't grabbing attention.
+  Try opening with a bold statement, action shot, or question before anything else.</li>
+</ul>
+<h2>90-Day Benchmarks</h2>
+<table style="width:auto">
+<thead><tr><th>Metric</th><th>90-Day Average</th><th>Top Quartile (P75)</th></tr></thead>
+<tbody>
+<tr><td>Views</td><td>2.0k</td><td>2.0k</td></tr>
+<tr><td>Reach</td><td>1.3k</td><td>1.4k</td></tr>
+<tr><td>Shares</td><td>44</td><td>67</td></tr>
+<tr><td>Saves</td><td>2</td><td>3</td></tr>
+<tr><td>Avg Watch Time</td><td>10.4s</td><td>10.3s</td></tr>
+</tbody>
+</table>
+
+<div class="footer">
+  PeaceGrappler Video Analysis &mdash; 2026-07-31 11:03 &mdash; Data from Instagram Graph API
+</div>
+</div></body></html>
