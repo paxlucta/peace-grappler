@@ -1,0 +1,343 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><title>Video Analysis 2026-08-14</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+/* video-analysis daily report tweaks */
+body{padding:24px;}
+.wrap{max-width:900px;margin:0 auto;}
+h1{font-size:28px;color:var(--text);margin-bottom:4px;}
+.sub{color:var(--muted);font-size:13px;margin-bottom:32px;}
+h2{font-size:18px;color:var(--text);margin:32px 0 14px;border-bottom:1px solid var(--border);padding-bottom:8px;text-transform:none;letter-spacing:0;}
+h3{font-size:15px;color:var(--text);margin-bottom:8px;text-transform:none;letter-spacing:0;}
+.kpi-row{display:table;width:100%;border-collapse:separate;border-spacing:12px;}
+.kpi{display:table-cell;background:var(--card);border:1px solid var(--border);
+  border-radius:10px;padding:16px 20px;text-align:center;width:16%;}
+.kpi .val{font-size:24px;font-weight:700;color:var(--accent);}
+.kpi .lbl{font-size:11px;color:var(--muted);margin-top:2px;}
+.badge.top{background:#d1fae5;color:#047857;}
+.badge.avg{background:#fef3c7;color:#92400e;}
+.badge.low{background:#fee2e2;color:#b91c1c;}
+.score{font-size:18px;font-weight:700;}
+.bar-wrap{background:#f3f4f6;border-radius:4px;height:6px;margin-top:4px;}
+.bar{height:6px;border-radius:4px;}
+.cap{color:var(--muted);font-size:12px;max-width:280px;line-height:1.4;}
+.cap a{color:var(--accent);text-decoration:none;}
+.insight-list{list-style:none;}
+.insight-list li{padding:10px 14px;border-left:3px solid var(--accent);
+  background:var(--card);margin-bottom:8px;border-radius:0 8px 8px 0;font-size:14px;border-top:1px solid var(--border);border-right:1px solid var(--border);border-bottom:1px solid var(--border);}
+.insight-list.avoid li{border-left-color:var(--red);}
+.insight-list.do li{border-left-color:var(--green);}
+.pct{font-weight:700;color:var(--accent);}
+.no-new{background:var(--card);border:1px solid var(--border);border-radius:10px;
+  padding:32px;text-align:center;color:var(--muted);}
+.reel-card{background:var(--card);border:1px solid var(--border);border-radius:12px;
+  padding:20px;margin-bottom:20px;}
+.reel-header{display:flex;align-items:flex-start;gap:16px;margin-bottom:14px;}
+.reel-score-block{text-align:center;min-width:60px;}
+.reel-meta{flex:1;}
+.reel-caption{font-size:13px;color:var(--muted);margin-top:4px;line-height:1.5;}
+.reel-stats{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px;font-size:13px;}
+.stat{color:var(--muted);}
+.stat b{color:var(--text);}
+.ai-section{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;}
+.ai-col{background:var(--page);border:1px solid var(--border);border-radius:8px;padding:12px 14px;}
+.ai-col h4{font-size:12px;font-weight:700;letter-spacing:.05em;margin-bottom:8px;text-transform:uppercase;}
+.ai-col.good h4{color:var(--green);}
+.ai-col.bad  h4{color:var(--red);}
+.ai-col ul{list-style:none;padding:0;}
+.ai-col li{font-size:12px;line-height:1.5;padding:3px 0;border-bottom:1px solid var(--border);}
+.ai-col li:last-child{border-bottom:none;}
+.ai-col.good li::before{content:"✓ ";color:var(--green);font-weight:700;}
+.ai-col.bad  li::before{content:"✗ ";color:var(--red);font-weight:700;}
+.top-tip{font-size:12px;color:#92400e;margin-top:10px;padding:8px 12px;
+  background:#fef3c7;border-radius:6px;border-left:3px solid var(--orange);}
+.top-tip b{color:#78350f;}
+</style>
+</head><body>
+<div class="wrap">
+<h1>Instagram Video Analysis</h1>
+<div class="sub">Reels from the last 7 days with metrics &mdash; Generated Aug 14, 2026 11:02 AM</div>
+
+<h2>New Content Summary (7 reels)</h2>
+<table class="kpi-row">
+<tr>
+<td class="kpi"><div class="val">6.5k <span style="color:#34d399;font-size:11px">▲195%</span></div><div class="lbl">Avg Views</div></td>
+<td class="kpi"><div class="val">4.0k <span style="color:#34d399;font-size:11px">▲164%</span></div><div class="lbl">Avg Reach</div></td>
+<td class="kpi"><div class="val">74</div><div class="lbl">Avg Shares</div></td>
+<td class="kpi"><div class="val">6</div><div class="lbl">Avg Saves</div></td>
+<td class="kpi"><div class="val">7.3s <span style="color:#f87171;font-size:11px">▼31%</span></div><div class="lbl">Avg Watch</div></td>
+<td class="kpi"><div class="val">9.27%</div><div class="lbl">Eng Rate</div></td>
+</tr>
+</table>
+<h2>Per-Reel Breakdown (7 reels)</h2>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#34d399">100</span><br>
+      <span class="badge top">🔥 Top Performer</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DbzBVOTBsw_/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        Manuel Manumito Souza conquista a Vitoria dobre Richie Miranda. #mma #ufc #peacegrappler
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-08-08</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>33.3k</b><div class="bar-wrap"><div class="bar" style="width:100%;background:#34d399"></div></div></span>
+    <span class="stat">📡 Reach <b>18.7k</b><div class="bar-wrap"><div class="bar" style="width:100%;background:#34d399"></div></div></span>
+    <span class="stat" style="color:#34d399">🔁 Shares <b>209</b></span>
+    <span class="stat">🔖 Saves <b>26</b></span>
+    <span class="stat">❤️ Likes <b>1.6k</b></span>
+    <span class="stat">💬 Comments <b>83</b></span>
+    <span class="stat" style="color:#34d399">⏱ Watch <b>10.9s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">10.0%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+  </div>
+  
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#34d399">72</span><br>
+      <span class="badge top">🔥 Top Performer</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/Db3tuoZh_OM/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        🇧🇷 Jean Silva promete mais uma finalização e não descarta subir nas costas do adversário de novo. Mas o objetivo é maior…
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-08-10</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>1.8k</b><div class="bar-wrap"><div class="bar" style="width:41%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>1.1k</b><div class="bar-wrap"><div class="bar" style="width:37%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:#34d399">🔁 Shares <b>143</b></span>
+    <span class="stat">🔖 Saves <b>2</b></span>
+    <span class="stat">❤️ Likes <b>103</b></span>
+    <span class="stat">💬 Comments <b>48</b></span>
+    <span class="stat" style="color:#34d399">⏱ Watch <b>11.6s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">26.1%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+  </div>
+  
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f59e0b">43</span><br>
+      <span class="badge avg">📊 Average</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/Dbzfl-Iu5GE/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        Quillan dominates Gamrot and on his way to the top of the division. A splendid demonstration of his technique, power and…
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-08-09</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>7.2k</b><div class="bar-wrap"><div class="bar" style="width:100%;background:#34d399"></div></div></span>
+    <span class="stat">📡 Reach <b>6.1k</b><div class="bar-wrap"><div class="bar" style="width:100%;background:#34d399"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>4</b></span>
+    <span class="stat">🔖 Saves <b>1</b></span>
+    <span class="stat">❤️ Likes <b>172</b></span>
+    <span class="stat">💬 Comments <b>10</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>6.3s</b></span>
+    <span class="stat">💥 Eng <b style="color:var(--muted)">3.07%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+  </div>
+  
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f87171">28</span><br>
+      <span class="badge low">⚠️ Needs Work</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/Dby6nG-hf7d/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        Carol Foro vitoriosa sobre Gigi Canuto n sua estreia no UFC vegas 120. Entrevista completa no Youtube. 
+
+Carol Foro take…
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-08-08</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>1.6k</b><div class="bar-wrap"><div class="bar" style="width:37%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>1.2k</b><div class="bar-wrap"><div class="bar" style="width:40%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>12</b></span>
+    <span class="stat">🔖 Saves <b>1</b></span>
+    <span class="stat">❤️ Likes <b>32</b></span>
+    <span class="stat">💬 Comments <b>5</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>4.5s</b></span>
+    <span class="stat">💥 Eng <b style="color:var(--muted)">4.04%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+  </div>
+  
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f87171">23</span><br>
+      <span class="badge low">⚠️ Needs Work</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/Db0RwRNRwC0/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        Juliana Miller finishes Ravena Oliveira with a RNC. 
+Juliana Miller finaliza Ravena oliveira.
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-08-09</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>308</b><div class="bar-wrap"><div class="bar" style="width:7%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>207</b><div class="bar-wrap"><div class="bar" style="width:6%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>0</b></span>
+    <span class="stat">🔖 Saves <b>1</b></span>
+    <span class="stat">❤️ Likes <b>11</b></span>
+    <span class="stat">💬 Comments <b>6</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>5.6s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">8.7%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+  </div>
+  
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f87171">19</span><br>
+      <span class="badge low">⚠️ Needs Work</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/Db1z8qIhgUl/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        🇺🇸 After three straight losses, Miles Johns gets back in the win column with a TKO victory over Gianni Vazquez. 👊🔥
+
+🇧🇷 D…
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-08-10</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>385</b><div class="bar-wrap"><div class="bar" style="width:8%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>264</b><div class="bar-wrap"><div class="bar" style="width:8%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>0</b></span>
+    <span class="stat">🔖 Saves <b>0</b></span>
+    <span class="stat">❤️ Likes <b>18</b></span>
+    <span class="stat">💬 Comments <b>5</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>6.1s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">8.71%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+  </div>
+  
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f87171">14</span><br>
+      <span class="badge low">⚠️ Needs Work</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/Db0Ncizx4I_/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        Ty Miller KO’s Billy Ray Geoff and now with a 2-0 Card at the UFC. Who’s next?
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-08-09</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>576</b><div class="bar-wrap"><div class="bar" style="width:13%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>443</b><div class="bar-wrap"><div class="bar" style="width:14%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>1</b></span>
+    <span class="stat">🔖 Saves <b>0</b></span>
+    <span class="stat">❤️ Likes <b>12</b></span>
+    <span class="stat">💬 Comments <b>6</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>5.9s</b></span>
+    <span class="stat">💥 Eng <b style="color:var(--muted)">4.29%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>No observations</li></ul>
+    </div>
+  </div>
+  
+</div><h2>What to Keep Doing</h2><ul class="insight-list do"><li><b>Long captions (>350 chars)</b> — present in <span class="pct">75%</span> of top reels vs 33% of weak reels. Keep it up.</li></ul><ul class="insight-list do" style="margin-top:8px"><li><b>Watch time in top performers is 2.8× higher</b> — the hook and pacing in your best reels work. Top: 15.9s avg vs bottom: 5.7s avg.</li></ul><ul class="insight-list do" style="margin-top:8px"><li><b>Top reels get 29.5× more shares per viewer</b> — your best content triggers sharing instincts. Keep creating that type.</li></ul><h2>What to Stop / Fix</h2><ul class="insight-list avoid"><li><b>Short captions (<150 chars)</b> — present in <span class="pct">41%</span> of weak reels vs 13% of top reels. Reconsider this approach.</li></ul>
+<ul class="insight-list avoid" style="margin-top:8px">
+  <li><b>5 reels had watch time well below average (&lt;60% of 10.5s)</b> —
+  viewers are dropping off early. The first 2–3 seconds likely aren't grabbing attention.
+  Try opening with a bold statement, action shot, or question before anything else.</li>
+</ul>
+<h2>90-Day Benchmarks</h2>
+<table style="width:auto">
+<thead><tr><th>Metric</th><th>90-Day Average</th><th>Top Quartile (P75)</th></tr></thead>
+<tbody>
+<tr><td>Views</td><td>2.2k</td><td>2.0k</td></tr>
+<tr><td>Reach</td><td>1.5k</td><td>1.4k</td></tr>
+<tr><td>Shares</td><td>44</td><td>67</td></tr>
+<tr><td>Saves</td><td>2</td><td>2</td></tr>
+<tr><td>Avg Watch Time</td><td>10.5s</td><td>10.3s</td></tr>
+</tbody>
+</table>
+
+<div class="footer">
+  PeaceGrappler Video Analysis &mdash; 2026-08-14 11:02 &mdash; Data from Instagram Graph API
+</div>
+</div></body></html>
