@@ -1,0 +1,236 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><title>Video Analysis 2026-09-01</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+/* video-analysis daily report tweaks */
+body{padding:24px;}
+.wrap{max-width:900px;margin:0 auto;}
+h1{font-size:28px;color:var(--text);margin-bottom:4px;}
+.sub{color:var(--muted);font-size:13px;margin-bottom:32px;}
+h2{font-size:18px;color:var(--text);margin:32px 0 14px;border-bottom:1px solid var(--border);padding-bottom:8px;text-transform:none;letter-spacing:0;}
+h3{font-size:15px;color:var(--text);margin-bottom:8px;text-transform:none;letter-spacing:0;}
+.kpi-row{display:table;width:100%;border-collapse:separate;border-spacing:12px;}
+.kpi{display:table-cell;background:var(--card);border:1px solid var(--border);
+  border-radius:10px;padding:16px 20px;text-align:center;width:16%;}
+.kpi .val{font-size:24px;font-weight:700;color:var(--accent);}
+.kpi .lbl{font-size:11px;color:var(--muted);margin-top:2px;}
+.badge.top{background:#d1fae5;color:#047857;}
+.badge.avg{background:#fef3c7;color:#92400e;}
+.badge.low{background:#fee2e2;color:#b91c1c;}
+.score{font-size:18px;font-weight:700;}
+.bar-wrap{background:#f3f4f6;border-radius:4px;height:6px;margin-top:4px;}
+.bar{height:6px;border-radius:4px;}
+.cap{color:var(--muted);font-size:12px;max-width:280px;line-height:1.4;}
+.cap a{color:var(--accent);text-decoration:none;}
+.insight-list{list-style:none;}
+.insight-list li{padding:10px 14px;border-left:3px solid var(--accent);
+  background:var(--card);margin-bottom:8px;border-radius:0 8px 8px 0;font-size:14px;border-top:1px solid var(--border);border-right:1px solid var(--border);border-bottom:1px solid var(--border);}
+.insight-list.avoid li{border-left-color:var(--red);}
+.insight-list.do li{border-left-color:var(--green);}
+.pct{font-weight:700;color:var(--accent);}
+.no-new{background:var(--card);border:1px solid var(--border);border-radius:10px;
+  padding:32px;text-align:center;color:var(--muted);}
+.reel-card{background:var(--card);border:1px solid var(--border);border-radius:12px;
+  padding:20px;margin-bottom:20px;}
+.reel-header{display:flex;align-items:flex-start;gap:16px;margin-bottom:14px;}
+.reel-score-block{text-align:center;min-width:60px;}
+.reel-meta{flex:1;}
+.reel-caption{font-size:13px;color:var(--muted);margin-top:4px;line-height:1.5;}
+.reel-stats{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px;font-size:13px;}
+.stat{color:var(--muted);}
+.stat b{color:var(--text);}
+.ai-section{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;}
+.ai-col{background:var(--page);border:1px solid var(--border);border-radius:8px;padding:12px 14px;}
+.ai-col h4{font-size:12px;font-weight:700;letter-spacing:.05em;margin-bottom:8px;text-transform:uppercase;}
+.ai-col.good h4{color:var(--green);}
+.ai-col.bad  h4{color:var(--red);}
+.ai-col ul{list-style:none;padding:0;}
+.ai-col li{font-size:12px;line-height:1.5;padding:3px 0;border-bottom:1px solid var(--border);}
+.ai-col li:last-child{border-bottom:none;}
+.ai-col.good li::before{content:"✓ ";color:var(--green);font-weight:700;}
+.ai-col.bad  li::before{content:"✗ ";color:var(--red);font-weight:700;}
+.top-tip{font-size:12px;color:#92400e;margin-top:10px;padding:8px 12px;
+  background:#fef3c7;border-radius:6px;border-left:3px solid var(--orange);}
+.top-tip b{color:#78350f;}
+</style>
+</head><body>
+<div class="wrap">
+<h1>Instagram Video Analysis</h1>
+<div class="sub">Reels from the last 7 days with metrics &mdash; Generated Sep 01, 2026 11:02 AM</div>
+
+<h2>New Content Summary (4 reels)</h2>
+<table class="kpi-row">
+<tr>
+<td class="kpi"><div class="val">2.5k <span style="color:#34d399;font-size:11px">▲15%</span></div><div class="lbl">Avg Views</div></td>
+<td class="kpi"><div class="val">1.7k <span style="color:#34d399;font-size:11px">▲11%</span></div><div class="lbl">Avg Reach</div></td>
+<td class="kpi"><div class="val">24</div><div class="lbl">Avg Shares</div></td>
+<td class="kpi"><div class="val">10</div><div class="lbl">Avg Saves</div></td>
+<td class="kpi"><div class="val">5.4s <span style="color:#f87171;font-size:11px">▼36%</span></div><div class="lbl">Avg Watch</div></td>
+<td class="kpi"><div class="val">4.53%</div><div class="lbl">Eng Rate</div></td>
+</tr>
+</table>
+<h2>Per-Reel Breakdown (4 reels)</h2>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#34d399">69</span><br>
+      <span class="badge top">🔥 Top Performer</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DcoGmsouhin/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        Julia Polastri KO’s Jingnan UFC Shangai. #juliapolastri
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-08-29</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>7.8k</b><div class="bar-wrap"><div class="bar" style="width:100%;background:#34d399"></div></div></span>
+    <span class="stat">📡 Reach <b>5.1k</b><div class="bar-wrap"><div class="bar" style="width:100%;background:#34d399"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>18</b></span>
+    <span class="stat">🔖 Saves <b>10</b></span>
+    <span class="stat">❤️ Likes <b>220</b></span>
+    <span class="stat">💬 Comments <b>17</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>5.8s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">5.21%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>Strong hook with fighter name + round info creates immediate context and credibility</li><li>High-contrast text (white/pink on dark) is scannable and stops scrolls</li><li>Clear UFC branding reinforces sport authority and legitimacy</li><li>Celebration moment adds emotional resonance and satisfaction payoff</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>Text-heavy hook buries the KO action itself—the visual hook is obscured by overlays</li><li>Only 18 shares for knockout content is low; suggests viral potential is being left on the table</li><li>No visible call-to-action (save/tag/share prompt) despite being exceptional moment</li><li>Average watch time (5.8s) indicates content after the hook fails to sustain retention</li></ul>
+    </div>
+  </div>
+  <div class="top-tip"><b>Top tip:</b> Strip the hook to just the KO impact for 1–2 frames, then add text overlay; let the action stop the scroll first, then provide context</div>
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f87171">36</span><br>
+      <span class="badge low">⚠️ Needs Work</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DcoRUhmOn2V/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        Umar disse que Song era fácil, não tinha um nivel alto e um saco de porrada.  Acabou mal quamdo Song Nocauteou ele no pr…
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-08-29</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>2.0k</b><div class="bar-wrap"><div class="bar" style="width:44%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>1.4k</b><div class="bar-wrap"><div class="bar" style="width:44%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>29</b></span>
+    <span class="stat">🔖 Saves <b>0</b></span>
+    <span class="stat">❤️ Likes <b>18</b></span>
+    <span class="stat">💬 Comments <b>5</b></span>
+    <span class="stat" style="color:#34d399">⏱ Watch <b>8.5s</b></span>
+    <span class="stat">💥 Eng <b style="color:var(--muted)">3.83%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>Strong visual hook: shirtless fighter with defined physique dominates frame immediately with high production branding</li><li>Clear competitive framing: ranking cards (#2 vs #6) establish stakes and narrative intrigue before the outcome</li><li>Decent average watch time (8.5s) indicates moderate viewer retention through the narrative arc</li><li>High-production value and professional octagon setting commands attention on scroll</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>Zero saves despite dramatic KO outcome—fight content should drive bookmarking for rewatching</li><li>Opens with pre-fight setup/intro rather than the actual KO moment, delaying the payoff</li><li>Portuguese caption limits reach for non-Portuguese-speaking audience without English subtitles</li><li>No visible on-screen call-to-action or engagement prompt beyond caption question</li></ul>
+    </div>
+  </div>
+  <div class="top-tip"><b>Top tip:</b> Lead with the KO moment or immediate aftermath in the first 2 seconds instead of the pre-fight setup—dramatic sports outcomes perform best when front-loaded; this alone would unlock saves and boost the engagement rate from 3.8%</div>
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f87171">18</span><br>
+      <span class="badge low">⚠️ Needs Work</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/DcorxtaBYbJ/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        Denise “Dee” Gomes nocauteou Yan Xiaonan no primeiro round do co-main event do UFC Shanghai. 💥
+
+Uma vitória gigante sobr…
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-08-29</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>269</b><div class="bar-wrap"><div class="bar" style="width:6%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>183</b><div class="bar-wrap"><div class="bar" style="width:6%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>0</b></span>
+    <span class="stat">🔖 Saves <b>0</b></span>
+    <span class="stat">❤️ Likes <b>9</b></span>
+    <span class="stat">💬 Comments <b>6</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>4.9s</b></span>
+    <span class="stat">💥 Eng <b style="color:#34d399">8.2%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>High average watch time (4.9s) indicates full clip completion and viewer retention</li><li>Bold text overlay immediately identifies fighter and event context</li><li>Consistent PEACE GRAPPLER branding reinforces channel identity</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>Critically low reach (183) and views (269) — dark, static aesthetic fails to stop scroll on algorithm feed</li><li>Zero shares and saves — combat sports content needs knockout impact moment, not ranking stats in hook</li><li>Rankings-focused messaging (#8 NO RANKING, #4 NO RANKING) alienates casual viewers; Portuguese-only caption limits English-speaking MMA audience</li></ul>
+    </div>
+  </div>
+  <div class="top-tip"><b>Top tip:</b> Lead with the actual knockout moment/impact frame instead of static poses; add English captions to reach broader MMA audience beyond Portuguese speakers</div>
+</div>
+<div class="reel-card">
+  <div class="reel-header">
+    <div class="reel-score-block">
+      <span class="score" style="color:#f87171">4</span><br>
+      <span class="badge low">⚠️ Needs Work</span>
+    </div>
+    <div class="reel-meta">
+      <a href="https://www.instagram.com/reel/Dcra8f7hI4n/" target="_blank" style="color:var(--accent2);font-size:14px;font-weight:600;text-decoration:none">
+        Denise “Dee” Gomes nocauteou Yan Xiaonan no primeiro round do co-main event do UFC Shanghai. 💥
+Uma vitória gigante sobre…
+      </a>
+      <div style="color:var(--muted);font-size:12px;margin-top:3px">2026-08-30</div>
+    </div>
+  </div>
+  <div class="reel-stats">
+    <span class="stat">👁 Views <b>119</b><div class="bar-wrap"><div class="bar" style="width:2%;background:#f87171"></div></div></span>
+    <span class="stat">📡 Reach <b>115</b><div class="bar-wrap"><div class="bar" style="width:3%;background:#f87171"></div></div></span>
+    <span class="stat" style="color:var(--text)">🔁 Shares <b>0</b></span>
+    <span class="stat">🔖 Saves <b>0</b></span>
+    <span class="stat">❤️ Likes <b>1</b></span>
+    <span class="stat">💬 Comments <b>0</b></span>
+    <span class="stat" style="color:#f87171">⏱ Watch <b>2.2s</b></span>
+    <span class="stat">💥 Eng <b style="color:var(--muted)">0.87%</b></span>
+  </div>
+  <div class="ai-section">
+    <div class="ai-col good">
+      <h4>WHAT WORKED</h4>
+      <ul><li>Clear, bold white text overlay is highly legible against dark background</li><li>Professional production quality with UFC branding visible</li><li>Second frame captures action/contact moment with gloves clearly visible</li><li>Bilingual caption expands reach to Portuguese and English speakers</li></ul>
+    </div>
+    <div class="ai-col bad">
+      <h4>WHAT TO FIX</h4>
+      <ul><li>Hook (frame 1) shows only fighting stance, not the actual knockout — weak visual anchor</li><li>Critically low average watch time (2.2s) indicates hook is failing to stop scrollers</li><li>Hook text is weak: 'No Ranking' creates no urgency or emotional pull</li><li>Dark lighting obscures action details that would create visual impact and retention</li></ul>
+    </div>
+  </div>
+  <div class="top-tip"><b>Top tip:</b> Replace frame 1 with the actual knockout moment (impact/contact) and change hook text to something urgent like 'BRUTAL FIRST-ROUND KO' — your 0.9% engagement and 2.2s watch time show the hook isn't compelling enough to stop the scroll before viewers leave</div>
+</div><h2>What to Keep Doing</h2><ul class="insight-list do"><li><b>Long captions (>350 chars)</b> — present in <span class="pct">57%</span> of top reels vs 25% of weak reels. Keep it up.</li></ul><ul class="insight-list do" style="margin-top:8px"><li><b>Watch time in top performers is 2.2× higher</b> — the hook and pacing in your best reels work. Top: 12.3s avg vs bottom: 5.5s avg.</li></ul><ul class="insight-list do" style="margin-top:8px"><li><b>Top reels get 30.5× more shares per viewer</b> — your best content triggers sharing instincts. Keep creating that type.</li></ul><h2>What to Stop / Fix</h2><p style="color:var(--muted);font-size:13px;">No strong negative patterns detected yet.</p>
+<ul class="insight-list avoid" style="margin-top:8px">
+  <li><b>2 reels had watch time well below average (&lt;60% of 8.3s)</b> —
+  viewers are dropping off early. The first 2–3 seconds likely aren't grabbing attention.
+  Try opening with a bold statement, action shot, or question before anything else.</li>
+</ul>
+<h2>90-Day Benchmarks</h2>
+<table style="width:auto">
+<thead><tr><th>Metric</th><th>90-Day Average</th><th>Top Quartile (P75)</th></tr></thead>
+<tbody>
+<tr><td>Views</td><td>2.2k</td><td>1.9k</td></tr>
+<tr><td>Reach</td><td>1.5k</td><td>1.3k</td></tr>
+<tr><td>Shares</td><td>39</td><td>24</td></tr>
+<tr><td>Saves</td><td>2</td><td>2</td></tr>
+<tr><td>Avg Watch Time</td><td>8.3s</td><td>9.0s</td></tr>
+</tbody>
+</table>
+
+<div class="footer">
+  PeaceGrappler Video Analysis &mdash; 2026-09-01 11:02 &mdash; Data from Instagram Graph API
+</div>
+</div></body></html>
